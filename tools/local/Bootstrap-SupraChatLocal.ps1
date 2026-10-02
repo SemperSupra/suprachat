@@ -1,13 +1,15 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [switch]$SkipApply
+    [string]$Root = (Join-Path $HOME 'Projects\SemperSupra'),
+    [switch]$SkipApply,
+    [switch]$UseExistingBootstrap
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$Root = Join-Path $HOME 'Projects\SemperSupra'
+$Root = [IO.Path]::GetFullPath($Root)
 $Bootstrap = Join-Path $Root '_bootstrap-suprachat-validation'
 
 $SetupCommit = '69c3f29af685a0f57faf291283c1615668d94cb7'
@@ -144,7 +146,12 @@ New-Item -ItemType Directory -Force -Path $Root | Out-Null
 Write-Host ''
 Write-Host '==> Bootstrap repository'
 
-if (-not (Test-Path -LiteralPath $Bootstrap)) {
+if ($UseExistingBootstrap) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Bootstrap '.git'))) {
+        throw ('UseExistingBootstrap requires a Git repository at: ' + $Bootstrap)
+    }
+}
+elseif (-not (Test-Path -LiteralPath $Bootstrap)) {
     Invoke-GitChecked -Arguments @(
         'clone',
         '--single-branch',
