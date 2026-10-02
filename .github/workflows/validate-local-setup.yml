@@ -1,0 +1,291 @@
+name: Validate local SupraChat setup script
+
+on:
+  pull_request:
+    paths:
+      - 'tools/local/Setup-SupraChatWorkspace.ps1'
+      - '.github/workflows/validate-local-setup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    uses: SupraShellScripts/github-ops-lab/.github/workflows/powershell-compatibility.yml@main
+    with:
+      repository: SemperSupra/suprachat
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      path: tools/local
+
+  selftest-winps51:
+    name: SelfTest - Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
+
+  selftest-ps7-windows:
+    name: SelfTest - PowerShell 7 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
+
+  selftest-ps7-linux:
+    name: SelfTest - PowerShell 7 Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
+
+  selftest-ps7-macos:
+    name: SelfTest - PowerShell 7 macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
+
+  apply-sim-winps51:
+    name: Apply simulation - Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise Apply with isolated command shims
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+
+          $shim = Join-Path $env:RUNNER_TEMP 'suprachat-shims'
+          New-Item -ItemType Directory -Force -Path $shim | Out-Null
+
+          @'
+          @echo off
+          if /I "%1"=="clone" goto clone
+          if /I "%1"=="remote" goto remote
+          if /I "%1"=="fetch" exit /b 0
+          if /I "%1"=="status" exit /b 0
+          if /I "%1"=="cat-file" goto catfile
+          if /I "%1"=="checkout" goto checkout
+          if /I "%1"=="rev-parse" goto revparse
+          echo unsupported fake git command: %* 1>&2
+          exit /b 9
+
+          :clone
+          if /I "%2"=="--single-branch" goto clone_migration
+          set "URL=%~2"
+          set "DEST=%~3"
+          goto make_clone
+
+          :clone_migration
+          set "URL=%~5"
+          set "DEST=%~6"
+
+          :make_clone
+          mkdir "%DEST%\.git" >nul 2>&1
+          > "%DEST%\.fake-origin" echo %URL%
+          > "%DEST%\.fake-head" echo seed
+          exit /b 0
+
+          :remote
+          if /I "%2"=="get-url" (
+            type ".fake-origin"
+            exit /b 0
+          )
+          exit /b 9
+
+          :catfile
+          if /I "%2"=="-t" (
+            echo commit
+            exit /b 0
+          )
+          exit /b 9
+
+          :checkout
+          if /I "%2"=="--detach" (
+            > ".fake-head" echo %~3
+            exit /b 0
+          )
+          exit /b 9
+
+          :revparse
+          if /I "%2"=="HEAD" (
+            type ".fake-head"
+            exit /b 0
+          )
+          exit /b 9
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'git.cmd') -Encoding ASCII
+
+          @'
+          @echo Hi mark-e-deyoung! You've successfully authenticated, but GitHub does not provide shell access. 1>&2
+          exit /b 1
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'ssh.cmd') -Encoding ASCII
+
+          @'
+          @echo {"number":1,"title":"fixture","url":"https://github.com/SemperSupra/fixture/issues/1","state":"OPEN","body":"fixture","comments":[]}
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'gh.cmd') -Encoding ASCII
+
+          @'
+          @echo off
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'codex.cmd') -Encoding ASCII
+
+          @'
+          @echo off
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'git-filter-repo.cmd') -Encoding ASCII
+
+          $env:PATH = $shim + [IO.Path]::PathSeparator + $env:PATH
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Apply Root With Spaces'
+
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Apply -Root $root
+
+          foreach ($required in @(
+            (Join-Path $root 'suprachat/.git'),
+            (Join-Path $root 'suprachat-private/.git'),
+            (Join-Path $root 'suprachat-migrate/.git'),
+            (Join-Path $root '_migration-context/suprachat-private-issue-1.json'),
+            (Join-Path $root '_migration-context/suprachat-public-issue-1.json'),
+            (Join-Path $root 'SUPRACHAT-WORKSPACE.md')
+          )) {
+            if (-not (Test-Path -LiteralPath $required)) {
+              throw "Apply simulation missing expected path: $required"
+            }
+          }
+
+  apply-sim-ps7-windows:
+    name: Apply simulation - PowerShell 7 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise Apply with isolated command shims
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+
+          $shim = Join-Path $env:RUNNER_TEMP 'suprachat-shims'
+          New-Item -ItemType Directory -Force -Path $shim | Out-Null
+
+          @'
+          @echo off
+          if /I "%1"=="clone" goto clone
+          if /I "%1"=="remote" goto remote
+          if /I "%1"=="fetch" exit /b 0
+          if /I "%1"=="status" exit /b 0
+          if /I "%1"=="cat-file" goto catfile
+          if /I "%1"=="checkout" goto checkout
+          if /I "%1"=="rev-parse" goto revparse
+          echo unsupported fake git command: %* 1>&2
+          exit /b 9
+
+          :clone
+          if /I "%2"=="--single-branch" goto clone_migration
+          set "URL=%~2"
+          set "DEST=%~3"
+          goto make_clone
+
+          :clone_migration
+          set "URL=%~5"
+          set "DEST=%~6"
+
+          :make_clone
+          mkdir "%DEST%\.git" >nul 2>&1
+          > "%DEST%\.fake-origin" echo %URL%
+          > "%DEST%\.fake-head" echo seed
+          exit /b 0
+
+          :remote
+          if /I "%2"=="get-url" (
+            type ".fake-origin"
+            exit /b 0
+          )
+          exit /b 9
+
+          :catfile
+          if /I "%2"=="-t" (
+            echo commit
+            exit /b 0
+          )
+          exit /b 9
+
+          :checkout
+          if /I "%2"=="--detach" (
+            > ".fake-head" echo %~3
+            exit /b 0
+          )
+          exit /b 9
+
+          :revparse
+          if /I "%2"=="HEAD" (
+            type ".fake-head"
+            exit /b 0
+          )
+          exit /b 9
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'git.cmd') -Encoding ASCII
+
+          @'
+          @echo Hi mark-e-deyoung! You've successfully authenticated, but GitHub does not provide shell access. 1>&2
+          exit /b 1
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'ssh.cmd') -Encoding ASCII
+
+          @'
+          @echo {"number":1,"title":"fixture","url":"https://github.com/SemperSupra/fixture/issues/1","state":"OPEN","body":"fixture","comments":[]}
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'gh.cmd') -Encoding ASCII
+
+          @'
+          @echo off
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'codex.cmd') -Encoding ASCII
+
+          @'
+          @echo off
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $shim 'git-filter-repo.cmd') -Encoding ASCII
+
+          $env:PATH = $shim + [IO.Path]::PathSeparator + $env:PATH
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Apply Root With Spaces'
+
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Apply -Root $root
+
+          foreach ($required in @(
+            (Join-Path $root 'suprachat/.git'),
+            (Join-Path $root 'suprachat-private/.git'),
+            (Join-Path $root 'suprachat-migrate/.git'),
+            (Join-Path $root '_migration-context/suprachat-private-issue-1.json'),
+            (Join-Path $root '_migration-context/suprachat-public-issue-1.json'),
+            (Join-Path $root 'SUPRACHAT-WORKSPACE.md')
+          )) {
+            if (-not (Test-Path -LiteralPath $required)) {
+              throw "Apply simulation missing expected path: $required"
+            }
+          }
