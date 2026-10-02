@@ -1,0 +1,192 @@
+name: Bootstrap SupraChat history migration
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/bootstrap-history-migration.yml'
+      - 'tools/local/Setup-SupraChatWorkspace.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  extract-and-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE_REPO: SemperSupra/agent-dispatch
+      SOURCE_BRANCH: exp/suprachat-macos-seal-repair-qualification-20261002
+      QUALIFIED_SOURCE_SHA: 627757867ac304c61e57af65e2fe5e32a4300afe
+      TARGET_BRANCH: migration/extracted-qualified-20261002
+    steps:
+      - name: Checkout migration bootstrap
+        uses: actions/checkout@v4
+
+      - name: Install git-filter-repo
+        run: python -m pip install --disable-pip-version-check git-filter-repo
+
+      - name: Preserve validated local bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp tools/local/Setup-SupraChatWorkspace.ps1 "$RUNNER_TEMP/Setup-SupraChatWorkspace.ps1"
+          cp .github/workflows/validate-local-setup.yml "$RUNNER_TEMP/validate-local-setup.yml"
+
+      - name: Clone exact qualified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --single-branch --branch "$SOURCE_BRANCH" "https://github.com/$SOURCE_REPO.git" "$RUNNER_TEMP/suprachat-migrate"
+          cd "$RUNNER_TEMP/suprachat-migrate"
+          git cat-file -e "$QUALIFIED_SOURCE_SHA^{commit}"
+          git checkout --detach "$QUALIFIED_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$QUALIFIED_SOURCE_SHA"
+
+      - name: Preserve product history and promote to repository root
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/suprachat-migrate"
+          git filter-repo \
+            --path prototype/suprachat/ \
+            --path .github/workflows/qualify-suprachat.yml \
+            --path-rename prototype/suprachat/: \
+            --force
+
+          FILTERED_HEAD="$(git rev-parse HEAD)"
+          echo "FILTERED_HEAD=$FILTERED_HEAD" >> "$GITHUB_ENV"
+
+          mkdir -p "$RUNNER_TEMP/migration-evidence"
+          cp .git/filter-repo/commit-map "$RUNNER_TEMP/migration-evidence/commit-map.txt"
+          {
+            echo "qualified_source_sha=$QUALIFIED_SOURCE_SHA"
+            echo "filtered_snapshot_head=$FILTERED_HEAD"
+          } > "$RUNNER_TEMP/migration-evidence/qualified-map.txt"
+
+      - name: Normalize dedicated repository layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/suprachat-migrate"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path(".")
+          for p in root.rglob("*"):
+              if not p.is_file() or ".git" in p.parts:
+                  continue
+              try:
+                  data = p.read_text(encoding="utf-8")
+              except UnicodeDecodeError:
+                  continue
+              updated = data.replace("prototype/suprachat/", "")
+              if p.as_posix() == ".github/workflows/qualify-suprachat.yml":
+                  updated = updated.replace("name: Qualify SupraChat Windows MVP", "name: Qualify SupraChat")
+              if updated != data:
+                  p.write_text(updated, encoding="utf-8")
+          PY
+
+          mkdir -p tools/local docs .github/workflows
+          cp "$RUNNER_TEMP/Setup-SupraChatWorkspace.ps1" tools/local/Setup-SupraChatWorkspace.ps1
+          cp "$RUNNER_TEMP/validate-local-setup.yml" .github/workflows/validate-local-setup.yml
+
+          cat > AGENTS.md <<'EOF'
+          # SupraChat actor contract
+
+          This repository is the public product/source/CI authority for SupraChat.
+
+          First-class audiences:
+          - humans through native desktop and web-facing product surfaces;
+          - automation through stable CLI, lifecycle, diagnostics, and machine-readable receipts;
+          - agents through semantic JSON-RPC/app-server/protocol surfaces.
+
+          Do not make one audience depend on scraping or wrapping another audience's interface.
+
+          Working rules:
+          - preserve human UI/UX, automation DX, and agent DX together;
+          - preserve accessible semantic controls and credential boundaries;
+          - keep qualification on public/free GitHub Actions;
+          - never place credentials, cookies, authorization codes, or token material in repository state or CI artifacts;
+          - use SemperSupra/suprachat-private#1 for private DLE/oracle/evidence state;
+          - use Agent Dispatch only as execution/orchestration substrate, not as product authority.
+          EOF
+
+          cat > docs/MIGRATION_PROVENANCE.md <<EOF
+          # Migration provenance
+
+          SupraChat was extracted from `SemperSupra/agent-dispatch` into this dedicated repository with history preservation.
+
+          Qualified source:
+          - branch: `$SOURCE_BRANCH`
+          - source SHA: `$QUALIFIED_SOURCE_SHA`
+          - independent qualification: `SemperSupra/agent-dispatch#126`, run `37003842653`
+          - source result: Windows x64, Linux x64, and macOS arm64 PASS
+
+          Extraction:
+          - retained `prototype/suprachat/**`, promoted to repository root
+          - retained `.github/workflows/qualify-suprachat.yml`
+          - `git filter-repo` commit map is emitted by the migration work cell and recorded in the private DLE
+          - filtered snapshot head before dedicated-repo normalization: `$FILTERED_HEAD`
+
+          Canonical authority switches only after this repository reproduces the tri-platform qualification from its own CI.
+
+          Private continuation/evidence authority: `SemperSupra/suprachat-private#1`.
+          EOF
+
+          git config user.name "SupraChat Migration Work Cell"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Normalize SupraChat dedicated repository and actor contract"
+
+      - name: Validate root-relative migration invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/suprachat-migrate"
+
+          test -f SupraChat/SupraChat.csproj
+          test -f SupraChat.Automation/SupraChat.Automation.csproj
+          test -f SupraChat.ContractTests/SupraChat.ContractTests.csproj
+          test -f .github/workflows/qualify-suprachat.yml
+          test -f tools/local/Setup-SupraChatWorkspace.ps1
+          test -f AGENTS.md
+          test -f docs/MIGRATION_PROVENANCE.md
+
+          if git grep -n 'prototype/suprachat/' -- ':!docs/MIGRATION_PROVENANCE.md'; then
+            echo "Obsolete monorepo-relative path remains." >&2
+            exit 1
+          fi
+
+      - name: Push extracted history to dedicated migration branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/suprachat-migrate"
+          git remote add target "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          git push --force target "HEAD:refs/heads/$TARGET_BRANCH"
+
+      - name: Migration receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/suprachat-migrate"
+          {
+            echo "schema=suprachat-history-migration/v1"
+            echo "source=$SOURCE_REPO@$QUALIFIED_SOURCE_SHA"
+            echo "filtered_snapshot_head=$FILTERED_HEAD"
+            echo "dedicated_head=$(git rev-parse HEAD)"
+            echo "target=$GITHUB_REPOSITORY@$TARGET_BRANCH"
+          } | tee "$RUNNER_TEMP/migration-evidence/migration-receipt.txt"
+
+      - name: Upload migration evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: suprachat-history-migration-evidence
+          path: ${{ runner.temp }}/migration-evidence/
+          if-no-files-found: error
+          retention-days: 14
