@@ -1,0 +1,69 @@
+name: Validate local SupraChat setup script
+
+on:
+  pull_request:
+    paths:
+      - 'tools/local/Setup-SupraChatWorkspace.ps1'
+      - '.github/workflows/validate-local-setup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    uses: SupraShellScripts/github-ops-lab/.github/workflows/powershell-compatibility.yml@main
+    with:
+      repository: SemperSupra/suprachat
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      path: tools/local
+
+  selftest-winps51:
+    name: SelfTest - Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+
+  selftest-ps7-windows:
+    name: SelfTest - PowerShell 7 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+
+  selftest-ps7-linux:
+    name: SelfTest - PowerShell 7 Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+
+  selftest-ps7-macos:
+    name: SelfTest - PowerShell 7 macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute non-mutating self-test
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
