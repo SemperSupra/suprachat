@@ -1156,6 +1156,7 @@ jobs:
 
 
   linux-desktop-oracle-census:
+    if: github.event_name == 'workflow_dispatch'
     name: Linux ChatGPT desktop runtime deep census
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -1179,6 +1180,7 @@ jobs:
           retention-days: 7
 
   macos-desktop-oracle-census:
+    if: github.event_name == 'workflow_dispatch'
     name: macOS ChatGPT desktop runtime deep census
     runs-on: macos-26
     timeout-minutes: 75
