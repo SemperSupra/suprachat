@@ -1,10 +1,11 @@
 name: Qualify SupraChat
 
 on:
+  push:
+    branches:
+      - 'migration/extracted-qualified-20261002'
+      - 'main'
   pull_request:
-    paths:
-      - '**'
-      - '.github/workflows/qualify-suprachat.yml'
   workflow_dispatch:
 
 permissions:
