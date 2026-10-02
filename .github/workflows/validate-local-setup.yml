@@ -445,3 +445,5 @@ jobs:
           & ./validation/tools/local/Run-SupraChatBootstrap.ps1 -Root $root -UseExistingBootstrap -SkipApply
           git filter-repo --version
           if ($LASTEXITCODE -ne 0) { throw 'git-filter-repo is not available after launcher.' }
+
+# launcher validation trigger: 2026-10-02T15:21Z
