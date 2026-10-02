@@ -71,7 +71,6 @@ jobs:
 
           python - <<'PY'
           from pathlib import Path
-
           for p in Path(".").rglob("*"):
               if not p.is_file() or ".git" in p.parts:
                   continue
@@ -111,27 +110,28 @@ jobs:
           python - <<'PY'
           import os
           from pathlib import Path
-
-          Path("docs/MIGRATION_PROVENANCE.md").write_text(f"""# Migration provenance
-
-SupraChat was extracted from `SemperSupra/agent-dispatch` into this dedicated repository with product history preservation.
-
-Qualified source:
-- branch: `{os.environ['SOURCE_BRANCH']}`
-- source SHA: `{os.environ['QUALIFIED_SOURCE_SHA']}`
-- independent qualification: `SemperSupra/agent-dispatch#126`, run `37003842653`
-- source result: Windows x64, Linux x64, and macOS arm64 PASS
-
-Extraction:
-- retained `prototype/suprachat/**`, promoted to repository root
-- product commit history preserved with `git filter-repo`
-- qualification-workflow history remains attributable to the source repository; normalized dedicated-repo workflows are added after extraction by the GitHub control plane
-- filtered snapshot head before dedicated-repo normalization: `{os.environ['FILTERED_HEAD']}`
-
-Canonical authority switches only after this repository reproduces the tri-platform qualification from its own CI.
-
-Private continuation/evidence authority: `SemperSupra/suprachat-private#1`.
-""", encoding="utf-8")
+          lines = [
+              "# Migration provenance",
+              "",
+              "SupraChat was extracted from SemperSupra/agent-dispatch into this dedicated repository with product history preservation.",
+              "",
+              "Qualified source:",
+              "- branch: " + os.environ["SOURCE_BRANCH"],
+              "- source SHA: " + os.environ["QUALIFIED_SOURCE_SHA"],
+              "- independent qualification: SemperSupra/agent-dispatch#126, run 37003842653",
+              "- source result: Windows x64, Linux x64, and macOS arm64 PASS",
+              "",
+              "Extraction:",
+              "- retained prototype/suprachat/**, promoted to repository root",
+              "- product commit history preserved with git filter-repo",
+              "- qualification-workflow history remains attributable to the source repository; normalized dedicated-repo workflows are added after extraction by the GitHub control plane",
+              "- filtered snapshot head before dedicated-repo normalization: " + os.environ["FILTERED_HEAD"],
+              "",
+              "Canonical authority switches only after this repository reproduces the tri-platform qualification from its own CI.",
+              "",
+              "Private continuation/evidence authority: SemperSupra/suprachat-private#1.",
+          ]
+          Path("docs/MIGRATION_PROVENANCE.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
           git config user.name "SupraChat Migration Work Cell"
@@ -144,14 +144,12 @@ Private continuation/evidence authority: `SemperSupra/suprachat-private#1`.
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/suprachat-migrate"
-
           test -f SupraChat/SupraChat.csproj
           test -f SupraChat.Automation/SupraChat.Automation.csproj
           test -f SupraChat.ContractTests/SupraChat.ContractTests.csproj
           test -f tools/local/Setup-SupraChatWorkspace.ps1
           test -f AGENTS.md
           test -f docs/MIGRATION_PROVENANCE.md
-
           if git grep -n 'prototype/suprachat/' -- ':!docs/MIGRATION_PROVENANCE.md'; then
             echo "Obsolete monorepo-relative path remains." >&2
             exit 1
