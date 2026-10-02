@@ -70,7 +70,7 @@ PY
     npx --yes @electron/asar@4.3.1 extract "$app_asar" "$app/Contents/Resources/__app_asar_extracted"
   fi
 
-  python3 "$ROOT_DIR/prototype/suprachat/tools/characterize_desktop_bundle.py" \
+  python3 "$ROOT_DIR/tools/characterize_desktop_bundle.py" \
     "$app" "$census" --label "$label" --platform macos
 
   bundled_codex="$(find "$app/Contents/Resources" -type f -name codex -print -quit || true)"

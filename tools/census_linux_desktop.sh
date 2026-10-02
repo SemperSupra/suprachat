@@ -78,7 +78,7 @@ for url in "${urls[@]}"; do
     fi
   fi
 
-  python3 "$ROOT_DIR/prototype/suprachat/tools/characterize_desktop_bundle.py" \
+  python3 "$ROOT_DIR/tools/characterize_desktop_bundle.py" \
     "$root" "$census" --label "$label" --platform linux
 
   bundled_codex="$(find "$root" -type f -name codex -path '*/resources/*' -print -quit || true)"

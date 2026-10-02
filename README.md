@@ -26,8 +26,8 @@ The embedded official ChatGPT surface is intended to carry normal chat/history/m
 
 Build:
 
-dotnet build prototype/suprachat/SupraChat/SupraChat.csproj -c Release
-dotnet run --project prototype/suprachat/SupraChat.ContractTests/SupraChat.ContractTests.csproj -c Release
+dotnet build SupraChat/SupraChat.csproj -c Release
+dotnet run --project SupraChat.ContractTests/SupraChat.ContractTests.csproj -c Release
 
 Windows 11 includes the Edge WebView2 runtime. Windows 10 may require the WebView2 runtime as an installer prerequisite.
 
