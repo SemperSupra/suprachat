@@ -289,3 +289,28 @@ jobs:
               throw "Apply simulation missing expected path: $required"
             }
           }
+
+
+  filter-repo-install-winps51:
+    name: Install git-filter-repo - Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and verify
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+          ./tools/local/Install-GitFilterRepo.ps1 -Mode Install
+
+  filter-repo-install-ps7:
+    name: Install git-filter-repo - PowerShell 7 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and verify
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          ./tools/local/Install-GitFilterRepo.ps1 -Mode Install
