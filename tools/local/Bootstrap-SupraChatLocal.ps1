@@ -1,6 +1,8 @@
 #requires -Version 5.1
 [CmdletBinding()]
-param()
+param(
+    [switch]$SkipApply
+)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -68,6 +70,59 @@ function Invoke-WinPSFile {
     & $WinPS -NoProfile -ExecutionPolicy Bypass -File $Path @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw ('Windows PowerShell child process failed with exit code {0}: {1}' -f $LASTEXITCODE, $Path)
+    }
+}
+
+function Add-PythonUserScriptsToProcessPath {
+    $pythonCommand = $null
+    $pythonArgs = @()
+
+    foreach ($candidate in @('py','python','python3')) {
+        $command = Get-Command -Name $candidate -ErrorAction SilentlyContinue
+        if ($command) {
+            $pythonCommand = if ($command.PSObject.Properties['Source'] -and $command.Source) {
+                [string]$command.Source
+            }
+            elseif ($command.PSObject.Properties['Path'] -and $command.Path) {
+                [string]$command.Path
+            }
+            else {
+                [string]$command.Name
+            }
+            break
+        }
+    }
+
+    if (-not $pythonCommand) {
+        return
+    }
+
+    $saved = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $pythonCommand @pythonArgs -c "import sysconfig; print(sysconfig.get_path('scripts', scheme='nt_user'))" 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $saved
+    }
+
+    if ($exitCode -ne 0) {
+        return
+    }
+
+    $scriptsPath = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+    if ([string]::IsNullOrWhiteSpace($scriptsPath)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $scriptsPath)) {
+        return
+    }
+
+    $pathEntries = @($env:PATH -split [IO.Path]::PathSeparator)
+    if ($pathEntries -notcontains $scriptsPath) {
+        $env:PATH = $scriptsPath + [IO.Path]::PathSeparator + $env:PATH
     }
 }
 
@@ -169,9 +224,15 @@ try {
     $filterRepo = Get-Command -Name 'git-filter-repo' -ErrorAction SilentlyContinue
     if (-not $filterRepo) {
         Invoke-WinPSFile -Path $Installer -Arguments @('-Mode','Install')
+        Add-PythonUserScriptsToProcessPath
     }
     else {
         Write-Host ('git-filter-repo already available: ' + $filterRepo.Source)
+    }
+
+    $filterRepo = Get-Command -Name 'git-filter-repo' -ErrorAction SilentlyContinue
+    if (-not $filterRepo) {
+        throw 'git-filter-repo was installed but is still not visible on the current process PATH.'
     }
 
     Write-Host ''
@@ -187,6 +248,13 @@ try {
         '-Mode','Plan',
         '-Root',$Root
     )
+
+    if ($SkipApply) {
+        Write-Host ''
+        Write-Host 'PASS: Bootstrap, dependency installation, verification, and Plan completed.'
+        Write-Host 'Apply was intentionally skipped.'
+        exit 0
+    }
 
     Write-Host ''
     Write-Host '==> Apply workspace setup'
