@@ -11,9 +11,20 @@ Qualified source:
 Extraction:
 - retained prototype/suprachat/**, promoted to repository root
 - product commit history preserved with git filter-repo
-- qualification-workflow history remains attributable to the source repository; normalized dedicated-repo workflows are added after extraction by the GitHub control plane
+- qualification-workflow history remains attributable to the source repository; normalized dedicated-repo workflows were added after extraction by the GitHub control plane
 - filtered snapshot head before dedicated-repo normalization: 37907140842f14eefa664ae823dc99f8e2c8f710
 
-Canonical authority switches only after this repository reproduces the tri-platform qualification from its own CI.
+Dedicated-repository qualification:
+- extracted branch: migration/extracted-qualified-20261002
+- qualified head: 841a82ed4207457495254ba690544f00535f5d38
+- public GHA run: 37023386130
+- Windows x64: PASS
+- Linux x64: PASS
+- macOS arm64: PASS
+- deep Linux/macOS clean-room census is a separate manual oracle plane and was intentionally skipped in the product cutover gate
 
-Private continuation/evidence authority: SemperSupra/suprachat-private#1.
+Canonical authority:
+- main was moved directly from the seed history to the independently green extracted history after run 37023386130 passed.
+- SemperSupra/suprachat is now the public product/source/CI authority.
+- SemperSupra/suprachat-private#1 remains the private DLE/oracle/evidence continuation authority.
+- Agent Dispatch remains an execution/orchestration substrate rather than product authority.
