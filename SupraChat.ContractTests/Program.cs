@@ -216,7 +216,7 @@ Require(DesktopNotificationService.Adapter is not "unsupported",
 Require(DesktopNotificationService.AppleScriptString("a\"b") == "\"a\\\"b\"",
     "macOS notification string escaping drifted");
 
-var parityPath = Path.Combine("prototype", "suprachat", "oracles", "audience-parity-20261001.json");
+var parityPath = Path.Combine("oracles", "audience-parity-20261001.json");
 Require(File.Exists(parityPath), "audience/accessibility parity manifest missing");
 using (var parityDoc = JsonDocument.Parse(File.ReadAllText(parityPath)))
 {
