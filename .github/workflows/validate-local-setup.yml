@@ -400,3 +400,48 @@ jobs:
           git clone ./validation $bootstrap
           if ($LASTEXITCODE -ne 0) { throw 'Could not preseed bootstrap repository.' }
           & ./validation/tools/local/Bootstrap-SupraChatLocal.ps1 -Root $root -UseExistingBootstrap -SkipApply
+
+
+  launcher-integrated-winps51:
+    name: Launcher - Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: validation
+          fetch-depth: 0
+      - name: Execute single-entry launcher through Plan
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Launcher Root With Spaces'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $bootstrap = Join-Path $root '_bootstrap-suprachat-validation'
+          git clone ./validation $bootstrap
+          if ($LASTEXITCODE -ne 0) { throw 'Could not preseed bootstrap repository.' }
+          & ./validation/tools/local/Run-SupraChatBootstrap.ps1 -Root $root -UseExistingBootstrap -SkipApply
+          git filter-repo --version
+          if ($LASTEXITCODE -ne 0) { throw 'git-filter-repo is not available after launcher.' }
+
+  launcher-integrated-ps7:
+    name: Launcher - PowerShell 7 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: validation
+          fetch-depth: 0
+      - name: Execute single-entry launcher through Plan
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $root = Join-Path $env:RUNNER_TEMP 'SupraChat Launcher Root With Spaces'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $bootstrap = Join-Path $root '_bootstrap-suprachat-validation'
+          git clone ./validation $bootstrap
+          if ($LASTEXITCODE -ne 0) { throw 'Could not preseed bootstrap repository.' }
+          & ./validation/tools/local/Run-SupraChatBootstrap.ps1 -Root $root -UseExistingBootstrap -SkipApply
+          git filter-repo --version
+          if ($LASTEXITCODE -ne 0) { throw 'git-filter-repo is not available after launcher.' }
