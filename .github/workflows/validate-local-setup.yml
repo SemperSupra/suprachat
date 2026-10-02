@@ -314,3 +314,48 @@ jobs:
         run: |
           if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
           ./tools/local/Install-GitFilterRepo.ps1 -Mode Install
+
+
+  bootstrap-wrapper-winps51:
+    name: Bootstrap wrapper - Windows PowerShell 5.1 parse/self-check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and inspect wrapper
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./tools/local/Bootstrap-SupraChatLocal.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if (@($errors).Count -ne 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 2
+          }
+
+  bootstrap-wrapper-ps7:
+    name: Bootstrap wrapper - PowerShell 7 parse/self-check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and inspect wrapper
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./tools/local/Bootstrap-SupraChatLocal.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if (@($errors).Count -ne 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 2
+          }
