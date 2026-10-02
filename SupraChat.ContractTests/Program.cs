@@ -307,13 +307,13 @@ Require(accessibilityContract.Human.ReducedMotionPreference, "reduced-motion pre
 Require(!accessibilityContract.Automation.ScreenScrapingRequired, "automation accessibility regressed to screen scraping");
 Require(!accessibilityContract.Agent.ScreenScrapingRequired, "agent accessibility regressed to screen scraping");
 
-var accessibilityDocPath = Path.Combine("prototype", "suprachat", "ACCESSIBILITY.md");
+var accessibilityDocPath = Path.Combine("ACCESSIBILITY.md");
 Require(File.Exists(accessibilityDocPath), "accessibility contract document missing");
 var accessibilityDoc = File.ReadAllText(accessibilityDocPath);
 Require(accessibilityDoc.Contains("Accessibility regressions are qualification failures", StringComparison.Ordinal),
     "accessibility qualification invariant missing");
 
-var mainWindowXamlPath = Path.Combine("prototype", "suprachat", "SupraChat", "MainWindow.axaml");
+var mainWindowXamlPath = Path.Combine("SupraChat", "MainWindow.axaml");
 Require(File.Exists(mainWindowXamlPath), "MainWindow accessibility surface missing");
 var mainWindowXaml = File.ReadAllText(mainWindowXamlPath);
 foreach (var marker in new[]
@@ -371,7 +371,7 @@ Require(normalizedPreference.ReducedMotion,
     "reduced-motion preference was lost during normalization");
 
 var automationSourcePath = Path.Combine(
-    "prototype", "suprachat", "SupraChat.Automation", "Program.cs");
+    "SupraChat.Automation", "Program.cs");
 Require(File.Exists(automationSourcePath), "automation source missing");
 var automationSource = File.ReadAllText(automationSourcePath);
 foreach (var marker in new[]
@@ -414,7 +414,7 @@ var browserStatus = BrowserSession.Status();
 Require(browserStatus.Schema == "suprachat-browser-runtime/v1", "browser runtime schema drifted");
 Require(browserStatus.EphemeralByDefault, "clean-room browser must remain ephemeral by default");
 Require(browserStatus.AccessibilitySnapshotSupported, "semantic browser snapshot invariant missing");
-var browserSource = File.ReadAllText(Path.Combine("prototype", "suprachat", "SupraChat", "Core", "BrowserSession.cs"));
+var browserSource = File.ReadAllText(Path.Combine("SupraChat", "Core", "BrowserSession.cs"));
 Require(browserSource.Contains("ClickByRoleAsync", StringComparison.Ordinal),
     "semantic browser role/name click actuator missing");
 Require(browserSource.Contains("FillByLabelAsync", StringComparison.Ordinal),
@@ -422,7 +422,7 @@ Require(browserSource.Contains("FillByLabelAsync", StringComparison.Ordinal),
 Require(!browserSource.Contains("Mouse.ClickAsync", StringComparison.Ordinal),
     "semantic browser tranche regressed to coordinate-first clicking");
 
-var browserProject = File.ReadAllText(Path.Combine("prototype", "suprachat", "SupraChat", "SupraChat.csproj"));
+var browserProject = File.ReadAllText(Path.Combine("SupraChat", "SupraChat.csproj"));
 Require(browserProject.Contains("Microsoft.Playwright\" Version=\"1.63.0\"", StringComparison.Ordinal),
     "Playwright browser runtime version drifted");
 
@@ -458,7 +458,7 @@ Require(correlated.SpanId.Length == 16 &&
     "W3C-compatible span id is malformed");
 
 var installerSource = File.ReadAllText(Path.Combine(
-    "prototype", "suprachat", "packaging", "windows", "install.ps1"));
+    "packaging", "windows", "install.ps1"));
 foreach (var marker in new[]
 {
     "timestamp_utc",
@@ -477,7 +477,7 @@ foreach (var marker in new[]
         $"Windows installer observability marker missing: {marker}");
 }
 
-var appXamlPath = Path.Combine("prototype", "suprachat", "SupraChat", "App.axaml");
+var appXamlPath = Path.Combine("SupraChat", "App.axaml");
 Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\"", StringComparison.Ordinal),
     "application must follow the platform theme/high-contrast preference");
 
