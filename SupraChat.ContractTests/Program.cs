@@ -135,7 +135,7 @@ Require(codexTurn.GetProperty("threadId").GetString() == "thread-test", "Codex t
 Require(codexTurn.GetProperty("input")[0].GetProperty("type").GetString() == "text", "Codex text input missing");
 
 var surfacePath = Path.Combine(
-    "prototype", "suprachat", "oracles", "codex-app-server-surface-20261001.json");
+    "oracles", "codex-app-server-surface-20261001.json");
 Require(File.Exists(surfacePath), "pinned Codex surface inventory missing");
 using (var surfaceDoc = JsonDocument.Parse(File.ReadAllText(surfacePath)))
 {
