@@ -291,7 +291,7 @@ function Save-IssueContext {
 
 function Write-WorkspaceManifest {
     param(
-        [hashtable]$Plan,
+        [System.Collections.IDictionary]$Plan,
         [string]$Path
     )
 
