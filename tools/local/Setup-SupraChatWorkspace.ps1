@@ -126,8 +126,16 @@ function Invoke-Git {
         }
 
         if ($Capture) {
-            $output = @(& $GitPath @Arguments 2>&1)
-            $exitCode = $LASTEXITCODE
+            $savedErrorActionPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $output = @(& $GitPath @Arguments 2>&1)
+                $exitCode = $LASTEXITCODE
+            }
+            finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+            }
+
             if ($exitCode -ne 0) {
                 $text = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
                 throw ("git {0} failed with exit code {1}.{2}{3}" -f ($Arguments -join ' '), $exitCode, [Environment]::NewLine, $text)
@@ -248,11 +256,20 @@ function Ensure-MigrationClone {
 function Test-GitHubSsh {
     param([string]$SshPath)
 
-    $output = @(& $SshPath -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new git@github.com 2>&1)
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $SshPath -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new git@github.com 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+
     $text = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
 
     if (($text -notmatch 'successfully authenticated') -and ($text -notmatch 'Hi .+!')) {
-        throw ("GitHub SSH authentication could not be confirmed.{0}{1}" -f [Environment]::NewLine, $text)
+        throw ("GitHub SSH authentication could not be confirmed (ssh exit {0}).{1}{2}" -f $exitCode, [Environment]::NewLine, $text)
     }
 
     Write-Host $text.Trim()
@@ -261,12 +278,11 @@ function Test-GitHubSsh {
 function Test-GitFilterRepo {
     param([string]$GitPath)
 
-    $output = @(& $GitPath filter-repo --version 2>&1)
-    $exitCode = $LASTEXITCODE
+    $command = Get-Command -Name 'git-filter-repo' -ErrorAction SilentlyContinue
 
     return [ordered]@{
-        Available = ($exitCode -eq 0)
-        Detail = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+        Available = [bool]$command
+        Detail = if ($command) { [string]$command.Source } else { 'not found on PATH' }
     }
 }
 
@@ -278,8 +294,16 @@ function Save-IssueContext {
         [string]$Destination
     )
 
-    $output = @(& $GhPath issue view $Issue --repo $Repository --json number,title,url,state,body,comments 2>&1)
-    $exitCode = $LASTEXITCODE
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $GhPath issue view $Issue --repo $Repository --json number,title,url,state,body,comments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+
     $text = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
 
     if ($exitCode -ne 0) {
