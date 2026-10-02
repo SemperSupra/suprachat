@@ -31,6 +31,7 @@ jobs:
           }
           $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
           ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
 
   selftest-ps7-windows:
     name: SelfTest - PowerShell 7 Windows
@@ -43,6 +44,7 @@ jobs:
           if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
           $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
           ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
 
   selftest-ps7-linux:
     name: SelfTest - PowerShell 7 Linux
@@ -55,6 +57,7 @@ jobs:
           if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
           $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
           ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
 
   selftest-ps7-macos:
     name: SelfTest - PowerShell 7 macOS
@@ -67,3 +70,4 @@ jobs:
           if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
           $root = Join-Path $env:RUNNER_TEMP 'SupraChat Root With Spaces'
           ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode SelfTest -Root $root
+          ./tools/local/Setup-SupraChatWorkspace.ps1 -Mode Plan -Root $root
