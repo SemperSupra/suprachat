@@ -359,3 +359,32 @@ jobs:
             $errors | Format-List | Out-String | Write-Error
             exit 2
           }
+
+
+  bootstrap-integrated-winps51:
+    name: Integrated bootstrap - Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: validation
+      - name: Run integrated bootstrap through Plan
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)"
+          }
+          & ./validation/tools/local/Bootstrap-SupraChatLocal.ps1 -SkipApply
+
+  bootstrap-integrated-ps7:
+    name: Integrated bootstrap - PowerShell 7 Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: validation
+      - name: Run integrated bootstrap through Plan
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Expected PowerShell 7+" }
+          & ./validation/tools/local/Bootstrap-SupraChatLocal.ps1 -SkipApply
