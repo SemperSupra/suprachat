@@ -267,7 +267,9 @@ function Write-CoworkFiles {
         '',
         $Plan.ContextPath,
         '',
-        'A local actor should read public AGENTS.md, private AGENTS.md, and the exported issue context.',
+        'Active public mission: SemperSupra/suprachat#4.',
+        'Active private execution/DLE authority: SemperSupra/suprachat-private#2.',
+        'A local actor should read public AGENTS.md, private AGENTS.md, the project-native private workset, and the exported issue context.',
         'Reconcile live GitHub state before acting. Do not reconstruct chat history.',
         'Choose the highest READY bounded action, preserve human/automation/agent parity,',
         'and write material evidence plus the next baton back to the private DLE.',
@@ -281,7 +283,8 @@ function Write-CoworkFiles {
         ('Private DLE working tree: ' + $Plan.PrivatePath),
         ('Context directory: ' + $Plan.ContextPath),
         '',
-        'Read both AGENTS.md files and the exported issue context first.',
+        'Read both AGENTS.md files, private worksets/local-cowork.json, and the exported issue context first.',
+        'Treat SemperSupra/suprachat#4 as the active public dogfood mission and SemperSupra/suprachat-private#2 as the private execution/evidence authority.',
         'Reconcile live GitHub state before acting.',
         'Continue the highest READY bounded action under the repository Way of Working.',
         'Preserve human UI/UX, automation DX, agent DX, accessibility, credential boundaries, and public/free GHA qualification.',
@@ -372,9 +375,10 @@ Ensure-Repository -GitPath $gitPath -RepositoryPath $plan.PrivatePath -SshUrl $p
 if (-not $SkipIssueExport -and $ghPath) {
     Write-Host ''
     Write-Host '==> Durable issue context'
-    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue 1 -Destination (Join-Path $plan.ContextPath 'public-issue-1.json')
-    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat-private' -Issue 1 -Destination (Join-Path $plan.ContextPath 'private-issue-1.json')
-    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat-private' -Issue 2 -Destination (Join-Path $plan.ContextPath 'private-issue-2.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue 4 -Destination (Join-Path $plan.ContextPath 'active-public-dogfood-issue-4.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat-private' -Issue 2 -Destination (Join-Path $plan.ContextPath 'active-private-execution-issue-2.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue 1 -Destination (Join-Path $plan.ContextPath 'provenance-public-migration-issue-1.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat-private' -Issue 1 -Destination (Join-Path $plan.ContextPath 'provenance-private-migration-issue-1.json')
 }
 
 $publicSnapshot = Get-RepoSnapshot -GitPath $gitPath -RepositoryPath $plan.PublicPath
