@@ -6,9 +6,9 @@ SupraChat uses sibling public and private repositories so a local actor can work
 
 Default root:
 
-`$HOME/Projects/SemperSupra`
+`$HOME/Projects/SemperSupra/SupraChat`
 
-Expected siblings:
+Everything SupraChat-specific lives below that root:
 
 - `suprachat/` — canonical public product/source/CI
 - `suprachat-private/` — private DLE/oracle/evidence
