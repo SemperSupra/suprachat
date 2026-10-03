@@ -329,6 +329,18 @@ function Invoke-SelfTest {
 $workspaceRoot = Get-WorkspaceRoot -RequestedRoot $Root
 $plan = Get-WorkspacePlan -WorkspaceRoot $workspaceRoot
 
+# On case-insensitive filesystems, a legacy sibling checkout named "suprachat"
+# aliases the intended container directory "SupraChat". Refuse to nest the
+# canonical public/private repositories inside an existing repository root.
+$rootGitMarker = Join-Path $plan.Root '.git'
+if (Test-Path -LiteralPath $rootGitMarker) {
+    throw ("Workspace root '{0}' resolves to an existing Git repository. " +
+           "On Windows this can happen when a legacy sibling checkout named 'suprachat' " +
+           "collides case-insensitively with the intended container 'SupraChat'. " +
+           "Rename or relocate the legacy checkout first; this script will not nest " +
+           "canonical repositories inside another repository.") -f $plan.Root
+}
+
 if ($Mode -eq 'SelfTest') {
     Invoke-SelfTest
     exit 0
