@@ -36,6 +36,7 @@ A lease contains only bounded consumer authority and metadata:
 
 - opaque lease ID
 - consumer identity/provenance
+- consumer-instance binding
 - granted capabilities
 - issued-at timestamp
 - expiry timestamp
@@ -43,6 +44,8 @@ A lease contains only bounded consumer authority and metadata:
 - revocation state
 
 A lease never contains a refresh token, renewable SIWC credential bundle, browser credential state, or any value from which renewable authority can be reconstructed.
+
+A lease ID is an identifier, not authority by itself. The semantic contract MUST support binding lease use to the consumer instance that acquired it. For remote transports, v1 MUST NOT depend on a freely replayable bearer lease ID alone: the adapter must prove consumer possession or authenticated channel/session binding in a way that is independently testable. The exact transport mechanism remains outside this semantic contract.
 
 ## Semantic operations
 
@@ -61,12 +64,14 @@ Inputs:
 
 Behavior:
 
-1. Validate consumer identity and authorization policy.
+1. Validate consumer identity, instance binding, and authorization policy.
 2. Validate requested capabilities.
 3. Under the broker's exclusive credential/refresh lease, obtain a usable broker credential if required.
-4. Mint bounded consumer authority.
+4. Mint bounded consumer authority bound to that consumer instance.
 5. Persist the lease before returning success.
 6. Return redacted lease metadata and the minimum bounded consumer handle needed by the chosen transport.
+
+The acquire request must carry or derive a stable consumer-instance binding. A remote adapter must reject subsequent lease use when the caller cannot prove the same binding.
 
 Retry of the same request ID MUST produce the same accepted outcome or a deterministic conflict; it MUST NOT mint extra authority.
 
@@ -82,6 +87,8 @@ Inputs:
 - lease ID
 
 Release is terminal for the lease ID. Repeating the same release is idempotent and returns a stable terminal receipt.
+
+Revocation/release semantics are admission-oriented: after the terminal transition the broker MUST reject admission of any new provider operation for that lease. A provider operation already admitted before revocation may be impossible to cancel upstream; v1 therefore records an explicit `admitted_at` boundary and must deterministically define whether its eventual response is delivered or discarded. The initial fail-closed policy is to discard the result after revocation unless a stronger causal requirement is proven.
 
 ### lease/renew
 
@@ -100,7 +107,8 @@ Deferred from v1 unless a concrete consumer proves an explicit renew operation i
 9. Transport adapters cannot expand semantic authority.
 10. Receipts, diagnostics, logs, CI artifacts, notebook output, and browser storage contain no credential material.
 11. Crash/restart recovery fails closed for uncertain lease state.
-12. Human, automation, and agent audiences use first-class semantic interfaces rather than scraping each other.
+12. Every lease use is bound to the acquiring consumer instance; possession of an opaque lease ID alone is insufficient authority for remote use.
+13. Human, automation, and agent audiences use first-class semantic interfaces rather than scraping each other.
 
 ## Conceptual state transitions
 
@@ -128,6 +136,18 @@ LEASED ---- release/revoke ----> REVOKED
 
 Multiple leases may exist simultaneously, but they are consumers of one broker-owned renewable credential lineage. They do not become independent refresh owners.
 
+### Restart epoch
+
+Broker process restart increments a broker epoch. For v1, all leases issued under an earlier epoch are invalidated on restart. Durable lease resurrection is deliberately deferred until there is evidence that it is worth the additional recovery-state complexity. Clients may reacquire a new lease after reconnecting.
+
+This gives v1 a simple fail-closed restart oracle:
+
+```text
+lease.epoch != broker.current_epoch -> BROKER_RESTARTED
+```
+
+No pre-restart lease may silently resume authority.
+
 ## Stable error classes
 
 - AUTH_REQUIRED
@@ -139,6 +159,8 @@ Multiple leases may exist simultaneously, but they are consumers of one broker-o
 - REQUEST_CONFLICT
 - REFRESH_FAILED
 - VERSION_UNSUPPORTED
+- CONSUMER_BINDING_FAILED
+- BROKER_RESTARTED
 
 Transport-specific failures map to these semantic classes where applicable and must not alter their meaning.
 
@@ -155,9 +177,12 @@ Before broker v1 is considered qualified:
 7. revoke-vs-use and expiry-vs-use races have explicit oracles;
 8. controlled clock-skew reps are green;
 9. sentinel leakage scans cover stdout/stderr, receipts, diagnostics, artifacts, notebook output, browser stores, and CI surfaces;
-10. one local/native consumer and one remote/ephemeral consumer complete causal model-discovery and inference reps;
-11. public/free GHA independently qualifies all public-safe deterministic behavior;
-12. real SIWC/OAuth authorization and credential-bound HIL remain local/private.
+10. replaying a lease ID from a different consumer binding fails;
+11. broker restart invalidates all earlier-epoch leases and clients can reacquire cleanly;
+12. revocation-vs-in-flight races prove the admission boundary and post-revoke response policy;
+13. one local/native consumer and one remote/ephemeral consumer complete causal model-discovery and inference reps;
+14. public/free GHA independently qualifies all public-safe deterministic behavior;
+15. real SIWC/OAuth authorization and credential-bound HIL remain local/private.
 
 ## Dependency gate
 
@@ -169,13 +194,24 @@ Implementation is blocked until:
 
 Design/review may proceed before those gates provided it does not modify PR #8.
 
+## Remote bootstrap boundary
+
+Remote transport bootstrap is permitted to establish consumer identity and mint a bounded broker lease only. It MUST NOT expose, derive, or become equivalent to renewable SIWC authority.
+
+Any static bootstrap secret, if a first proving rep genuinely requires one, must be:
+- independently scoped from SIWC credentials;
+- revocable without reauthorizing the ChatGPT account;
+- limited to broker bootstrap/lease acquisition;
+- replaceable by a stronger workload-identity or proof-of-possession mechanism.
+
+GitHub Actions should prefer workload identity when a practical zero-cost implementation exists; do not make that a prerequisite for the first local broker causal rep.
+
 ## Open questions to falsify before freezing v1
 
-- Is a broker-issued bearer lease sufficient, or must leases be bound to a consumer-generated key?
+- Which concrete consumer-binding mechanism gives the smallest adequate proof-of-possession for each remote adapter?
 - What is the minimum useful TTL ceiling for Colab/GHA/browser consumers?
-- Which revocation semantics are achievable for already in-flight provider requests?
-- How should remote transport bootstrap authenticate without turning a bootstrap secret into de facto renewable authority?
-- Can workload identity replace static bootstrap secrets for GHA?
+- Can post-revocation in-flight responses always be discarded locally without creating confusing provider-side side effects?
+- Can workload identity replace static bootstrap secrets for GHA in the first remote proving rep?
 - Which adapter should be the first causal implementation: local IPC, loopback HTTP, or another existing SupraChat semantic surface?
 
 These are design questions, not permission to broaden v1 scope.
