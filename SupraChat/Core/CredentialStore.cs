@@ -31,14 +31,30 @@ public static class CredentialStore
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static string PathName => Path.Combine(AppState.DirectoryPath, "siwc-credential.dat");
     private static string RegistrationsPath => Path.Combine(AppState.DirectoryPath, "siwc-registrations.dat");
+    private static string LeasePath => Path.Combine(AppState.DirectoryPath, "siwc-credential.lock");
 
     public static async Task SaveAsync(SiwcCredential credential)
     {
         await Gate.WaitAsync();
         try
         {
-            await WriteProtectedJsonAsync(PathName, credential);
-            await RememberRegistrationUnlockedAsync(credential);
+            var normalized = credential.Generation < 1
+                ? credential with { Generation = 1 }
+                : credential;
+
+            var current = await ReadProtectedJsonAsync<SiwcCredential>(PathName);
+            if (current is not null &&
+                string.Equals(current.ClientId, normalized.ClientId, StringComparison.Ordinal) &&
+                string.Equals(current.Subject, normalized.Subject, StringComparison.Ordinal) &&
+                Math.Max(1, current.Generation) > normalized.Generation)
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to overwrite SIWC credential generation {current.Generation} " +
+                    $"with stale generation {normalized.Generation}.");
+            }
+
+            await WriteProtectedJsonAsync(PathName, normalized);
+            await RememberRegistrationUnlockedAsync(normalized);
         }
         finally
         {
@@ -51,11 +67,45 @@ public static class CredentialStore
         await Gate.WaitAsync();
         try
         {
-            return await ReadProtectedJsonAsync<SiwcCredential>(PathName);
+            var credential = await ReadProtectedJsonAsync<SiwcCredential>(PathName);
+            return credential is { Generation: < 1 }
+                ? credential with { Generation = 1 }
+                : credential;
         }
         finally
         {
             Gate.Release();
+        }
+    }
+
+    public static async Task<IAsyncDisposable> AcquireExclusiveCredentialLeaseAsync(
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(AppState.DirectoryPath);
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(30));
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var stream = new FileStream(
+                    LeasePath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 1,
+                    FileOptions.Asynchronous);
+                return new CredentialLease(stream);
+            }
+            catch (IOException) when (DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+                throw new TimeoutException("Timed out waiting for the local SIWC credential lease.");
         }
     }
 
@@ -180,5 +230,11 @@ public static class CredentialStore
         AppState.TryRestrict(temp);
         File.Move(temp, path, overwrite: true);
         AppState.TryRestrict(path);
+    }
+
+    private sealed class CredentialLease(FileStream stream) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync() =>
+            await stream.DisposeAsync().ConfigureAwait(false);
     }
 }
