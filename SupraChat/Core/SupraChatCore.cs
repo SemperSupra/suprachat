@@ -70,6 +70,35 @@ public sealed class SupraChatCore
         return refreshed;
     }
 
+    public async Task<SiwcCredential> CommitInteractiveCredentialAsync(
+        SiwcCredential candidate,
+        CancellationToken cancellationToken = default)
+    {
+        await using var lease = await CredentialStore
+            .AcquireExclusiveCredentialLeaseAsync(cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        var current = await CredentialStore.TryLoadAsync().ConfigureAwait(false);
+        if (current is not null &&
+            string.Equals(current.ClientId, candidate.ClientId, StringComparison.Ordinal) &&
+            string.Equals(current.Subject, candidate.Subject, StringComparison.Ordinal))
+        {
+            candidate = candidate with
+            {
+                Generation = Math.Max(
+                    Math.Max(1, candidate.Generation),
+                    Math.Max(1, current.Generation) + 1)
+            };
+        }
+        else
+        {
+            candidate = candidate with { Generation = Math.Max(1, candidate.Generation) };
+        }
+
+        await CredentialStore.SaveAsync(candidate).ConfigureAwait(false);
+        return candidate;
+    }
+
     public async Task<IReadOnlyList<ModelChoice>> ListModelsAsync(
         string? correlationId = null,
         CancellationToken cancellationToken = default)
