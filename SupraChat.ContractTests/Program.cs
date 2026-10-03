@@ -184,6 +184,8 @@ Require(!bundleJson.Contains("ID_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordina
     "ID token leaked into portable credential envelope");
 Require(!bundleJson.Contains("subject-secret-value", StringComparison.Ordinal),
     "raw subject leaked into portable credential envelope");
+Require(!bundleJson.Contains("subject_fingerprint", StringComparison.Ordinal),
+    "portable credential envelope should not expose a stable account fingerprint");
 
 var restoredCredential = PortableCredentialBundle.Unprotect(
     bundle,
@@ -225,6 +227,8 @@ var authDescriptor = SupraChatCore.DescribeCredential(portableCredential);
 var authDescriptorJson = JsonSerializer.Serialize(authDescriptor);
 Require(authDescriptor.CredentialGeneration == 7, "core auth descriptor lost credential generation");
 Require(authDescriptor.EarliestRefreshMetadataPresent, "core auth descriptor lost earliest-refresh presence");
+Require(!authDescriptorJson.Contains("subject-secret-value", StringComparison.Ordinal),
+    "core auth descriptor leaked raw subject");
 Require(!authDescriptorJson.Contains("ACCESS_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
     "core auth descriptor leaked access token");
 Require(!authDescriptorJson.Contains("REFRESH_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
