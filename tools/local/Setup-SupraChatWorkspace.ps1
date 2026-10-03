@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-Sets up the local SupraChat workspace under ~/Projects/SemperSupra.
+Sets up the local SupraChat workspace under ~/Projects/SemperSupra/SupraChat.
 
 .DESCRIPTION
 Compatible with Windows PowerShell 5.1 and PowerShell 7.x.
@@ -67,7 +67,7 @@ function Get-WorkspaceRoot {
 
     $candidate = $RequestedRoot
     if ([string]::IsNullOrWhiteSpace($candidate)) {
-        $candidate = Join-Path -Path $HOME -ChildPath 'Projects/SemperSupra'
+        $candidate = Join-Path -Path $HOME -ChildPath 'Projects/SemperSupra/SupraChat'
     }
 
     $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
