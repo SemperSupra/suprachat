@@ -76,8 +76,8 @@ public sealed class SupraChatCore
     {
         var credential = await GetUsableCredentialAsync(
             requirePlanUsage: true,
-            correlationId,
-            cancellationToken).ConfigureAwait(false);
+            correlationId: correlationId,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
         return await _responses.ListModelsAsync(credential.AccessToken).ConfigureAwait(false);
     }
 
