@@ -56,7 +56,7 @@ function Get-WorkspaceRoot {
 
     $candidate = $RequestedRoot
     if ([string]::IsNullOrWhiteSpace($candidate)) {
-        $candidate = Join-Path -Path $HOME -ChildPath 'Projects/SemperSupra'
+        $candidate = Join-Path -Path $HOME -ChildPath 'Projects/SemperSupra/SupraChat'
     }
 
     $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
@@ -305,6 +305,12 @@ function Invoke-SelfTest {
     if ($plan.PublicSsh -ne 'git@github.com:SemperSupra/suprachat.git') { $failures.Add('Public remote wrong.') }
     if ($plan.PrivateSsh -ne 'git@github.com:SemperSupra/suprachat-private.git') { $failures.Add('Private remote wrong.') }
     if (-not [IO.Path]::IsPathRooted($plan.Root)) { $failures.Add('Root is not absolute.') }
+
+    $defaultRoot = Get-WorkspaceRoot -RequestedRoot $null
+    $expectedSuffix = [IO.Path]::Combine('Projects','SemperSupra','SupraChat')
+    if (-not $defaultRoot.EndsWith($expectedSuffix, [StringComparison]::OrdinalIgnoreCase)) {
+        $failures.Add("Default root must end in '$expectedSuffix'; got '$defaultRoot'.")
+    }
 
     if ($failures.Count -gt 0) {
         throw ('SelfTest failed: ' + ($failures -join ' '))
