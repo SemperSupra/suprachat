@@ -1,0 +1,358 @@
+{
+  "schema": "suprachat-broker-lease-test-vectors/v1",
+  "status": "design-draft",
+  "authority": "SemperSupra/suprachat#9",
+  "semantics_ref": "docs/credential-broker-lease-v1.md",
+  "note": "Public-safe synthetic vectors only. No SIWC credentials or real account data.",
+  "fixtures": {
+    "broker_epoch_1": "epoch-0001",
+    "broker_epoch_2": "epoch-0002",
+    "consumer_a": {
+      "id": "consumer-a",
+      "binding": "binding-a"
+    },
+    "consumer_b": {
+      "id": "consumer-b",
+      "binding": "binding-b"
+    },
+    "capabilities": [
+      "models.read",
+      "responses.create"
+    ]
+  },
+  "vectors": [
+    {
+      "id": "acquire-first",
+      "initial": {
+        "broker": "READY",
+        "epoch": "epoch-0001",
+        "leases": []
+      },
+      "operation": {
+        "name": "lease/acquire",
+        "request_id": "req-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a",
+        "capabilities": [
+          "models.read"
+        ],
+        "ttl_seconds": 300
+      },
+      "expect": {
+        "result": "LEASED",
+        "lease_count": 1,
+        "error": null,
+        "renewable_material_exposed": false
+      }
+    },
+    {
+      "id": "acquire-replay-idempotent",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "existing_request_id": "req-1",
+        "existing_lease": "lease-1"
+      },
+      "operation": {
+        "name": "lease/acquire",
+        "request_id": "req-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a",
+        "capabilities": [
+          "models.read"
+        ],
+        "ttl_seconds": 300
+      },
+      "expect": {
+        "same_logical_lease": true,
+        "additional_authority": false,
+        "error": null
+      }
+    },
+    {
+      "id": "acquire-request-conflict",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "existing_request_id": "req-1",
+        "existing_lease": "lease-1"
+      },
+      "operation": {
+        "name": "lease/acquire",
+        "request_id": "req-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a",
+        "capabilities": [
+          "responses.create"
+        ],
+        "ttl_seconds": 300
+      },
+      "expect": {
+        "error": "REQUEST_CONFLICT",
+        "additional_authority": false
+      }
+    },
+    {
+      "id": "wrong-binding-replay",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "consumer": "consumer-a",
+          "binding": "binding-a"
+        }
+      },
+      "operation": {
+        "name": "models/list",
+        "lease_id": "lease-1",
+        "consumer": "consumer-b",
+        "binding": "binding-b"
+      },
+      "expect": {
+        "error": "CONSUMER_BINDING_FAILED",
+        "provider_operation_admitted": false
+      }
+    },
+    {
+      "id": "release-first",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "state": "ACTIVE"
+        }
+      },
+      "operation": {
+        "name": "lease/release",
+        "request_id": "release-1",
+        "lease_id": "lease-1"
+      },
+      "expect": {
+        "lease_state": "REVOKED",
+        "error": null
+      }
+    },
+    {
+      "id": "release-replay-idempotent",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "state": "REVOKED"
+        },
+        "existing_request_id": "release-1"
+      },
+      "operation": {
+        "name": "lease/release",
+        "request_id": "release-1",
+        "lease_id": "lease-1"
+      },
+      "expect": {
+        "lease_state": "REVOKED",
+        "stable_terminal_receipt": true,
+        "error": null
+      }
+    },
+    {
+      "id": "post-release-use",
+      "initial": {
+        "broker": "READY",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "state": "REVOKED"
+        }
+      },
+      "operation": {
+        "name": "models/list",
+        "lease_id": "lease-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a"
+      },
+      "expect": {
+        "error": "LEASE_REVOKED",
+        "provider_operation_admitted": false
+      }
+    },
+    {
+      "id": "expired-use",
+      "initial": {
+        "broker": "READY",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "state": "ACTIVE",
+          "expires_at": "2026-10-03T12:00:00Z"
+        },
+        "now": "2026-10-03T12:00:01Z"
+      },
+      "operation": {
+        "name": "models/list",
+        "lease_id": "lease-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a"
+      },
+      "expect": {
+        "error": "LEASE_EXPIRED",
+        "provider_operation_admitted": false
+      }
+    },
+    {
+      "id": "restart-invalidates-lease",
+      "initial": {
+        "broker": "READY",
+        "epoch": "epoch-0002",
+        "lease": {
+          "id": "lease-1",
+          "state": "ACTIVE",
+          "issued_epoch": "epoch-0001"
+        }
+      },
+      "operation": {
+        "name": "models/list",
+        "lease_id": "lease-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a"
+      },
+      "expect": {
+        "error": "BROKER_RESTARTED",
+        "provider_operation_admitted": false
+      }
+    },
+    {
+      "id": "restart-reacquire",
+      "initial": {
+        "broker": "READY",
+        "epoch": "epoch-0002",
+        "prior_lease": {
+          "id": "lease-1",
+          "issued_epoch": "epoch-0001"
+        }
+      },
+      "operation": {
+        "name": "lease/acquire",
+        "request_id": "req-after-restart",
+        "consumer": "consumer-a",
+        "binding": "binding-a",
+        "capabilities": [
+          "models.read"
+        ],
+        "ttl_seconds": 300
+      },
+      "expect": {
+        "new_lease": true,
+        "issued_epoch": "epoch-0002",
+        "error": null
+      }
+    },
+    {
+      "id": "revoke-before-admission",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "state": "REVOKED"
+        }
+      },
+      "operation": {
+        "name": "responses/create",
+        "lease_id": "lease-1",
+        "consumer": "consumer-a",
+        "binding": "binding-a"
+      },
+      "expect": {
+        "error": "LEASE_REVOKED",
+        "provider_operation_admitted": false,
+        "response_delivered": false
+      }
+    },
+    {
+      "id": "revoke-after-admission",
+      "initial": {
+        "broker": "LEASED",
+        "epoch": "epoch-0001",
+        "lease": {
+          "id": "lease-1",
+          "state": "ACTIVE"
+        },
+        "provider_operation": {
+          "id": "op-1",
+          "admitted": true
+        }
+      },
+      "concurrent": [
+        {
+          "name": "lease/release",
+          "request_id": "release-2",
+          "lease_id": "lease-1"
+        },
+        {
+          "name": "provider/result",
+          "operation_id": "op-1"
+        }
+      ],
+      "expect": {
+        "lease_state": "REVOKED",
+        "provider_may_complete": true,
+        "response_delivered": false
+      }
+    },
+    {
+      "id": "refresh-generation-regression",
+      "initial": {
+        "credential_generation": 8,
+        "refresh_lineage": "lineage-a"
+      },
+      "operation": {
+        "name": "credential/write",
+        "generation": 7,
+        "refresh_lineage": "lineage-a"
+      },
+      "expect": {
+        "accepted": false,
+        "error": "STALE_GENERATION"
+      }
+    },
+    {
+      "id": "refresh-generation-conflict",
+      "initial": {
+        "credential_generation": 8,
+        "refresh_lineage": "lineage-a"
+      },
+      "operation": {
+        "name": "credential/write",
+        "generation": 8,
+        "refresh_lineage": "lineage-b"
+      },
+      "expect": {
+        "accepted": false,
+        "error": "GENERATION_CONFLICT"
+      }
+    },
+    {
+      "id": "status-does-not-refresh",
+      "initial": {
+        "broker": "READY",
+        "credential_refresh_due": true,
+        "refresh_owner": null
+      },
+      "operation": {
+        "name": "broker/status"
+      },
+      "expect": {
+        "refresh_started": false,
+        "state_mutation": false
+      }
+    }
+  ],
+  "required_meta_oracles": [
+    "no serialized result contains fields or sentinel values representing access_token, refresh_token, id_token, authorization_code, cookie, or renewable credential bundle",
+    "every consequential operation receipt includes request_id and terminal classification",
+    "transport adapter cannot alter requested capabilities after semantic validation",
+    "all lease-use operations verify consumer binding before provider admission"
+  ]
+}
