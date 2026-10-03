@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Xml.Linq;
 using SupraChat.Core;
 
 static void Require(bool condition, string message)
@@ -215,6 +216,21 @@ Require(DesktopNotificationService.Adapter is not "unsupported",
     "desktop notification adapter missing for supported platform");
 Require(DesktopNotificationService.AppleScriptString("a\"b") == "\"a\\\"b\"",
     "macOS notification string escaping drifted");
+
+// NativeControlHost can create layered child HWNDs only with modern Windows compatibility.
+var desktopProject = XDocument.Load(Path.Combine("SupraChat", "SupraChat.csproj"));
+Require(desktopProject.Descendants("ApplicationManifest").Single().Value == "app.manifest",
+    "desktop executable must embed its Windows compatibility manifest");
+var desktopManifest = XDocument.Load(Path.Combine("SupraChat", "app.manifest"));
+XNamespace compatibilityNamespace = "urn:schemas-microsoft-com:compatibility.v1";
+Require(desktopManifest.Descendants(compatibilityNamespace + "supportedOS")
+        .Any(os => (string?)os.Attribute("Id") == "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"),
+    "native control hosting requires Windows 10+ compatibility declaration");
+XNamespace securityNamespace = "urn:schemas-microsoft-com:asm.v3";
+var executionLevel = desktopManifest.Descendants(securityNamespace + "requestedExecutionLevel").Single();
+Require((string?)executionLevel.Attribute("level") == "asInvoker" &&
+        (string?)executionLevel.Attribute("uiAccess") == "false",
+    "desktop manifest must preserve per-user execution without elevated UI access");
 
 var parityPath = Path.Combine("oracles", "audience-parity-20261001.json");
 Require(File.Exists(parityPath), "audience/accessibility parity manifest missing");
