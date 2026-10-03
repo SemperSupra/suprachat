@@ -36,3 +36,9 @@ Start the local actor in the public `suprachat` working tree and give it the gen
 Private DLE issue state, not chat reconstruction, is the continuation authority.
 
 Human SIWC/OAuth approval remains a human boundary. Do not copy tokens, cookies, authorization codes, browser-profile secrets, or credential material into repository state, issue comments, or CI artifacts.
+
+## Windows case-insensitive path collision
+
+On Windows, `SupraChat` and `suprachat` resolve to the same filesystem path. If a legacy top-level checkout still exists at `$HOME/Projects/SemperSupra/suprachat`, rename or relocate it before creating the dedicated `$HOME/Projects/SemperSupra/SupraChat` workspace root.
+
+The bootstrap scripts now refuse to continue when the intended workspace root itself contains a `.git` directory, preventing canonical repositories from being nested inside a legacy checkout.
