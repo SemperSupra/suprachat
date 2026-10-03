@@ -49,6 +49,12 @@ public static class CredentialStore
                     $"Refusing to overwrite SIWC credential generation {current.Generation} " +
                     $"with stale generation {normalized.Generation}.");
             }
+            if (current is not null && WouldConflictGeneration(current, normalized))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to overwrite SIWC credential generation {current.Generation} " +
+                    "with a different rotating refresh-token lineage at the same generation.");
+            }
 
             await WriteProtectedJsonAsync(PathName, normalized);
             await RememberRegistrationUnlockedAsync(normalized);
@@ -62,9 +68,21 @@ public static class CredentialStore
     public static bool WouldRegressGeneration(
         SiwcCredential current,
         SiwcCredential candidate) =>
-        string.Equals(current.ClientId, candidate.ClientId, StringComparison.Ordinal) &&
-        string.Equals(current.Subject, candidate.Subject, StringComparison.Ordinal) &&
+        SameRegistration(current, candidate) &&
         Math.Max(1, current.Generation) > Math.Max(1, candidate.Generation);
+
+    public static bool WouldConflictGeneration(
+        SiwcCredential current,
+        SiwcCredential candidate) =>
+        SameRegistration(current, candidate) &&
+        Math.Max(1, current.Generation) == Math.Max(1, candidate.Generation) &&
+        !string.Equals(current.RefreshToken, candidate.RefreshToken, StringComparison.Ordinal);
+
+    private static bool SameRegistration(
+        SiwcCredential left,
+        SiwcCredential right) =>
+        string.Equals(left.ClientId, right.ClientId, StringComparison.Ordinal) &&
+        string.Equals(left.Subject, right.Subject, StringComparison.Ordinal);
 
     public static async Task<SiwcCredential?> TryLoadAsync()
     {
