@@ -215,6 +215,11 @@ Require(CredentialStore.WouldRegressGeneration(newerCredential, portableCredenti
     "stale credential generation was not detected");
 Require(!CredentialStore.WouldRegressGeneration(portableCredential, newerCredential),
     "newer credential generation was incorrectly rejected");
+var conflictingCredential = portableCredential with { RefreshToken = "DIFFERENT_ROTATING_REFRESH_TOKEN" };
+Require(CredentialStore.WouldConflictGeneration(portableCredential, conflictingCredential),
+    "same-generation rotating refresh-token conflict was not detected");
+Require(!CredentialStore.WouldConflictGeneration(portableCredential, portableCredential),
+    "identical same-generation credential was incorrectly treated as conflicting");
 
 var authDescriptor = SupraChatCore.DescribeCredential(portableCredential);
 var authDescriptorJson = JsonSerializer.Serialize(authDescriptor);
