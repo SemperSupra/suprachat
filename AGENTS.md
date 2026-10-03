@@ -14,5 +14,6 @@ Working rules:
 - preserve accessible semantic controls and credential boundaries;
 - keep qualification on public/free GitHub Actions;
 - never place credentials, cookies, authorization codes, or token material in repository state or CI artifacts;
-- use SemperSupra/suprachat-private#1 for private DLE/oracle/evidence state;
+- use SemperSupra/suprachat-private#2 for current private DLE/oracle/evidence continuation; closed private issue #1 is migration provenance;
+- closed public dogfood issue #4 is provenance for the completed first Windows/SIWC coworking rep; start further work as a new bounded mission rather than silently extending it;
 - use Agent Dispatch only as execution/orchestration substrate, not as product authority.
