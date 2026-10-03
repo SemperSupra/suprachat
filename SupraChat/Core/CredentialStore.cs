@@ -43,10 +43,7 @@ public static class CredentialStore
                 : credential;
 
             var current = await ReadProtectedJsonAsync<SiwcCredential>(PathName);
-            if (current is not null &&
-                string.Equals(current.ClientId, normalized.ClientId, StringComparison.Ordinal) &&
-                string.Equals(current.Subject, normalized.Subject, StringComparison.Ordinal) &&
-                Math.Max(1, current.Generation) > normalized.Generation)
+            if (current is not null && WouldRegressGeneration(current, normalized))
             {
                 throw new InvalidOperationException(
                     $"Refusing to overwrite SIWC credential generation {current.Generation} " +
@@ -61,6 +58,13 @@ public static class CredentialStore
             Gate.Release();
         }
     }
+
+    public static bool WouldRegressGeneration(
+        SiwcCredential current,
+        SiwcCredential candidate) =>
+        string.Equals(current.ClientId, candidate.ClientId, StringComparison.Ordinal) &&
+        string.Equals(current.Subject, candidate.Subject, StringComparison.Ordinal) &&
+        Math.Max(1, current.Generation) > Math.Max(1, candidate.Generation);
 
     public static async Task<SiwcCredential?> TryLoadAsync()
     {
