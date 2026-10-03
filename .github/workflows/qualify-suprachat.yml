@@ -1111,14 +1111,7 @@ jobs:
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
-                foreach ($automationId in @(
-                'RootTabs',
-                'ChatGPT.WebView',
-                'Auth.SignIn',
-                'AgentLab.Prompt',
-                'Auth.Status',
-                'Accessibility.Status'
-              )) {
+                function Require-SemanticControl([string]$automationId) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
@@ -1133,7 +1126,26 @@ jobs:
                 if ([string]::IsNullOrWhiteSpace($name)) {
                   throw "UI Automation accessible name missing: $automationId"
                 }
-              }
+                return $element
+                }
+
+                # Inactive tab content is not attached to the live UIA tree. Select each
+                # work area before checking its controls. Native WebView content has
+                # its own provider; its declarative ID is covered by contract checks.
+                foreach ($automationId in @('RootTabs', 'Nav.Back', 'Nav.Home', 'Tab.ChatGPT')) {
+                  $null = Require-SemanticControl $automationId
+                }
+                foreach ($area in @(
+                  @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') }
+                )) {
+                  $tab = Require-SemanticControl $area.tab
+                  $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+                  $selection.Select()
+                  foreach ($automationId in $area.controls) {
+                    $null = Require-SemanticControl $automationId
+                  }
+                }
 
                 $receipt = @{
                   schema = 'suprachat-windows-uia-qualification/v1'
