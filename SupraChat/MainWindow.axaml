@@ -1,6 +1,7 @@
 <Window
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:SupraChat"
     x:Class="SupraChat.MainWindow"
     Width="1280"
     Height="900"
@@ -101,8 +102,7 @@
                            AutomationProperties.AutomationId="Auth.PortableHeading" />
                 <TextBlock TextWrapping="Wrap"
                            Text="Export an encrypted renewable SIWC credential bundle for another trusted runtime, or import one here. Copies share renewable authority and can interfere if multiple hosts rotate the same refresh lineage; use intentionally and protect the bundle and passphrase." />
-                <TextBox x:Name="CredentialPassphraseBox"
-                         PasswordChar="●"
+                <local:SecurePassphraseTextBox x:Name="CredentialPassphraseBox"
                          Watermark="Bundle passphrase (12+ characters)"
                          AutomationProperties.AutomationId="Auth.BundlePassphrase"
                          AutomationProperties.Name="Credential bundle passphrase"
