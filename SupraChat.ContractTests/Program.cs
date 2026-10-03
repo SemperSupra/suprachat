@@ -164,6 +164,76 @@ Require(fakeCredential.HasPlanUsage, "plan-usage scope should be recognized");
 var identityOnly = fakeCredential with { Scopes = new[] { "openid", "profile" } };
 Require(!identityOnly.HasPlanUsage, "identity-only session must remain distinct from plan usage");
 
+var portableCredential = fakeCredential with
+{
+    Generation = 7,
+    EarliestRefreshAtRaw = "1790033000"
+};
+var bundle = PortableCredentialBundle.Protect(
+    portableCredential,
+    "correct horse battery staple",
+    exportedAt: DateTimeOffset.Parse("2026-10-03T10:00:00Z"));
+var bundleJson = JsonSerializer.Serialize(bundle);
+Require(bundle.Schema == PortableCredentialBundle.Schema, "portable credential bundle schema mismatch");
+Require(bundle.Mode == PortableCredentialBundle.CopyMode, "portable credential bundle mode mismatch");
+Require(!bundleJson.Contains("ACCESS_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
+    "access token leaked into portable credential envelope");
+Require(!bundleJson.Contains("REFRESH_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
+    "refresh token leaked into portable credential envelope");
+Require(!bundleJson.Contains("ID_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
+    "ID token leaked into portable credential envelope");
+Require(!bundleJson.Contains("subject-secret-value", StringComparison.Ordinal),
+    "raw subject leaked into portable credential envelope");
+Require(!bundleJson.Contains("subject_fingerprint", StringComparison.Ordinal),
+    "portable credential envelope should not expose a stable account fingerprint");
+
+var restoredCredential = PortableCredentialBundle.Unprotect(
+    bundle,
+    "correct horse battery staple");
+Require(restoredCredential.AccessToken == portableCredential.AccessToken,
+    "portable credential access-token round trip failed");
+Require(restoredCredential.RefreshToken == portableCredential.RefreshToken,
+    "portable credential refresh-token round trip failed");
+Require(restoredCredential.IdToken == portableCredential.IdToken,
+    "portable credential ID-token round trip failed");
+Require(restoredCredential.Generation == 7,
+    "portable credential generation round trip failed");
+Require(restoredCredential.EarliestRefreshAtRaw == "1790033000",
+    "opaque earliest_refresh_at metadata was not preserved");
+
+var wrongPassphraseRejected = false;
+try
+{
+    _ = PortableCredentialBundle.Unprotect(bundle, "this passphrase is wrong");
+}
+catch (System.Security.Cryptography.CryptographicException)
+{
+    wrongPassphraseRejected = true;
+}
+Require(wrongPassphraseRejected, "portable credential bundle accepted a wrong passphrase");
+
+var newerCredential = portableCredential with { Generation = 8 };
+Require(CredentialStore.WouldRegressGeneration(newerCredential, portableCredential),
+    "stale credential generation was not detected");
+Require(!CredentialStore.WouldRegressGeneration(portableCredential, newerCredential),
+    "newer credential generation was incorrectly rejected");
+var conflictingCredential = portableCredential with { RefreshToken = "DIFFERENT_ROTATING_REFRESH_TOKEN" };
+Require(CredentialStore.WouldConflictGeneration(portableCredential, conflictingCredential),
+    "same-generation rotating refresh-token conflict was not detected");
+Require(!CredentialStore.WouldConflictGeneration(portableCredential, portableCredential),
+    "identical same-generation credential was incorrectly treated as conflicting");
+
+var authDescriptor = SupraChatCore.DescribeCredential(portableCredential);
+var authDescriptorJson = JsonSerializer.Serialize(authDescriptor);
+Require(authDescriptor.CredentialGeneration == 7, "core auth descriptor lost credential generation");
+Require(authDescriptor.EarliestRefreshMetadataPresent, "core auth descriptor lost earliest-refresh presence");
+Require(!authDescriptorJson.Contains("subject-secret-value", StringComparison.Ordinal),
+    "core auth descriptor leaked raw subject");
+Require(!authDescriptorJson.Contains("ACCESS_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
+    "core auth descriptor leaked access token");
+Require(!authDescriptorJson.Contains("REFRESH_TOKEN_MUST_NOT_APPEAR", StringComparison.Ordinal),
+    "core auth descriptor leaked refresh token");
+
 var receipt = QualificationReceipts.BuildDirect(
     "gpt-example",
     fakeCredential,
@@ -339,6 +409,11 @@ foreach (var marker in new[]
     "AutomationProperties.AutomationId=\"AgentLab.Prompt\"",
     "AutomationProperties.AutomationId=\"AgentLab.CaptureScreen\"",
     "AutomationProperties.AutomationId=\"Auth.Status\"",
+    "AutomationProperties.AutomationId=\"Auth.PortableHeading\"",
+    "AutomationProperties.AutomationId=\"Auth.BundlePassphrase\"",
+    "AutomationProperties.AutomationId=\"Auth.ExportCredential\"",
+    "AutomationProperties.AutomationId=\"Auth.ImportCredential\"",
+    "AutomationProperties.AutomationId=\"Auth.PortableStatus\"",
     "AutomationProperties.AutomationId=\"Accessibility.Status\"",
     "AutomationProperties.AutomationId=\"Accessibility.ScaleDown\"",
     "AutomationProperties.AutomationId=\"Accessibility.ScaleReset\"",
@@ -419,12 +494,26 @@ foreach (var marker in new[]
     "\"diagnostics\"",
     "\"diagnostics-export\"",
     "\"diagnostics/read\"",
-    "\"diagnostics/export\""
+    "\"diagnostics/export\"",
+    "\"auth-bundle-inspect\"",
+    "\"auth-export\"",
+    "\"auth-import\"",
+    "\"auth/bundle/inspect\"",
+    "\"auth/export\"",
+    "\"auth/import\""
 })
 {
     Require(automationSource.Contains(marker, StringComparison.Ordinal),
         $"semantic machine runtime surface missing: {marker}");
 }
+
+var coreDocPath = Path.Combine("docs", "core-api-portable-credentials.md");
+Require(File.Exists(coreDocPath), "core API / portable credential architecture document missing");
+var coreDoc = File.ReadAllText(coreDocPath);
+Require(coreDoc.Contains("SupraChat Core API", StringComparison.Ordinal),
+    "core API architecture decision missing");
+Require(coreDoc.Contains("remote credential broker / lease service", StringComparison.Ordinal),
+    "deferred broker boundary missing");
 
 var browserStatus = BrowserSession.Status();
 Require(browserStatus.Schema == "suprachat-browser-runtime/v1", "browser runtime schema drifted");

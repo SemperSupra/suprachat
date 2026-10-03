@@ -59,3 +59,40 @@ Public CI now produces self-contained artifacts for:
 This mirrors a key property observed in OpenAI's current unified macOS/Linux desktop clients: the local Codex/runtime capability is part of the desktop application rather than an unrelated prerequisite.
 
 The ChatGPT product WebView, SIWC/Responses binding, and bundled Codex runtime remain separate capability planes. The application does not substitute recovered first-party private endpoints for supported integration surfaces.
+
+
+## Core API and portable SIWC credentials
+
+SupraChat is converging on one semantic Core API shared by the desktop UI, automation CLI, and agent JSON-RPC surfaces. The current tranche keeps the desktop implementation intact while moving authorization status, token refresh, model discovery, and portable credential operations behind the common core.
+
+Portable SIWC credential bundles are encrypted and versioned. Secret-bearing bundle contents are written only to the requested file; command receipts and JSON-RPC results remain redacted.
+
+Automation examples:
+
+```powershell
+$env:SUPRACHAT_BUNDLE_PASSPHRASE = "<strong secret>"
+
+SupraChat.Automation.exe auth-status
+
+SupraChat.Automation.exe auth-export --confirm `
+  --output .\suprachat-siwc.json `
+  --passphrase-env SUPRACHAT_BUNDLE_PASSPHRASE
+
+SupraChat.Automation.exe auth-bundle-inspect `
+  --input .\suprachat-siwc.json
+
+SupraChat.Automation.exe auth-import --confirm `
+  --input .\suprachat-siwc.json `
+  --passphrase-env SUPRACHAT_BUNDLE_PASSPHRASE
+```
+
+Equivalent agent methods are:
+
+- `auth/status`
+- `auth/bundle/inspect`
+- `auth/export`
+- `auth/import`
+
+Export/import are consequential operations and require explicit confirmation. Passphrases are supplied from environment variables for automation/agent sessions rather than command-line values.
+
+The first qualified bundle mode is an explicit encrypted **copy**. Multiple copies hold renewable authority and can race the same rotating refresh lineage if independently refreshed. Safe simultaneous ephemeral consumption through a persistent credential broker is intentionally deferred to a later qualification tranche.
