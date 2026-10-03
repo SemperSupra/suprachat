@@ -1000,6 +1000,16 @@ jobs:
           $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
           Start-Sleep -Seconds 8
 
+          # A fatal exception can leave a process/window alive while its UI thread is stuck.
+          if ((Test-Path $startupLog) -and
+              (Select-String -LiteralPath $startupLog -SimpleMatch 'fatal-startup-exception' -Quiet)) {
+            throw 'SupraChat reported a fatal startup exception despite process aliveness.'
+          }
+          $p.Refresh()
+          if (-not $p.HasExited -and ($p.MainWindowHandle -eq 0 -or -not $p.Responding)) {
+            throw 'SupraChat launch did not produce a responsive native window.'
+          }
+
           if ($p.HasExited) {
             Write-Host "SupraChat exited during launch smoke with code $($p.ExitCode)"
             if (Test-Path $startupLog) { Get-Content $startupLog }
