@@ -409,6 +409,14 @@ function Invoke-SelfTest {
 $workspaceRoot = Get-WorkspaceRoot -RequestedRoot $Root
 $plan = Get-WorkspacePlan -WorkspaceRoot $workspaceRoot
 
+$rootGitMarker = Join-Path $plan.Root '.git'
+if (Test-Path -LiteralPath $rootGitMarker) {
+    throw ("Workspace root '{0}' resolves to an existing Git repository. " +
+           "On Windows a legacy sibling checkout named 'suprachat' can collide " +
+           "case-insensitively with the intended container 'SupraChat'. " +
+           "Relocate the legacy checkout before running setup.") -f $plan.Root
+}
+
 if ($Mode -eq 'SelfTest') {
     Invoke-SelfTest
     exit 0
