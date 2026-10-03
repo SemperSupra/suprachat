@@ -8,7 +8,6 @@ public sealed record SupraChatAuthStatus(
     int ScopeCount,
     long CredentialGeneration,
     string? ClientIdSuffix,
-    string? SubjectFingerprint,
     bool EarliestRefreshMetadataPresent);
 
 public sealed record CredentialBundleReceipt(
@@ -18,7 +17,6 @@ public sealed record CredentialBundleReceipt(
     string Mode,
     DateTimeOffset Timestamp,
     string ClientIdSuffix,
-    string SubjectFingerprint,
     long CredentialGeneration,
     bool ContainsTokenMaterial);
 
@@ -171,7 +169,6 @@ public sealed class SupraChatCore
                 ScopeCount: 0,
                 CredentialGeneration: 0,
                 ClientIdSuffix: null,
-                SubjectFingerprint: null,
                 EarliestRefreshMetadataPresent: false)
             : new(
                 Schema,
@@ -181,7 +178,6 @@ public sealed class SupraChatCore
                 ScopeCount: credential.Scopes.Length,
                 CredentialGeneration: Math.Max(1, credential.Generation),
                 ClientIdSuffix: Suffix(credential.ClientId),
-                SubjectFingerprint: Fingerprint(credential.Subject),
                 EarliestRefreshMetadataPresent: !string.IsNullOrWhiteSpace(credential.EarliestRefreshAtRaw));
 
     private static CredentialBundleReceipt Receipt(
@@ -196,17 +192,10 @@ public sealed class SupraChatCore
             summary.Mode,
             DateTimeOffset.UtcNow,
             summary.ClientIdSuffix,
-            summary.SubjectFingerprint,
             Math.Max(1, generation),
             ContainsTokenMaterial: false);
 
     private static string Suffix(string value) =>
         value[^Math.Min(value.Length, 12)..];
 
-    private static string Fingerprint(string subject)
-    {
-        var bytes = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(subject));
-        return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
-    }
 }
