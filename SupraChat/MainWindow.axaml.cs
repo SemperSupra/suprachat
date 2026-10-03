@@ -13,6 +13,7 @@ public partial class MainWindow : Window
 {
     private readonly SiwcClient _siwc = new();
     private readonly ResponsesClient _responses = new();
+    private readonly SupraChatCore _core = new();
     private readonly List<ResponseAttachment> _attachments = new();
     private readonly Queue<CodexProtocolEvent> _pendingServerRequests = new();
 
@@ -408,6 +409,85 @@ public partial class MainWindow : Window
     private async void AddAccount_Click(object? sender, RoutedEventArgs e) =>
         await CompleteSignInAsync(promptConsent: false, forceNewRegistration: true);
 
+    private async void ExportCredentialBundle_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var top = TopLevel.GetTopLevel(this)
+                ?? throw new InvalidOperationException("No desktop storage provider is available.");
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Export encrypted SupraChat credential bundle",
+                SuggestedFileName = $"suprachat-siwc-{DateTime.UtcNow:yyyyMMddTHHmmssZ}.json"
+            });
+            if (file is null)
+                return;
+
+            var receipt = await _core.ExportCredentialAsync(
+                file.Path.LocalPath,
+                CredentialPassphraseBox.Text ?? string.Empty);
+            CredentialBundleStatus.Text =
+                $"Encrypted credential bundle exported to {receipt.Path}. " +
+                $"Generation={receipt.CredentialGeneration}; no token material was written to the receipt.";
+        }
+        catch (Exception ex)
+        {
+            CredentialBundleStatus.Text = $"Credential export failed: {ex.Message}";
+        }
+        finally
+        {
+            CredentialPassphraseBox.Text = string.Empty;
+        }
+    }
+
+    private async void ImportCredentialBundle_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var top = TopLevel.GetTopLevel(this)
+                ?? throw new InvalidOperationException("No desktop storage provider is available.");
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Import encrypted SupraChat credential bundle",
+                AllowMultiple = false
+            });
+            var file = files.FirstOrDefault();
+            if (file is null)
+                return;
+
+            var priorToken = _credential?.AccessToken;
+            var receipt = await _core.ImportCredentialAsync(
+                file.Path.LocalPath,
+                CredentialPassphraseBox.Text ?? string.Empty);
+
+            _credential = await CredentialStore.TryLoadAsync();
+            await RefreshRegistrationsAsync(_credential?.ClientId);
+            if (_credential is not null &&
+                !string.Equals(priorToken, _credential.AccessToken, StringComparison.Ordinal))
+            {
+                await StopCodexAsync();
+                await StopResponsesWebSocketAsync();
+            }
+
+            CredentialBundleStatus.Text =
+                $"Encrypted credential bundle imported. Generation={receipt.CredentialGeneration}; " +
+                "this runtime kept its own host identity.";
+            AuthStatus.Text = _credential is { HasPlanUsage: true }
+                ? "Imported ChatGPT-plan authorization is ready."
+                : "Credential bundle imported; ChatGPT-plan usage is not currently granted.";
+            if (_credential?.HasPlanUsage == true)
+                await PopulateModelsAsync();
+        }
+        catch (Exception ex)
+        {
+            CredentialBundleStatus.Text = $"Credential import failed: {ex.Message}";
+        }
+        finally
+        {
+            CredentialPassphraseBox.Text = string.Empty;
+        }
+    }
+
     private async void EnablePlanUsage_Click(object? sender, RoutedEventArgs e) =>
         await CompleteSignInAsync(promptConsent: true);
 
@@ -582,7 +662,8 @@ public partial class MainWindow : Window
         await DogfoodObservability.RecordOperationAsync("responses", "model-discovery", "start", operation);
         try
         {
-            var models = await _responses.ListModelsAsync(_credential.AccessToken);
+            var models = await _core.ListModelsAsync(operation.CorrelationId);
+            _credential = await CredentialStore.TryLoadAsync();
             ModelBox.ItemsSource = models;
             ModelBox.SelectedItem ??= models.FirstOrDefault();
             AuthStatus.Text = $"Agent Lab authorized; {models.Count} model(s) visible to this ChatGPT-plan grant.";
@@ -1399,25 +1480,25 @@ public partial class MainWindow : Window
 
     private async Task EnsureCredentialAsync(string? correlationId = null)
     {
-        _credential ??= await CredentialStore.TryLoadAsync();
-        if (_credential is null)
-            throw new InvalidOperationException("Use Continue with ChatGPT first.");
-
-        var priorToken = _credential.AccessToken;
-        var refreshed = await _siwc.RefreshIfNeededAsync(_credential, correlationId: correlationId);
-        if (!ReferenceEquals(refreshed, _credential))
+        var priorToken = _credential?.AccessToken;
+        try
         {
-            _credential = refreshed;
-            await CredentialStore.SaveAsync(_credential);
-            if (!string.Equals(priorToken, refreshed.AccessToken, StringComparison.Ordinal))
-            {
-                await StopCodexAsync();
-                await StopResponsesWebSocketAsync();
-            }
+            _credential = await _core.GetUsableCredentialAsync(
+                requirePlanUsage: true,
+                correlationId: correlationId);
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("No local ChatGPT authorization", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Use Continue with ChatGPT first.", ex);
         }
 
-        if (!_credential.HasPlanUsage)
-            throw new InvalidOperationException("ChatGPT-plan usage is not granted. Use Enable plan usage.");
+        if (priorToken is not null &&
+            !string.Equals(priorToken, _credential.AccessToken, StringComparison.Ordinal))
+        {
+            await StopCodexAsync();
+            await StopResponsesWebSocketAsync();
+        }
     }
 
     private async Task<CodexAppServerClient> EnsureCodexAsync()
