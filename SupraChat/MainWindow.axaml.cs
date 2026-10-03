@@ -540,7 +540,7 @@ public partial class MainWindow : Window
                 promptConsent,
                 registration,
                 operation.CorrelationId);
-            await CredentialStore.SaveAsync(_credential);
+            _credential = await _core.CommitInteractiveCredentialAsync(_credential);
             await RefreshRegistrationsAsync(_credential.ClientId);
 
             if (!string.Equals(priorToken, _credential.AccessToken, StringComparison.Ordinal) ||
