@@ -9,7 +9,6 @@ public sealed record PortableCredentialBundleEnvelope(
     string Mode,
     DateTimeOffset ExportedAt,
     string ClientIdSuffix,
-    string SubjectFingerprint,
     string Kdf,
     int KdfIterations,
     string Cipher,
@@ -23,7 +22,6 @@ public sealed record PortableCredentialBundleSummary(
     string Mode,
     DateTimeOffset ExportedAt,
     string ClientIdSuffix,
-    string SubjectFingerprint,
     string Cipher);
 
 public static class PortableCredentialBundle
@@ -77,7 +75,6 @@ public static class PortableCredentialBundle
             mode,
             timestamp,
             Suffix(credential.ClientId),
-            Fingerprint(credential.Subject),
             "pbkdf2-sha256",
             KdfIterations,
             "aes-256-gcm",
@@ -129,7 +126,6 @@ public static class PortableCredentialBundle
             envelope.Mode,
             envelope.ExportedAt,
             envelope.ClientIdSuffix,
-            envelope.SubjectFingerprint,
             envelope.Cipher);
     }
 
@@ -179,12 +175,6 @@ public static class PortableCredentialBundle
 
     private static string Suffix(string clientId) =>
         clientId[^Math.Min(clientId.Length, 12)..];
-
-    private static string Fingerprint(string subject)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(subject));
-        return Convert.ToHexString(hash)[..16].ToLowerInvariant();
-    }
 
     private static void ValidatePassphrase(string passphrase)
     {
