@@ -19,7 +19,9 @@ public sealed record SiwcCredential(
     string TokenType,
     long ExpiresIn,
     string[] Scopes,
-    DateTimeOffset SavedAt)
+    DateTimeOffset SavedAt,
+    long Generation = 1,
+    string? EarliestRefreshAtRaw = null)
 {
     public bool HasPlanUsage => Scopes.Contains(SiwcProtocol.RequiredPlanScope, StringComparer.Ordinal);
     public DateTimeOffset ExpiresAt => SavedAt.AddSeconds(ExpiresIn);
@@ -151,6 +153,7 @@ public sealed class SiwcClient
         var tokenType = root.TryGetProperty("token_type", out var tt) ? tt.GetString() ?? "Bearer" : "Bearer";
         var expiresIn = root.TryGetProperty("expires_in", out var ei) ? ei.GetInt64() : 3600;
         var scopes = ParseScopes(root, Array.Empty<string>());
+        var earliestRefreshAtRaw = OptionalRaw(root, "earliest_refresh_at");
 
         var principal = await ValidateIdTokenAsync(idToken, issuedClientId, attempt.Nonce);
         var subject = principal.FindFirst("sub")?.Value
@@ -182,7 +185,9 @@ public sealed class SiwcClient
             tokenType,
             expiresIn,
             scopes,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            Generation: Math.Max(1, (existing?.Generation ?? 0) + 1),
+            EarliestRefreshAtRaw: earliestRefreshAtRaw);
 
         await DogfoodObservability.RecordOperationAsync(
             "auth",
@@ -241,6 +246,7 @@ public sealed class SiwcClient
             var tokenType = root.TryGetProperty("token_type", out var tt) ? tt.GetString() ?? credential.TokenType : credential.TokenType;
             var expiresIn = root.TryGetProperty("expires_in", out var ei) ? ei.GetInt64() : 3600;
             var scopes = ParseScopes(root, credential.Scopes);
+            var earliestRefreshAtRaw = OptionalRaw(root, "earliest_refresh_at");
 
             return credential with
             {
@@ -249,7 +255,9 @@ public sealed class SiwcClient
                 TokenType = tokenType,
                 ExpiresIn = expiresIn,
                 Scopes = scopes,
-                SavedAt = DateTimeOffset.UtcNow
+                SavedAt = DateTimeOffset.UtcNow,
+                Generation = Math.Max(1, credential.Generation) + 1,
+                EarliestRefreshAtRaw = earliestRefreshAtRaw ?? credential.EarliestRefreshAtRaw
             };
         }
         finally
@@ -352,6 +360,11 @@ public sealed class SiwcClient
         root.TryGetProperty(name, out var value) && value.GetString() is { Length: > 0 } text
             ? text
             : throw new InvalidOperationException($"Token response omitted {name}.");
+
+    private static string? OptionalRaw(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value)
+            ? value.GetRawText()
+            : null;
 
     private static string DiagnosticSuffix(HttpResponseMessage response, string body)
     {
