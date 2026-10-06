@@ -41,6 +41,7 @@ public partial class MainWindow : Window
             await LoadAccessibilityPreferencesAsync();
             RefreshAccessibilityStatus();
             await RefreshMachineSurfaceAsync();
+            RefreshWorkProjection();
             await DogfoodObservability.RecordOperationAsync(
                 "ui",
                 "window-ready",
@@ -192,6 +193,89 @@ public partial class MainWindow : Window
             $"authorization={(credential is null ? "required" : credential.HasPlanUsage ? "plan-ready" : "identity-only")}";
 
         RefreshAudienceParityStatus();
+    }
+
+    private void RefreshWorkProjection_Click(object? sender, RoutedEventArgs e) =>
+        RefreshWorkProjection();
+
+    private void RefreshWorkProjection()
+    {
+        var fixturePath = Path.Combine(
+            AppContext.BaseDirectory,
+            "oracles",
+            "hic-work-projection-issue19-v1.json");
+        var profile = (WorkProjectionProfileBox.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim().ToLowerInvariant()
+            ?? "rich";
+
+        if (!File.Exists(fixturePath))
+        {
+            WorkProjectionMission.Text = "Work projection fixture is not packaged.";
+            WorkProjectionState.Text = $"profile={profile} · fixture=missing";
+            WorkProjectionFrontier.Text = fixturePath;
+            WorkProjectionDetails.Text = "No work projection was derived.";
+            return;
+        }
+
+        try
+        {
+            var snapshot = WorkProjectionEngine.LoadSnapshot(fixturePath);
+            var projection = WorkProjectionEngine.Project(
+                snapshot,
+                WorkProjectionEngine.ContextForProfile(profile));
+
+            WorkProjectionMission.Text = projection.Mission;
+            WorkProjectionState.Text =
+                $"workstream={projection.WorkstreamId} · state={projection.AuthoritativeState} · " +
+                $"disposition={projection.Disposition} · profile={projection.Profile}";
+            WorkProjectionFrontier.Text = projection.Frontier;
+
+            var lines = new List<string>
+            {
+                $"Observed: {projection.ObservedAt:O}",
+                $"Source: {projection.Source.System}:{projection.Source.Locator} generation={projection.Source.Generation}",
+                $"Withheld: items={projection.WithheldItemCount}, captures={projection.WithheldCaptureCount}, actions={projection.WithheldActionCount}",
+                "",
+                "Items"
+            };
+
+            if (projection.Items.Length == 0)
+                lines.Add("- none");
+            foreach (var item in projection.Items)
+            {
+                lines.Add($"- [{item.Kind}] {item.Summary}");
+                if (item.EvidenceRefs.Length > 0)
+                    lines.Add($"  evidence: {string.Join(", ", item.EvidenceRefs)}");
+            }
+
+            lines.Add("");
+            lines.Add("Exploration captures");
+            if (projection.Captures.Length == 0)
+                lines.Add("- none");
+            foreach (var capture in projection.Captures)
+            {
+                lines.Add(
+                    $"- [{capture.Status}/{capture.Kind}] {capture.Summary} · " +
+                    $"promoted={capture.Promoted} · execution-authorized={capture.ExecutionAuthorized}");
+                if (capture.Constraints.Length > 0)
+                    lines.Add($"  constraints: {string.Join(", ", capture.Constraints)}");
+            }
+
+            lines.Add("");
+            lines.Add("Allowed semantic actions");
+            if (projection.AllowedActions.Length == 0)
+                lines.Add("- none");
+            foreach (var action in projection.AllowedActions)
+                lines.Add($"- {action.Id} ({action.Intent}) consequential={action.Consequential}");
+
+            WorkProjectionDetails.Text = string.Join(Environment.NewLine, lines);
+        }
+        catch (Exception ex)
+        {
+            WorkProjectionMission.Text = "Work projection could not be derived.";
+            WorkProjectionState.Text = $"profile={profile} · projection=failed";
+            WorkProjectionFrontier.Text = "Inspect the fixture/contract before using this projection.";
+            WorkProjectionDetails.Text = ex.Message;
+        }
     }
 
     private void RefreshAudienceParityStatus()
