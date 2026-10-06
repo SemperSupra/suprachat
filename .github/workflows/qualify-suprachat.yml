@@ -1144,11 +1144,34 @@ jobs:
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
-                $element = $window.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $idCondition)
+                $element = $null
+                $lastLookupError = $null
+                foreach ($attempt in 1..8) {
+                  try {
+                    # Avalonia can rebuild the UIA subtree while a tab selection is
+                    # materializing. Reacquire the process root each attempt rather
+                    # than retaining a stale AutomationElement across that rebuild.
+                    $processCondition = New-Object System.Windows.Automation.PropertyCondition(
+                      [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                      $p.Id)
+                    $currentWindow = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                      [System.Windows.Automation.TreeScope]::Descendants,
+                      $processCondition)
+                    if ($currentWindow) {
+                      $element = $currentWindow.FindFirst(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        $idCondition)
+                    }
+                    if ($element) { break }
+                  }
+                  catch {
+                    $lastLookupError = $_.Exception.Message
+                  }
+                  Start-Sleep -Milliseconds 250
+                }
                 if (-not $element) {
-                  throw "UI Automation element missing despite semantic peers being exposed: $automationId"
+                  $suffix = if ($lastLookupError) { " Last UIA error: $lastLookupError" } else { "" }
+                  throw "UI Automation element missing despite semantic peers being exposed: $automationId.$suffix"
                 }
 
                 $name = $element.Current.Name
@@ -1179,6 +1202,7 @@ jobs:
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
+                  Start-Sleep -Milliseconds 300
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }
