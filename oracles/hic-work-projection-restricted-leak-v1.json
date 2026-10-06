@@ -1,0 +1,65 @@
+{
+  "schema": "suprachat-authoritative-work-snapshot/v1",
+  "workstream_id": "fixture:restricted-leak-negative",
+  "source": {
+    "system": "fixture",
+    "locator": "oracles/hic-work-projection-restricted-leak-v1.json",
+    "generation": "v1"
+  },
+  "observed_at": "2026-10-06T10:34:19Z",
+  "mission": "Prove restricted projections filter disallowed information before rendering.",
+  "authoritative_state": "QUALIFICATION_FIXTURE",
+  "frontier": "Attempt direct and indirect leakage through summaries, evidence references, captures, and semantic action identifiers.",
+  "disposition": "NOOP",
+  "items": [
+    {
+      "id": "public.safe",
+      "kind": "condition",
+      "summary": "Public-safe condition remains visible.",
+      "information_class": "public",
+      "material": true,
+      "evidence_refs": ["fixture:public-safe"]
+    },
+    {
+      "id": "restricted.secret",
+      "kind": "evidence",
+      "summary": "SUPRACHAT_RESTRICTED_SENTINEL must never appear in restricted projection output.",
+      "information_class": "restricted",
+      "material": true,
+      "evidence_refs": ["fixture:SUPRACHAT_RESTRICTED_SENTINEL:evidence"]
+    }
+  ],
+  "captures": [
+    {
+      "id": "capture.restricted",
+      "kind": "observation",
+      "summary": "SUPRACHAT_RESTRICTED_SENTINEL capture detail.",
+      "status": "candidate",
+      "information_class": "restricted",
+      "related_workstreams": ["SUPRACHAT_RESTRICTED_SENTINEL"],
+      "constraints": [],
+      "promoted": false,
+      "execution_authorized": false
+    }
+  ],
+  "actions": [
+    {
+      "id": "capture.add",
+      "intent": "capture",
+      "information_class": "public",
+      "consequential": false
+    },
+    {
+      "id": "work.inspect.public",
+      "intent": "orient",
+      "information_class": "public",
+      "consequential": false
+    },
+    {
+      "id": "SUPRACHAT_RESTRICTED_SENTINEL.action",
+      "intent": "command",
+      "information_class": "restricted",
+      "consequential": true
+    }
+  ]
+}
