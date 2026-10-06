@@ -179,6 +179,10 @@ internal static class Program
             "auth/bundle/inspect",
             "auth/export",
             "auth/import",
+            "broker/status",
+            "lease/acquire",
+            "lease/status",
+            "lease/release",
             "models/list",
             "realtime/voices",
             "remote/status",
@@ -621,6 +625,7 @@ internal static class Program
     private static async Task<int> RunStdioAsync()
     {
         Console.Error.WriteLine("{\"suprachat\":\"stdio-ready\",\"schema\":\"suprachat-jsonrpc/v1\"}");
+        var brokerSession = new BrokerStdioSession(Core);
 
         try
         {
@@ -644,7 +649,7 @@ internal static class Program
                     if (string.IsNullOrWhiteSpace(method))
                         throw new MachineException(2, "INVALID_REQUEST", "JSON-RPC method is required.");
 
-                    var result = await DispatchRpcAsync(method, parameters);
+                    var result = await DispatchRpcAsync(method, parameters, brokerSession);
                     response = new
                     {
                         jsonrpc = "2.0",
@@ -678,7 +683,10 @@ internal static class Program
         return 0;
     }
 
-    private static async Task<object> DispatchRpcAsync(string method, JsonElement? parameters)
+    private static async Task<object> DispatchRpcAsync(
+        string method,
+        JsonElement? parameters,
+        BrokerStdioSession brokerSession)
     {
         return method switch
         {
@@ -697,7 +705,11 @@ internal static class Program
             "auth/bundle/inspect" => await RpcAuthBundleInspectAsync(parameters),
             "auth/export" => await RpcAuthExportAsync(parameters),
             "auth/import" => await RpcAuthImportAsync(parameters),
-            "models/list" => await ModelsAsync(),
+            "broker/status" => BrokerStatusView(await brokerSession.StatusAsync()),
+            "lease/acquire" => await RpcBrokerAcquireAsync(brokerSession, parameters),
+            "lease/status" => await RpcBrokerLeaseStatusAsync(brokerSession, parameters),
+            "lease/release" => await RpcBrokerReleaseAsync(brokerSession, parameters),
+            "models/list" => await RpcBrokerModelsAsync(brokerSession, parameters),
             "realtime/voices" => await RpcCodexReadAsync("thread/realtime/listVoices", emptyParams: true),
             "remote/status" => await RpcCodexReadAsync("remoteControl/status/read", emptyParams: false),
             "remote/enable" => await RpcRemoteEnableAsync(parameters),
@@ -762,6 +774,151 @@ internal static class Program
             path,
             observability = DogfoodObservability.Describe()
         };
+    }
+
+    private static object BrokerStatusView(BrokerStatus status) => new
+    {
+        schema = "suprachat-broker-status/v1",
+        host_id = status.HostId,
+        epoch = status.Epoch,
+        credential_generation = status.CredentialGeneration,
+        credential_present = status.CredentialPresent,
+        refresh_in_progress = status.RefreshInProgress,
+        active_lease_count = status.ActiveLeaseCount
+    };
+
+    private static object? BrokerLeaseViewObject(BrokerLeaseView? lease) =>
+        lease is null
+            ? null
+            : new
+            {
+                lease_id = lease.LeaseId,
+                consumer_id = lease.ConsumerId,
+                capabilities = lease.Capabilities,
+                issued_at = lease.IssuedAt,
+                expires_at = lease.ExpiresAt,
+                epoch = lease.Epoch,
+                credential_generation = lease.CredentialGeneration,
+                state = lease.State.ToString().ToUpperInvariant()
+            };
+
+    private static object BrokerAcquireView(BrokerAcquireResult result) => new
+    {
+        schema = "suprachat-broker-acquire/v1",
+        request_id = result.RequestId,
+        classification = result.Classification,
+        lease = BrokerLeaseViewObject(result.Lease),
+        error = result.Error,
+        replay = result.Replay
+    };
+
+    private static object BrokerReleaseView(BrokerReleaseResult result) => new
+    {
+        schema = "suprachat-broker-release/v1",
+        request_id = result.RequestId,
+        classification = result.Classification,
+        lease_id = result.LeaseId,
+        lease_state = result.LeaseState?.ToString().ToUpperInvariant(),
+        error = result.Error,
+        replay = result.Replay
+    };
+
+    private static async Task<object> RpcBrokerAcquireAsync(
+        BrokerStdioSession brokerSession,
+        JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var requestId = RequiredProperty(p, "request_id");
+
+        if (!p.TryGetProperty("capabilities", out var capabilitiesValue) ||
+            capabilitiesValue.ValueKind != JsonValueKind.Array)
+            throw new MachineException(2, "INVALID_PARAMS", "params.capabilities must be a non-empty array of strings.");
+
+        var capabilities = new List<string>();
+        foreach (var value in capabilitiesValue.EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+                throw new MachineException(2, "INVALID_PARAMS", "params.capabilities entries must be non-empty strings.");
+            capabilities.Add(value.GetString()!);
+        }
+
+        if (capabilities.Count == 0)
+            throw new MachineException(2, "INVALID_PARAMS", "params.capabilities must be non-empty.");
+
+        TimeSpan? ttl = null;
+        if (p.TryGetProperty("ttl_seconds", out var ttlValue))
+        {
+            if (ttlValue.ValueKind != JsonValueKind.Number ||
+                !ttlValue.TryGetInt32(out var ttlSeconds) ||
+                ttlSeconds <= 0)
+                throw new MachineException(2, "INVALID_PARAMS", "params.ttl_seconds must be a positive integer.");
+            ttl = TimeSpan.FromSeconds(ttlSeconds);
+        }
+
+        return BrokerAcquireView(
+            await brokerSession.AcquireAsync(requestId, capabilities, ttl).ConfigureAwait(false));
+    }
+
+    private static async Task<object> RpcBrokerLeaseStatusAsync(
+        BrokerStdioSession brokerSession,
+        JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var leaseId = RequiredProperty(p, "lease_id");
+        var lease = await brokerSession.LeaseStatusAsync(leaseId).ConfigureAwait(false);
+        return new
+        {
+            schema = "suprachat-broker-lease-status/v1",
+            lease_id = leaseId,
+            lease = BrokerLeaseViewObject(lease),
+            error = lease is null ? BrokerErrorCodes.LeaseNotFound : null
+        };
+    }
+
+    private static async Task<object> RpcBrokerReleaseAsync(
+        BrokerStdioSession brokerSession,
+        JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        return BrokerReleaseView(
+            await brokerSession.ReleaseAsync(
+                RequiredProperty(p, "request_id"),
+                RequiredProperty(p, "lease_id")).ConfigureAwait(false));
+    }
+
+    private static async Task<object> RpcBrokerModelsAsync(
+        BrokerStdioSession brokerSession,
+        JsonElement? parameters)
+    {
+        if (parameters is null)
+            return await ModelsAsync().ConfigureAwait(false);
+
+        var p = RequireObject(parameters);
+        var leaseId = OptionalString(p, "lease_id");
+        if (leaseId is null)
+            return await ModelsAsync().ConfigureAwait(false);
+
+        var operationId = RequiredProperty(p, "operation_id");
+        var admission = await brokerSession
+            .AdmitAsync(operationId, leaseId, "models.read")
+            .ConfigureAwait(false);
+        if (admission.Error is not null || admission.Admission is null)
+            throw new MachineException(
+                3,
+                admission.Error ?? "BROKER_UNAVAILABLE",
+                "The broker did not admit model discovery for this lease.");
+
+        var result = await ModelsAsync().ConfigureAwait(false);
+        var deliveryError = await brokerSession
+            .ResultDeliveryErrorAsync(admission.Admission)
+            .ConfigureAwait(false);
+        if (deliveryError is not null)
+            throw new MachineException(
+                3,
+                deliveryError,
+                "The broker no longer permits delivery of the admitted model-discovery result.");
+
+        return result;
     }
 
     private static async Task<object> RpcDiagnosticsExportAsync(JsonElement? parameters)

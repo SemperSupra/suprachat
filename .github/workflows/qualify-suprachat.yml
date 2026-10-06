@@ -142,6 +142,48 @@ jobs:
             throw 'Agent diagnostics correlation contract missing.'
           }
 
+          # Public runners deliberately have no SIWC credential. Exercise the
+          # broker adapter in one persistent stdio process and require it to
+          # fail closed without creating renewable authority.
+          $brokerRequests = @(
+            '{"jsonrpc":"2.0","id":4,"method":"broker/status"}',
+            '{"jsonrpc":"2.0","id":5,"method":"lease/acquire","params":{"request_id":"ci-no-credential","capabilities":["models.read"]}}',
+            '{"jsonrpc":"2.0","id":6,"method":"lease/status","params":{"lease_id":"ci-missing-lease"}}',
+            '{"jsonrpc":"2.0","id":7,"method":"lease/release","params":{"request_id":"ci-release-missing","lease_id":"ci-missing-lease"}}'
+          )
+          $brokerLines = $brokerRequests | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'SupraChat broker stdio smoke failed.' }
+          $brokerResponses = @($brokerLines | ForEach-Object { $_ | ConvertFrom-Json })
+          if ($brokerResponses.Count -ne 4) { throw 'Broker stdio response count changed.' }
+
+          $brokerStatus = $brokerResponses | Where-Object { $_.id -eq 4 } | Select-Object -First 1
+          if (-not $brokerStatus -or
+              $brokerStatus.result.schema -ne 'suprachat-broker-status/v1' -or
+              $brokerStatus.result.credential_present -or
+              $brokerStatus.result.credential_generation -ne 0) {
+            throw 'Broker no-credential status did not fail closed.'
+          }
+
+          $brokerAcquire = $brokerResponses | Where-Object { $_.id -eq 5 } | Select-Object -First 1
+          if (-not $brokerAcquire -or
+              $brokerAcquire.result.classification -ne 'REJECTED' -or
+              $brokerAcquire.result.error -ne 'AUTH_REQUIRED' -or
+              $null -ne $brokerAcquire.result.lease) {
+            throw 'Broker acquire did not reject the no-credential runner.'
+          }
+
+          $leaseStatus = $brokerResponses | Where-Object { $_.id -eq 6 } | Select-Object -First 1
+          if (-not $leaseStatus -or $leaseStatus.result.error -ne 'LEASE_NOT_FOUND') {
+            throw 'Broker lease/status missing-lease oracle changed.'
+          }
+
+          $leaseRelease = $brokerResponses | Where-Object { $_.id -eq 7 } | Select-Object -First 1
+          if (-not $leaseRelease -or
+              $leaseRelease.result.classification -ne 'REJECTED' -or
+              $leaseRelease.result.error -ne 'LEASE_NOT_FOUND') {
+            throw 'Broker lease/release missing-lease oracle changed.'
+          }
+
       - name: Publish self-contained application
         shell: pwsh
         run: |
