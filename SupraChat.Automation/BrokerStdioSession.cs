@@ -27,7 +27,22 @@ internal sealed class BrokerStdioSession
         IReadOnlyList<string> capabilities,
         TimeSpan? ttl)
     {
-        var broker = await ObserveAsync(requireUsableCredential: true).ConfigureAwait(false);
+        CredentialBrokerCore broker;
+        try
+        {
+            broker = await ObserveAsync(requireUsableCredential: true).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            broker = await ObserveAsync(requireUsableCredential: false).ConfigureAwait(false);
+            return new BrokerAcquireResult(
+                requestId,
+                "REJECTED",
+                Lease: null,
+                Error: BrokerErrorCodes.AuthRequired,
+                Replay: false);
+        }
+
         return broker.Acquire(new BrokerAcquireRequest(
             requestId,
             ConsumerId,
