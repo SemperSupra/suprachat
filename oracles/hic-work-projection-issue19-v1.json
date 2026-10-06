@@ -1,0 +1,73 @@
+{
+  "schema": "suprachat-authoritative-work-snapshot/v1",
+  "workstream_id": "github:SemperSupra/suprachat#19",
+  "source": {
+    "system": "github",
+    "locator": "SemperSupra/suprachat#19",
+    "generation": "issue-19@2026-10-06T10:34:19Z"
+  },
+  "observed_at": "2026-10-06T10:34:19Z",
+  "mission": "Prove one semantic HiC work system can project the same authoritative workstream across rich, compact, restricted, automation, agent, and accessible-human surfaces.",
+  "authoritative_state": "READY_FOR_BOUNDED_RDTE",
+  "frontier": "Implement the pure projection contract and machine-semantic fixture rep before adding substantial GUI layout.",
+  "disposition": "READY",
+  "items": [
+    {
+      "id": "condition.no-new-authority",
+      "kind": "condition",
+      "summary": "The projection is derived state and must not become workstream authority.",
+      "information_class": "public",
+      "material": true,
+      "evidence_refs": ["github:SemperSupra/suprachat#19:comment-6014576884"]
+    },
+    {
+      "id": "change.mobile-capture",
+      "kind": "change",
+      "summary": "Mobile is a first-class exploration, discovery, ideation, and capture surface as well as an orientation and command surface.",
+      "information_class": "public",
+      "material": true,
+      "evidence_refs": ["github:SemperSupra/suprachat#19:comment-6014418228"]
+    },
+    {
+      "id": "detail.layout-future",
+      "kind": "detail",
+      "summary": "Detailed multi-pane layout remains downstream of the semantic projection rep.",
+      "information_class": "public",
+      "material": false,
+      "evidence_refs": ["github:SemperSupra/suprachat#19"]
+    }
+  ],
+  "captures": [
+    {
+      "id": "capture.same-primitive",
+      "kind": "hypothesis",
+      "summary": "X and Y may share the same primitive; explore the relationship without coupling their schedules.",
+      "status": "candidate",
+      "information_class": "public",
+      "related_workstreams": ["X", "Y"],
+      "constraints": ["do-not-couple-schedules"],
+      "promoted": false,
+      "execution_authorized": false
+    }
+  ],
+  "actions": [
+    {
+      "id": "capture.add",
+      "intent": "capture",
+      "information_class": "public",
+      "consequential": false
+    },
+    {
+      "id": "work.defer",
+      "intent": "command",
+      "information_class": "public",
+      "consequential": false
+    },
+    {
+      "id": "work.inspect.public",
+      "intent": "orient",
+      "information_class": "public",
+      "consequential": false
+    }
+  ]
+}
