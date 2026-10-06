@@ -10,6 +10,8 @@ static void Require(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+BrokerContractTests.Run();
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
