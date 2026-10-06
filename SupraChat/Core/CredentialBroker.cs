@@ -350,11 +350,7 @@ public sealed class CredentialBrokerCore
     public void ObserveCredentialPresence(bool present)
     {
         lock (_gate)
-        {
             _credentialPresent = present;
-            if (!present)
-                _credentialGeneration = 0;
-        }
     }
 
     public string ToPrivacySafeJson(object value)
