@@ -566,6 +566,20 @@ Require(restrictedProjection.AllowedActions.All(x =>
 Require(JsonSerializer.Serialize(workSnapshot) == workSnapshotBefore,
     "projection mutated authoritative source state");
 
+var malformedSnapshotRejected = false;
+try
+{
+    WorkProjectionEngine.Project(
+        workSnapshot with { Items = null! },
+        WorkProjectionEngine.ContextForProfile("compact"));
+}
+catch (InvalidOperationException)
+{
+    malformedSnapshotRejected = true;
+}
+Require(malformedSnapshotRejected,
+    "projection must fail closed when required semantic arrays are absent");
+
 var noOpProjection = WorkProjectionEngine.Project(
     workSnapshot with { Disposition = "NOOP" },
     WorkProjectionEngine.ContextForProfile("compact"));
