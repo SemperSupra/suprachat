@@ -186,13 +186,13 @@ Before broker v1 is considered qualified:
 
 ## Dependency gate
 
-Implementation is blocked until:
+Satisfied 2026-10-06:
 
-1. supplemental local UIA passphrase-readback issue #15 passes;
-2. PR #8 is merged by controller authority;
-3. canonical main is reconciled and green.
+1. supplemental local UIA passphrase-readback issue #15 is CLOSED / PASS;
+2. PR #8 was merged by controller authority;
+3. canonical main commit `250e5ef9d2a3017e8374d1a8243429abcc54eaf0` has tree `57bbe69e46a3c21349868cc20541c0b621ea514f`, exactly matching combined PR #8 head `6b93c979ed6711216a5fbd08912e3d80699be067`, which passed run `37498458905`.
 
-Design/review may proceed before those gates provided it does not modify PR #8.
+The first implementation rep remains deliberately transport-independent. Remote adapters and consumer fan-out still require subsequent evidence.
 
 ## Remote bootstrap boundary
 
