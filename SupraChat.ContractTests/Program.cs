@@ -419,7 +419,9 @@ foreach (var marker in new[]
     "\"diagnostics\"",
     "\"diagnostics-export\"",
     "\"diagnostics/read\"",
-    "\"diagnostics/export\""
+    "\"diagnostics/export\"",
+    "\"work-projection\"",
+    "\"work/projection/read\""
 })
 {
     Require(automationSource.Contains(marker, StringComparison.Ordinal),
