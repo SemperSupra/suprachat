@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Xml.Linq;
+using Avalonia.Automation.Peers;
+using Avalonia.Automation.Provider;
+using SupraChat;
 using SupraChat.Core;
 
 static void Require(bool condition, string message)
@@ -402,6 +405,19 @@ Require(accessibilityDoc.Contains("Accessibility regressions are qualification f
 var mainWindowXamlPath = Path.Combine("SupraChat", "MainWindow.axaml");
 Require(File.Exists(mainWindowXamlPath), "MainWindow accessibility surface missing");
 var mainWindowXaml = File.ReadAllText(mainWindowXamlPath);
+Require(mainWindowXaml.Contains("<local:SecurePassphraseTextBox x:Name=\"CredentialPassphraseBox\"", StringComparison.Ordinal),
+    "portable credential passphrase must use the hardened secure textbox");
+Require(!mainWindowXaml.Contains("<TextBox x:Name=\"CredentialPassphraseBox\"", StringComparison.Ordinal),
+    "portable credential passphrase regressed to the stock TextBox automation peer");
+
+var securePassphrase = new SecurePassphraseTextBox();
+Require(securePassphrase.PasswordChar == '●' && !securePassphrase.RevealPassword,
+    "secure passphrase textbox must mask by default");
+var securePassphrasePeer = ControlAutomationPeer.CreatePeerForElement(securePassphrase);
+Require(securePassphrasePeer.GetAutomationControlType() == AutomationControlType.Edit,
+    "secure passphrase textbox must remain an accessible edit control");
+Require(securePassphrasePeer.GetProvider<IValueProvider>() is null,
+    "secure passphrase textbox must not expose secret text through automation ValuePattern");
 foreach (var marker in new[]
 {
     "AutomationProperties.AutomationId=\"SupraChat.MainWindow\"",
