@@ -32,7 +32,9 @@ internal sealed class BrokerStdioSession
         {
             broker = await ObserveAsync(requireUsableCredential: true).ConfigureAwait(false);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("No local ChatGPT authorization", StringComparison.Ordinal) ||
+            ex.Message.Contains(SiwcProtocol.RequiredPlanScope, StringComparison.Ordinal))
         {
             broker = await ObserveAsync(requireUsableCredential: false).ConfigureAwait(false);
             return new BrokerAcquireResult(
