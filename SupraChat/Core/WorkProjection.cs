@@ -68,20 +68,24 @@ public static class WorkProjectionEngine
     {
         Validate(snapshot);
 
-        var visibleItems = snapshot.Items
+        var classVisibleItems = snapshot.Items
             .Where(x => context.AllowedInformationClasses.Contains(x.InformationClass))
+            .ToArray();
+        var visibleItems = classVisibleItems
             .Where(x => context.RichDetail || x.Material)
             .Select(x => context.RichDetail
                 ? x
                 : x with { EvidenceRefs = Array.Empty<string>() })
             .ToArray();
 
-        var visibleCaptures = snapshot.Captures
+        var classVisibleCaptures = snapshot.Captures
             .Where(x => context.AllowedInformationClasses.Contains(x.InformationClass))
             .ToArray();
+        var visibleCaptures = classVisibleCaptures;
 
         var classVisibleActions = snapshot.Actions
-            .Where(x => context.AllowedInformationClasses.Contains(x.InformationClass));
+            .Where(x => context.AllowedInformationClasses.Contains(x.InformationClass))
+            .ToArray();
         var visibleActions = (context.AllowedActionIds is null
                 ? classVisibleActions
                 : classVisibleActions.Where(x => context.AllowedActionIds.Contains(x.Id)))
@@ -100,8 +104,9 @@ public static class WorkProjectionEngine
             visibleItems,
             visibleCaptures,
             visibleActions,
-            snapshot.Items.Length - visibleItems.Length,
-            snapshot.Captures.Length - visibleCaptures.Length,
+            classVisibleItems.Length - visibleItems.Length,
+            snapshot.Items.Length - classVisibleItems.Length,
+            snapshot.Captures.Length - classVisibleCaptures.Length,
             snapshot.Actions.Length - visibleActions.Length);
     }
 
@@ -118,11 +123,22 @@ public static class WorkProjectionEngine
             throw new InvalidOperationException(
                 "Work snapshot must identify its workstream, mission, authoritative state, and frontier.");
 
+        if (snapshot.Source is null ||
+            string.IsNullOrWhiteSpace(snapshot.Source.System) ||
+            string.IsNullOrWhiteSpace(snapshot.Source.Locator) ||
+            string.IsNullOrWhiteSpace(snapshot.Source.Generation) ||
+            snapshot.Items is null ||
+            snapshot.Captures is null ||
+            snapshot.Actions is null)
+            throw new InvalidOperationException(
+                "Work snapshot must include source identity plus item, capture, and action arrays.");
+
         foreach (var datum in snapshot.Items)
         {
             if (string.IsNullOrWhiteSpace(datum.Id) ||
                 string.IsNullOrWhiteSpace(datum.Kind) ||
-                string.IsNullOrWhiteSpace(datum.InformationClass))
+                string.IsNullOrWhiteSpace(datum.InformationClass) ||
+                datum.EvidenceRefs is null)
                 throw new InvalidOperationException("Work snapshot contains an invalid item.");
         }
 
@@ -130,7 +146,9 @@ public static class WorkProjectionEngine
         {
             if (string.IsNullOrWhiteSpace(capture.Id) ||
                 string.IsNullOrWhiteSpace(capture.Kind) ||
-                string.IsNullOrWhiteSpace(capture.InformationClass))
+                string.IsNullOrWhiteSpace(capture.InformationClass) ||
+                capture.RelatedWorkstreams is null ||
+                capture.Constraints is null)
                 throw new InvalidOperationException("Work snapshot contains an invalid capture.");
         }
 
@@ -206,6 +224,7 @@ public sealed record HumanWorkProjection(
     WorkProjectionDatum[] Items,
     WorkProjectionCapture[] Captures,
     WorkProjectionAction[] AllowedActions,
-    int WithheldItemCount,
-    int WithheldCaptureCount,
-    int WithheldActionCount);
+    int SuppressedDetailItemCount,
+    int RestrictedItemCount,
+    int RestrictedCaptureCount,
+    int UnavailableActionCount);
