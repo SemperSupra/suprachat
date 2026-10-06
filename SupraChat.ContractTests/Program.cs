@@ -548,6 +548,12 @@ Require(richProjection.Items.Length > compactProjection.Items.Length,
     "compact projection did not reduce non-material detail");
 Require(compactProjection.Items.All(x => x.EvidenceRefs.Length == 0),
     "compact projection retained rich evidence references");
+Require(compactProjection.SuppressedDetailItemCount == 1,
+    "compact projection did not distinguish attention/detail suppression");
+Require(compactProjection.RestrictedItemCount == 0 &&
+        compactProjection.RestrictedCaptureCount == 0 &&
+        compactProjection.UnavailableActionCount == 0,
+    "compact projection incorrectly reported access/actuator restriction");
 Require(richProjection.Captures.Length == 1 &&
         !richProjection.Captures[0].Promoted &&
         !richProjection.Captures[0].ExecutionAuthorized,
@@ -584,9 +590,11 @@ Require(leakRichJson.Contains(RestrictedSentinel, StringComparison.Ordinal),
     "negative fixture did not expose sentinel in rich projection");
 Require(!leakRestrictedJson.Contains(RestrictedSentinel, StringComparison.Ordinal),
     "restricted projection leaked disallowed information through a derived field");
-Require(leakRestricted.WithheldItemCount > 0 &&
-        leakRestricted.WithheldCaptureCount > 0 &&
-        leakRestricted.WithheldActionCount > 0,
-    "restricted projection did not report withheld semantic content");
+Require(leakRestricted.SuppressedDetailItemCount == 0,
+    "restricted leak fixture unexpectedly suppressed detail for attention bandwidth");
+Require(leakRestricted.RestrictedItemCount > 0 &&
+        leakRestricted.RestrictedCaptureCount > 0 &&
+        leakRestricted.UnavailableActionCount > 0,
+    "restricted projection did not report restricted/unavailable semantic content");
 
 Console.WriteLine("SupraChat contract checks PASS");
