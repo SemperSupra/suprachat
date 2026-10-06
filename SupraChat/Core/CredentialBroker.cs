@@ -126,7 +126,7 @@ public sealed class CredentialBrokerCore
     {
         if (string.IsNullOrWhiteSpace(hostId))
             throw new ArgumentException("Broker host identity is required.", nameof(hostId));
-        if (credentialGeneration < 1)
+        if (credentialGeneration < 0 || (credentialPresent && credentialGeneration < 1))
             throw new ArgumentOutOfRangeException(nameof(credentialGeneration));
         if (epoch < 1)
             throw new ArgumentOutOfRangeException(nameof(epoch));
@@ -333,11 +333,28 @@ public sealed class CredentialBrokerCore
     }
 
     // Observation input from the owning credential subsystem. This does not
-    // create, refresh, persist, or transfer renewable credentials.
+    // create, refresh, persist, or transfer renewable credentials. Generation
+    // validity remains the CredentialStore/SiwcClient owner's responsibility.
+    public void ObserveCredentialState(bool present, long generation)
+    {
+        if (generation < 0 || (present && generation < 1))
+            throw new ArgumentOutOfRangeException(nameof(generation));
+
+        lock (_gate)
+        {
+            _credentialPresent = present;
+            _credentialGeneration = present ? generation : 0;
+        }
+    }
+
     public void ObserveCredentialPresence(bool present)
     {
         lock (_gate)
+        {
             _credentialPresent = present;
+            if (!present)
+                _credentialGeneration = 0;
+        }
     }
 
     public string ToPrivacySafeJson(object value)
@@ -377,6 +394,8 @@ public sealed class CredentialBrokerCore
             return BrokerErrorCodes.ConsumerBindingFailed;
         if (!lease.Capabilities.Contains(capability, StringComparer.Ordinal))
             return BrokerErrorCodes.CapabilityDenied;
+        if (!_credentialPresent)
+            return BrokerErrorCodes.AuthRequired;
         return null;
     }
 
