@@ -168,9 +168,6 @@ public sealed class CredentialBrokerCore
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!_credentialPresent)
-            return AcquireError(request.RequestId, BrokerErrorCodes.AuthRequired);
-
         var capabilities = request.Capabilities
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
@@ -195,6 +192,8 @@ public sealed class CredentialBrokerCore
             ttl.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
             string.Join(",", capabilities));
 
+        // Once an acquire request is accepted, an exact replay must return the
+        // same logical lease even if current credential readiness later changes.
         if (_acquireRequests.TryGetValue(request.RequestId, out var existing))
         {
             if (!string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal))
@@ -207,6 +206,9 @@ public sealed class CredentialBrokerCore
                 Error: null,
                 Replay: true);
         }
+
+        if (!_credentialPresent)
+            return AcquireError(request.RequestId, BrokerErrorCodes.AuthRequired);
 
         var now = _clock();
         var leaseId = $"lease-{++_leaseSequence:D6}";
@@ -303,14 +305,9 @@ public sealed class CredentialBrokerCore
         checked { _epoch++; }
     }
 
-    public void SetCredentialPresence(bool present) => _credentialPresent = present;
-
-    public void AdvanceCredentialGeneration(long generation)
-    {
-        if (generation < _credentialGeneration)
-            throw new InvalidOperationException(BrokerErrorCodes.StaleGeneration);
-        _credentialGeneration = generation;
-    }
+    // Observation input from the owning credential subsystem. This does not
+    // create, refresh, persist, or transfer renewable credentials.
+    public void ObserveCredentialPresence(bool present) => _credentialPresent = present;
 
     public string ToPrivacySafeJson(object value)
     {
