@@ -450,6 +450,60 @@
 
             <Separator Margin="0,12,0,8" />
 
+            <TextBlock FontSize="18" FontWeight="SemiBold" Text="HiC work projection (RDTE)"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="WorkProjection.Heading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Derived view of one authoritative workstream. Changing the profile changes detail/disclosure projection only; it does not create a second workstream or mutate authority." />
+            <TextBlock x:Name="WorkProjectionProfileLabel"
+                       FontWeight="SemiBold"
+                       Text="Projection profile" />
+            <WrapPanel Orientation="Horizontal">
+              <ComboBox x:Name="WorkProjectionProfileBox"
+                        Width="220"
+                        Margin="0,0,8,8"
+                        SelectedIndex="0"
+                        AutomationProperties.AutomationId="WorkProjection.Profile"
+                        AutomationProperties.LabeledBy="{Binding #WorkProjectionProfileLabel}"
+                        AutomationProperties.HelpText="Choose rich, compact, or restricted projection semantics for the same workstream.">
+                <ComboBoxItem Content="rich" />
+                <ComboBoxItem Content="compact" />
+                <ComboBoxItem Content="restricted" />
+              </ComboBox>
+              <Button Margin="0,0,8,8"
+                      Content="Refresh projection"
+                      Click="RefreshWorkProjection_Click"
+                      AutomationProperties.AutomationId="WorkProjection.Refresh"
+                      AutomationProperties.HelpText="Re-derive the selected work projection from the packaged authoritative-work fixture." />
+            </WrapPanel>
+            <TextBlock x:Name="WorkProjectionMission"
+                       TextWrapping="Wrap"
+                       Text="Work projection mission not loaded."
+                       AutomationProperties.AutomationId="WorkProjection.Mission"
+                       AutomationProperties.Name="Work projection mission" />
+            <TextBlock x:Name="WorkProjectionState"
+                       TextWrapping="Wrap"
+                       Text="Work projection state not loaded."
+                       AutomationProperties.AutomationId="WorkProjection.State"
+                       AutomationProperties.Name="Work projection authoritative state"
+                       AutomationProperties.LiveSetting="Polite" />
+            <TextBlock x:Name="WorkProjectionFrontier"
+                       TextWrapping="Wrap"
+                       Text="Work projection frontier not loaded."
+                       AutomationProperties.AutomationId="WorkProjection.Frontier"
+                       AutomationProperties.Name="Work projection frontier" />
+            <TextBox x:Name="WorkProjectionDetails"
+                     AcceptsReturn="True"
+                     IsReadOnly="True"
+                     TextWrapping="Wrap"
+                     MinHeight="180"
+                     AutomationProperties.AutomationId="WorkProjection.Details"
+                     AutomationProperties.Name="Work projection details"
+                     AutomationProperties.HelpText="Semantic items, exploration captures, allowed actions, evidence and withheld-content counts for the selected projection." />
+
+            <Separator Margin="0,12,0,8" />
+
             <TextBlock FontSize="18" FontWeight="SemiBold" Text="Accessibility"
                        AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="2"

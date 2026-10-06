@@ -45,6 +45,7 @@ internal static class Program
             {
                 "capabilities" => WriteSuccess(Capabilities()),
                 "accessibility" => WriteSuccess(Accessibility()),
+                "work-projection" => WriteSuccess(WorkProjectionCli(args[1..])),
                 "accessibility-preferences" => WriteSuccess(await AccessibilityPreferencesAsync()),
                 "accessibility-set" => WriteSuccess(await SetAccessibilityPreferencesAsync(args[1..])),
                 "parity" => WriteSuccess(ReadCatalog("audience-parity-20261001.json")),
@@ -100,6 +101,7 @@ internal static class Program
         {
             new { name = "capabilities", description = "Read machine/product capability metadata." },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
+            new { name = "work-projection", description = "Project one authoritative work snapshot for a HiC surface context.", syntax = "work-projection --fixture <snapshot.json> --profile <rich|compact|restricted>" },
             new { name = "accessibility-preferences", description = "Read effective local accessibility preferences." },
             new { name = "accessibility-set", description = "Set local accessibility preferences.", syntax = "accessibility-set [--scale <0.8-2.0>] [--reduced-motion <true|false>]" },
             new { name = "parity", description = "Read machine-readable human/accessibility/automation/agent parity by capability." },
@@ -159,6 +161,7 @@ internal static class Program
         {
             "capabilities/read",
             "accessibility/read",
+            "work/projection/read",
             "accessibility/preferences/read",
             "accessibility/preferences/write",
             "parity/read",
@@ -217,6 +220,49 @@ internal static class Program
     };
 
     private static AccessibilityDescriptor Accessibility() => AccessibilityContract.Describe();
+
+    private static HumanWorkProjection WorkProjectionCli(string[] args)
+    {
+        var fixture = RequiredOption(args, "--fixture");
+        var profile = RequiredOption(args, "--profile");
+
+        try
+        {
+            var snapshot = WorkProjectionEngine.LoadSnapshot(fixture);
+            return WorkProjectionEngine.Project(
+                snapshot,
+                WorkProjectionEngine.ContextForProfile(profile));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                                   JsonException or InvalidOperationException or ArgumentException)
+        {
+            throw new MachineException(2, "WORK_PROJECTION_INVALID", SafeMessage(ex));
+        }
+    }
+
+    private static HumanWorkProjection RpcWorkProjection(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var profile = RequiredProperty(p, "profile");
+        if (!p.TryGetProperty("snapshot", out var snapshot) ||
+            snapshot.ValueKind != JsonValueKind.Object)
+            throw new MachineException(
+                2,
+                "INVALID_PARAMS",
+                "work/projection/read requires object params.snapshot.");
+
+        try
+        {
+            var source = WorkProjectionEngine.ParseSnapshot(snapshot.GetRawText());
+            return WorkProjectionEngine.Project(
+                source,
+                WorkProjectionEngine.ContextForProfile(profile));
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
+        {
+            throw new MachineException(2, "WORK_PROJECTION_INVALID", SafeMessage(ex));
+        }
+    }
 
     private static object BrowserStatus() => BrowserSession.Status();
 
@@ -638,6 +684,7 @@ internal static class Program
         {
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
+            "work/projection/read" => RpcWorkProjection(parameters),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
             "accessibility/preferences/write" => await RpcAccessibilityPreferencesWriteAsync(parameters),
             "parity/read" => ReadCatalog("audience-parity-20261001.json"),

@@ -419,7 +419,9 @@ foreach (var marker in new[]
     "\"diagnostics\"",
     "\"diagnostics-export\"",
     "\"diagnostics/read\"",
-    "\"diagnostics/export\""
+    "\"diagnostics/export\"",
+    "\"work-projection\"",
+    "\"work/projection/read\""
 })
 {
     Require(automationSource.Contains(marker, StringComparison.Ordinal),
@@ -496,5 +498,117 @@ foreach (var marker in new[]
 var appXamlPath = Path.Combine("SupraChat", "App.axaml");
 Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\"", StringComparison.Ordinal),
     "application must follow the platform theme/high-contrast preference");
+
+foreach (var marker in new[]
+{
+    "WorkProjection.Heading",
+    "WorkProjection.Profile",
+    "WorkProjection.Refresh",
+    "WorkProjection.Mission",
+    "WorkProjection.State",
+    "WorkProjection.Frontier",
+    "WorkProjection.Details"
+})
+{
+    Require(mainWindowXaml.Contains(marker, StringComparison.Ordinal),
+        $"accessible human work-projection control missing: {marker}");
+}
+Require(browserProject.Contains("hic-work-projection-issue19-v1.json", StringComparison.Ordinal),
+    "desktop package does not include the HiC projection dogfood fixture");
+
+var workFixturePath = Path.Combine("oracles", "hic-work-projection-issue19-v1.json");
+var workSnapshot = WorkProjectionEngine.LoadSnapshot(workFixturePath);
+var workSnapshotBefore = JsonSerializer.Serialize(workSnapshot);
+
+var richProjection = WorkProjectionEngine.Project(
+    workSnapshot,
+    WorkProjectionEngine.ContextForProfile("rich"));
+var compactProjection = WorkProjectionEngine.Project(
+    workSnapshot,
+    WorkProjectionEngine.ContextForProfile("compact"));
+var restrictedProjection = WorkProjectionEngine.Project(
+    workSnapshot,
+    WorkProjectionEngine.ContextForProfile("restricted"));
+
+Require(richProjection.Schema == WorkProjectionEngine.ProjectionSchema,
+    "rich work projection schema mismatch");
+Require(richProjection.WorkstreamId == compactProjection.WorkstreamId &&
+        richProjection.WorkstreamId == restrictedProjection.WorkstreamId,
+    "projection profiles changed workstream identity");
+Require(richProjection.Mission == compactProjection.Mission &&
+        richProjection.Mission == restrictedProjection.Mission,
+    "projection profiles changed mission");
+Require(richProjection.AuthoritativeState == compactProjection.AuthoritativeState &&
+        richProjection.AuthoritativeState == restrictedProjection.AuthoritativeState,
+    "projection profiles changed authoritative state");
+Require(richProjection.Frontier == compactProjection.Frontier &&
+        richProjection.Frontier == restrictedProjection.Frontier,
+    "projection profiles changed frontier");
+Require(richProjection.Items.Length > compactProjection.Items.Length,
+    "compact projection did not reduce non-material detail");
+Require(compactProjection.Items.All(x => x.EvidenceRefs.Length == 0),
+    "compact projection retained rich evidence references");
+Require(compactProjection.SuppressedDetailItemCount == 1,
+    "compact projection did not distinguish attention/detail suppression");
+Require(compactProjection.RestrictedItemCount == 0 &&
+        compactProjection.RestrictedCaptureCount == 0 &&
+        compactProjection.UnavailableActionCount == 0,
+    "compact projection incorrectly reported access/actuator restriction");
+Require(richProjection.Captures.Length == 1 &&
+        !richProjection.Captures[0].Promoted &&
+        !richProjection.Captures[0].ExecutionAuthorized,
+    "exploration capture silently became commitment");
+Require(richProjection.Captures[0].Constraints.Contains("do-not-couple-schedules"),
+    "capture constraint was lost");
+Require(restrictedProjection.AllowedActions.All(x =>
+        x.Id is "capture.add" or "work.defer" or "work.inspect.public"),
+    "restricted projection exposed an action outside its actuator envelope");
+Require(JsonSerializer.Serialize(workSnapshot) == workSnapshotBefore,
+    "projection mutated authoritative source state");
+
+var malformedSnapshotRejected = false;
+try
+{
+    WorkProjectionEngine.Project(
+        workSnapshot with { Items = null! },
+        WorkProjectionEngine.ContextForProfile("compact"));
+}
+catch (InvalidOperationException)
+{
+    malformedSnapshotRejected = true;
+}
+Require(malformedSnapshotRejected,
+    "projection must fail closed when required semantic arrays are absent");
+
+var noOpProjection = WorkProjectionEngine.Project(
+    workSnapshot with { Disposition = "NOOP" },
+    WorkProjectionEngine.ContextForProfile("compact"));
+var parkProjection = WorkProjectionEngine.Project(
+    workSnapshot with { Disposition = "PARK" },
+    WorkProjectionEngine.ContextForProfile("compact"));
+Require(noOpProjection.Disposition == "NOOP" && parkProjection.Disposition == "PARK",
+    "NOOP/PARK dispositions are not representable");
+
+var leakSnapshot = WorkProjectionEngine.LoadSnapshot(
+    Path.Combine("oracles", "hic-work-projection-restricted-leak-v1.json"));
+var leakRich = WorkProjectionEngine.Project(
+    leakSnapshot,
+    WorkProjectionEngine.ContextForProfile("rich"));
+var leakRestricted = WorkProjectionEngine.Project(
+    leakSnapshot,
+    WorkProjectionEngine.ContextForProfile("restricted"));
+var leakRichJson = JsonSerializer.Serialize(leakRich);
+var leakRestrictedJson = JsonSerializer.Serialize(leakRestricted);
+const string RestrictedSentinel = "SUPRACHAT_RESTRICTED_SENTINEL";
+Require(leakRichJson.Contains(RestrictedSentinel, StringComparison.Ordinal),
+    "negative fixture did not expose sentinel in rich projection");
+Require(!leakRestrictedJson.Contains(RestrictedSentinel, StringComparison.Ordinal),
+    "restricted projection leaked disallowed information through a derived field");
+Require(leakRestricted.SuppressedDetailItemCount == 0,
+    "restricted leak fixture unexpectedly suppressed detail for attention bandwidth");
+Require(leakRestricted.RestrictedItemCount > 0 &&
+        leakRestricted.RestrictedCaptureCount > 0 &&
+        leakRestricted.UnavailableActionCount > 0,
+    "restricted projection did not report restricted/unavailable semantic content");
 
 Console.WriteLine("SupraChat contract checks PASS");
