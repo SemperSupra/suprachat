@@ -100,6 +100,7 @@ public sealed class CredentialBrokerCore
     private sealed record AcquireRecord(string Fingerprint, string LeaseId);
     private sealed record ReleaseRecord(string LeaseId, BrokerReleaseResult Result);
 
+    private readonly object _gate = new();
     private readonly Func<DateTimeOffset> _clock;
     private readonly TimeSpan _defaultTtl;
     private readonly TimeSpan _maxTtl;
@@ -149,119 +150,134 @@ public sealed class CredentialBrokerCore
 
     public BrokerStatus Status()
     {
-        var now = _clock();
-        var active = _leases.Values.Count(x =>
-            x.State == BrokerLeaseState.Active &&
-            x.Epoch == _epoch &&
-            x.ExpiresAt > now);
+        lock (_gate)
+        {
+            var now = _clock();
+            var active = _leases.Values.Count(x =>
+                x.State == BrokerLeaseState.Active &&
+                x.Epoch == _epoch &&
+                x.ExpiresAt > now);
 
-        return new BrokerStatus(
-            HostId,
-            _epoch,
-            _credentialGeneration,
-            _credentialPresent,
-            RefreshInProgress: false,
-            ActiveLeaseCount: active);
+            return new BrokerStatus(
+                HostId,
+                _epoch,
+                _credentialGeneration,
+                _credentialPresent,
+                RefreshInProgress: false,
+                ActiveLeaseCount: active);
+        
+        }
     }
 
     public BrokerAcquireResult Acquire(BrokerAcquireRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var capabilities = request.Capabilities
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .ToArray();
-
-        if (string.IsNullOrWhiteSpace(request.RequestId) ||
-            string.IsNullOrWhiteSpace(request.ConsumerId) ||
-            string.IsNullOrWhiteSpace(request.ConsumerBinding) ||
-            capabilities.Length == 0 ||
-            capabilities.Any(x => !_allowedCapabilities.Contains(x)))
-            return AcquireError(request.RequestId, BrokerErrorCodes.CapabilityDenied);
-
-        var ttl = request.Ttl ?? _defaultTtl;
-        if (ttl <= TimeSpan.Zero || ttl > _maxTtl)
-            return AcquireError(request.RequestId, BrokerErrorCodes.CapabilityDenied);
-
-        var fingerprint = string.Join(
-            "|",
-            request.ConsumerId,
-            request.ConsumerBinding,
-            ttl.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            string.Join(",", capabilities));
-
-        // Once an acquire request is accepted, an exact replay must return the
-        // same logical lease even if current credential readiness later changes.
-        if (_acquireRequests.TryGetValue(request.RequestId, out var existing))
+        lock (_gate)
         {
-            if (!string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal))
-                return AcquireError(request.RequestId, BrokerErrorCodes.RequestConflict);
+            ArgumentNullException.ThrowIfNull(request);
+
+            var capabilities = request.Capabilities
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(x => x, StringComparer.Ordinal)
+                .ToArray();
+
+            if (string.IsNullOrWhiteSpace(request.RequestId) ||
+                string.IsNullOrWhiteSpace(request.ConsumerId) ||
+                string.IsNullOrWhiteSpace(request.ConsumerBinding) ||
+                capabilities.Length == 0 ||
+                capabilities.Any(x => !_allowedCapabilities.Contains(x)))
+                return AcquireError(request.RequestId, BrokerErrorCodes.CapabilityDenied);
+
+            var ttl = request.Ttl ?? _defaultTtl;
+            if (ttl <= TimeSpan.Zero || ttl > _maxTtl)
+                return AcquireError(request.RequestId, BrokerErrorCodes.CapabilityDenied);
+
+            var fingerprint = string.Join(
+                "|",
+                request.ConsumerId,
+                request.ConsumerBinding,
+                ttl.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                string.Join(",", capabilities));
+
+            // Once an acquire request is accepted, an exact replay must return the
+            // same logical lease even if current credential readiness later changes.
+            if (_acquireRequests.TryGetValue(request.RequestId, out var existing))
+            {
+                if (!string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal))
+                    return AcquireError(request.RequestId, BrokerErrorCodes.RequestConflict);
+
+                return new BrokerAcquireResult(
+                    request.RequestId,
+                    "LEASED",
+                    _leases[existing.LeaseId],
+                    Error: null,
+                    Replay: true);
+            }
+
+            if (!_credentialPresent)
+                return AcquireError(request.RequestId, BrokerErrorCodes.AuthRequired);
+
+            var now = _clock();
+            var leaseId = $"lease-{++_leaseSequence:D6}";
+            var lease = new BrokerLeaseView(
+                leaseId,
+                request.ConsumerId,
+                request.ConsumerBinding,
+                capabilities,
+                now,
+                now.Add(ttl),
+                _epoch,
+                _credentialGeneration,
+                BrokerLeaseState.Active);
+
+            _leases.Add(leaseId, lease);
+            _acquireRequests.Add(request.RequestId, new AcquireRecord(fingerprint, leaseId));
 
             return new BrokerAcquireResult(
                 request.RequestId,
                 "LEASED",
-                _leases[existing.LeaseId],
+                lease,
                 Error: null,
-                Replay: true);
+                Replay: false);
+        
         }
-
-        if (!_credentialPresent)
-            return AcquireError(request.RequestId, BrokerErrorCodes.AuthRequired);
-
-        var now = _clock();
-        var leaseId = $"lease-{++_leaseSequence:D6}";
-        var lease = new BrokerLeaseView(
-            leaseId,
-            request.ConsumerId,
-            request.ConsumerBinding,
-            capabilities,
-            now,
-            now.Add(ttl),
-            _epoch,
-            _credentialGeneration,
-            BrokerLeaseState.Active);
-
-        _leases.Add(leaseId, lease);
-        _acquireRequests.Add(request.RequestId, new AcquireRecord(fingerprint, leaseId));
-
-        return new BrokerAcquireResult(
-            request.RequestId,
-            "LEASED",
-            lease,
-            Error: null,
-            Replay: false);
     }
 
-    public BrokerLeaseView? LeaseStatus(string leaseId) =>
-        _leases.TryGetValue(leaseId, out var lease) ? lease : null;
+    public BrokerLeaseView? LeaseStatus(string leaseId)
+    {
+        lock (_gate)
+            return _leases.TryGetValue(leaseId, out var lease) ? lease : null;
+    }
 
     public BrokerReleaseResult Release(string requestId, string leaseId)
     {
-        if (_releaseRequests.TryGetValue(requestId, out var prior))
+        lock (_gate)
         {
-            if (!string.Equals(prior.LeaseId, leaseId, StringComparison.Ordinal))
-                return ReleaseError(requestId, leaseId, BrokerErrorCodes.RequestConflict);
+            if (_releaseRequests.TryGetValue(requestId, out var prior))
+            {
+                if (!string.Equals(prior.LeaseId, leaseId, StringComparison.Ordinal))
+                    return ReleaseError(requestId, leaseId, BrokerErrorCodes.RequestConflict);
 
-            return prior.Result with { Replay = true };
+                return prior.Result with { Replay = true };
+            }
+
+            if (!_leases.TryGetValue(leaseId, out var lease))
+                return ReleaseError(requestId, leaseId, BrokerErrorCodes.LeaseNotFound);
+
+            var revoked = lease with { State = BrokerLeaseState.Revoked };
+            _leases[leaseId] = revoked;
+
+            var result = new BrokerReleaseResult(
+                requestId,
+                "REVOKED",
+                leaseId,
+                BrokerLeaseState.Revoked,
+                Error: null,
+                Replay: false);
+            _releaseRequests[requestId] = new ReleaseRecord(leaseId, result);
+            return result;
+        
         }
-
-        if (!_leases.TryGetValue(leaseId, out var lease))
-            return ReleaseError(requestId, leaseId, BrokerErrorCodes.LeaseNotFound);
-
-        var revoked = lease with { State = BrokerLeaseState.Revoked };
-        _leases[leaseId] = revoked;
-
-        var result = new BrokerReleaseResult(
-            requestId,
-            "REVOKED",
-            leaseId,
-            BrokerLeaseState.Revoked,
-            Error: null,
-            Replay: false);
-        _releaseRequests[requestId] = new ReleaseRecord(leaseId, result);
-        return result;
     }
 
     public BrokerAdmissionResult TryAdmitProviderOperation(
@@ -271,43 +287,58 @@ public sealed class CredentialBrokerCore
         string consumerBinding,
         string capability)
     {
-        var error = ValidateLeaseUse(leaseId, consumerId, consumerBinding, capability);
-        if (error is not null)
-            return new BrokerAdmissionResult(null, error);
+        lock (_gate)
+        {
+            var error = ValidateLeaseUse(leaseId, consumerId, consumerBinding, capability);
+            if (error is not null)
+                return new BrokerAdmissionResult(null, error);
 
-        return new BrokerAdmissionResult(
-            new BrokerAdmission(
-                operationId,
-                leaseId,
-                consumerId,
-                consumerBinding,
-                capability,
-                _epoch,
-                _clock()),
-            Error: null);
+            return new BrokerAdmissionResult(
+                new BrokerAdmission(
+                    operationId,
+                    leaseId,
+                    consumerId,
+                    consumerBinding,
+                    capability,
+                    _epoch,
+                    _clock()),
+                Error: null);
+        
+        }
     }
 
     public bool CanDeliverProviderResult(BrokerAdmission admission)
     {
-        ArgumentNullException.ThrowIfNull(admission);
+        lock (_gate)
+        {
+            ArgumentNullException.ThrowIfNull(admission);
 
-        if (!_leases.TryGetValue(admission.LeaseId, out var lease))
-            return false;
+            if (!_leases.TryGetValue(admission.LeaseId, out var lease))
+                return false;
 
-        return admission.Epoch == _epoch &&
-               lease.Epoch == _epoch &&
-               lease.State == BrokerLeaseState.Active &&
-               lease.ExpiresAt > _clock();
+            return admission.Epoch == _epoch &&
+                   lease.Epoch == _epoch &&
+                   lease.State == BrokerLeaseState.Active &&
+                   lease.ExpiresAt > _clock();
+        
+        }
     }
 
     public void Restart()
     {
-        checked { _epoch++; }
+        lock (_gate)
+        {
+            checked { _epoch++; }
+        }
     }
 
     // Observation input from the owning credential subsystem. This does not
     // create, refresh, persist, or transfer renewable credentials.
-    public void ObserveCredentialPresence(bool present) => _credentialPresent = present;
+    public void ObserveCredentialPresence(bool present)
+    {
+        lock (_gate)
+            _credentialPresent = present;
+    }
 
     public string ToPrivacySafeJson(object value)
     {
