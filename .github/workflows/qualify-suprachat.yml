@@ -82,6 +82,23 @@ jobs:
           if ($accessDoc.value.automation.screen_scraping_required) { throw 'Automation accessibility regressed to screen scraping.' }
           if ($accessDoc.value.agent.screen_scraping_required) { throw 'Agent accessibility regressed to screen scraping.' }
 
+          $projectionFixture = Join-Path $PWD 'oracles/hic-work-projection-issue19-v1.json'
+          $projection = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $projectionFixture --profile compact
+          if ($LASTEXITCODE -ne 0) { throw 'Compact work projection failed.' }
+          $projectionDoc = $projection | ConvertFrom-Json
+          if (-not $projectionDoc.ok -or
+              $projectionDoc.value.schema -ne 'suprachat-work-projection/v1' -or
+              $projectionDoc.value.workstream_id -ne 'github:SemperSupra/suprachat#19') {
+            throw 'Compact work projection contract failed.'
+          }
+
+          $leakFixture = Join-Path $PWD 'oracles/hic-work-projection-restricted-leak-v1.json'
+          $restrictedProjection = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $leakFixture --profile restricted
+          if ($LASTEXITCODE -ne 0) { throw 'Restricted work projection failed.' }
+          if (($restrictedProjection -join [Environment]::NewLine).Contains('SUPRACHAT_RESTRICTED_SENTINEL')) {
+            throw 'Restricted work projection leaked sentinel.'
+          }
+
           $catalog = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- catalog
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat.Automation catalog failed.' }
           $catalogDoc = $catalog | ConvertFrom-Json
@@ -140,6 +157,17 @@ jobs:
               $diagResponse.result.schema -ne 'suprachat-dogfood-observability/v2' -or
               $diagResponse.result.trace_id.Length -ne 32) {
             throw 'Agent diagnostics correlation contract missing.'
+          }
+
+          $snapshotJson = Get-Content (Join-Path $PWD 'oracles/hic-work-projection-issue19-v1.json') -Raw
+          $projectionRequest = '{"jsonrpc":"2.0","id":4,"method":"work/projection/read","params":{"profile":"compact","snapshot":' + $snapshotJson + '}}'
+          $projectionLines = $projectionRequest | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'SupraChat work/projection/read stdio failed.' }
+          $projectionResponse = ($projectionLines | Select-Object -Last 1) | ConvertFrom-Json
+          if ($projectionResponse.id -ne 4 -or
+              $projectionResponse.result.schema -ne 'suprachat-work-projection/v1' -or
+              $projectionResponse.result.workstream_id -ne 'github:SemperSupra/suprachat#19') {
+            throw 'Agent work projection contract missing.'
           }
 
       - name: Publish self-contained application
