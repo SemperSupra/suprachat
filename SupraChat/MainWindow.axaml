@@ -1,6 +1,7 @@
 <Window
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:SupraChat"
     x:Class="SupraChat.MainWindow"
     Width="1280"
     Height="900"
@@ -25,7 +26,7 @@
         <Button Grid.Column="3" Margin="0,0,6,0" Content="Home" Click="Home_Click"
                  AutomationProperties.AutomationId="Nav.Home"
                  AutomationProperties.HelpText="Navigate the embedded product view to ChatGPT home." />
-        <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="Official ChatGPT product surface + full subscription-backed Agent Lab" />
+        <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="ChatGPT product + Agent Lab" />
         <Button Grid.Column="5" Content="Open in browser" Click="OpenExternal_Click"
                  AutomationProperties.AutomationId="Nav.OpenExternal"
                  AutomationProperties.HelpText="Open ChatGPT in the system browser." />
@@ -54,12 +55,12 @@
         <ScrollViewer>
           <StackPanel Margin="20" Spacing="10" MaxWidth="1100">
             <TextBlock FontSize="22" FontWeight="SemiBold"
-                       Text="ChatGPT-plan actor interview and capability surface"
+                       Text="Agent Lab"
                        AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="1"
                        AutomationProperties.AutomationId="AgentLab.Heading" />
             <TextBlock TextWrapping="Wrap"
-                       Text="This plane uses OpenAI's documented Sign in with ChatGPT flow, account-specific model catalog, every currently supported direct Responses capability, and the complete pinned Codex app-server protocol. It remains separate from the first-party ChatGPT product surface." />
+                       Text="Use your authorized ChatGPT plan through supported Responses and Codex interfaces. Account, credential portability, and runtime controls stay separate from the first-party ChatGPT product tab." />
 
             <WrapPanel Orientation="Horizontal">
               <Button x:Name="SignInButton" Margin="0,0,8,8"
@@ -79,7 +80,7 @@
                        AutomationProperties.LiveSetting="Polite" />
 
             <TextBlock x:Name="AccountRegistrationLabel" FontWeight="SemiBold"
-                       Text="ChatGPT account registration"
+                       Text="Account &amp; authorization"
                        AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="2" />
             <WrapPanel Orientation="Horizontal">
@@ -91,6 +92,40 @@
               <Button Margin="0,0,8,8" Content="Use saved account" Click="UseSavedAccount_Click" AutomationProperties.AutomationId="Auth.UseSavedAccount" />
               <Button Margin="0,0,8,8" Content="Add another account/workspace" Click="AddAccount_Click" AutomationProperties.AutomationId="Auth.AddAccount" />
             </WrapPanel>
+
+            <Border Padding="12" Margin="0,4,0,8" BorderThickness="1" CornerRadius="6">
+              <StackPanel Spacing="8">
+                <TextBlock FontWeight="SemiBold"
+                           Text="Portable credentials"
+                           AutomationProperties.ControlTypeOverride="Header"
+                           AutomationProperties.HeadingLevel="2"
+                           AutomationProperties.AutomationId="Auth.PortableHeading" />
+                <TextBlock TextWrapping="Wrap"
+                           Text="Export an encrypted renewable SIWC credential bundle for another trusted runtime, or import one here. Copies share renewable authority and can interfere if multiple hosts rotate the same refresh lineage; use intentionally and protect the bundle and passphrase." />
+                <local:SecurePassphraseTextBox x:Name="CredentialPassphraseBox"
+                         Watermark="Bundle passphrase (12+ characters)"
+                         AutomationProperties.AutomationId="Auth.BundlePassphrase"
+                         AutomationProperties.Name="Credential bundle passphrase"
+                         AutomationProperties.HelpText="Passphrase used only in memory to encrypt or decrypt the selected portable credential bundle." />
+                <WrapPanel Orientation="Horizontal">
+                  <Button Margin="0,0,8,0"
+                          Content="Export encrypted bundle…"
+                          Click="ExportCredentialBundle_Click"
+                          AutomationProperties.AutomationId="Auth.ExportCredential"
+                          AutomationProperties.HelpText="Write the active renewable credential to an encrypted portable file." />
+                  <Button Content="Import encrypted bundle…"
+                          Click="ImportCredentialBundle_Click"
+                          AutomationProperties.AutomationId="Auth.ImportCredential"
+                          AutomationProperties.HelpText="Import an encrypted portable credential while preserving this host's local host identity." />
+                </WrapPanel>
+                <TextBlock x:Name="CredentialBundleStatus"
+                           Text="No portable credential operation performed."
+                           TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="Auth.PortableStatus"
+                           AutomationProperties.Name="Portable credential status"
+                           AutomationProperties.LiveSetting="Polite" />
+              </StackPanel>
+            </Border>
 
             <WrapPanel Orientation="Horizontal">
               <Button Margin="0,0,8,8" Content="Refresh models" Click="RefreshModels_Click" AutomationProperties.AutomationId="AgentLab.RefreshModels" />

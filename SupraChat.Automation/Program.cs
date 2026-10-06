@@ -19,6 +19,7 @@ internal static class Program
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
     private static readonly SemaphoreSlim StdoutGate = new(1, 1);
+    private static readonly SupraChatCore Core = new();
 
     private static CodexAppServerClient? _agentCodex;
     private static CodexAppServerClient.CodexEventSubscription? _agentCodexEvents;
@@ -55,6 +56,9 @@ internal static class Program
                 "diagnostics" => WriteSuccess(DogfoodObservability.Describe()),
                 "diagnostics-export" => WriteSuccess(await DiagnosticsExportAsync(args[1..])),
                 "auth-status" => WriteSuccess(await AuthStatusAsync()),
+                "auth-bundle-inspect" => WriteSuccess(await AuthBundleInspectAsync(args[1..])),
+                "auth-export" => WriteSuccess(await AuthExportAsync(args[1..])),
+                "auth-import" => WriteSuccess(await AuthImportAsync(args[1..])),
                 "models" => WriteSuccess(await ModelsAsync()),
                 "voices" => WriteSuccess(await CodexRpcAsync(new[] { "--method", "thread/realtime/listVoices", "--params", "{}" })),
                 "remote-status" => WriteSuccess(await CodexRpcAsync(new[] { "--method", "remoteControl/status/read" })),
@@ -110,6 +114,9 @@ internal static class Program
             new { name = "diagnostics", description = "Read privacy-safe dogfood observability metadata, trace IDs, and local log paths." },
             new { name = "diagnostics-export", description = "Export a privacy-safe diagnostics bundle.", syntax = "diagnostics-export --output <path.zip>" },
             new { name = "auth-status", description = "Read redacted local ChatGPT-plan authorization state." },
+            new { name = "auth-bundle-inspect", description = "Inspect redacted metadata from an encrypted portable SIWC credential bundle.", syntax = "auth-bundle-inspect --input <path>" },
+            new { name = "auth-export", description = "Export the active renewable SIWC credential to an encrypted portable bundle.", syntax = "auth-export --confirm --output <path> --passphrase-env <ENV_VAR>" },
+            new { name = "auth-import", description = "Import an encrypted portable SIWC credential bundle while preserving this host's identity.", syntax = "auth-import --confirm --input <path> --passphrase-env <ENV_VAR>" },
             new { name = "models", description = "List models visible to the saved ChatGPT-plan authorization." },
             new { name = "voices", description = "List realtime voices exposed by the bundled Codex runtime." },
             new { name = "remote-status", description = "Read Codex Remote connection/identity status without enabling or pairing." },
@@ -169,6 +176,9 @@ internal static class Program
             "diagnostics/read",
             "diagnostics/export",
             "auth/status",
+            "auth/bundle/inspect",
+            "auth/export",
+            "auth/import",
             "models/list",
             "realtime/voices",
             "remote/status",
@@ -372,20 +382,56 @@ internal static class Program
         };
     }
 
-    private static async Task<object> AuthStatusAsync()
+    private static async Task<object> AuthStatusAsync() =>
+        new
+        {
+            schema = Schema,
+            auth = await Core.GetAuthStatusAsync()
+        };
+
+    private static async Task<object> AuthBundleInspectAsync(string[] args)
     {
-        var credential = await CredentialStore.TryLoadAsync();
+        var input = RequiredOption(args, "--input");
         return new
         {
             schema = Schema,
-            auth = CredentialSummary(credential)
+            bundle = await Core.InspectCredentialBundleAsync(input)
         };
+    }
+
+    private static async Task<object> AuthExportAsync(string[] args)
+    {
+        RequireExplicitConfirmation(args, "Exporting renewable SIWC credentials");
+        var output = RequiredOption(args, "--output");
+        var passphrase = PassphraseFromEnvironment(args);
+        try
+        {
+            return await Core.ExportCredentialAsync(output, passphrase);
+        }
+        finally
+        {
+            passphrase = string.Empty;
+        }
+    }
+
+    private static async Task<object> AuthImportAsync(string[] args)
+    {
+        RequireExplicitConfirmation(args, "Importing renewable SIWC credentials");
+        var input = RequiredOption(args, "--input");
+        var passphrase = PassphraseFromEnvironment(args);
+        try
+        {
+            return await Core.ImportCredentialAsync(input, passphrase);
+        }
+        finally
+        {
+            passphrase = string.Empty;
+        }
     }
 
     private static async Task<object> ModelsAsync()
     {
-        var credential = await RequireCredentialAsync();
-        var models = await new ResponsesClient().ListModelsAsync(credential.AccessToken);
+        var models = await Core.ListModelsAsync();
         return new
         {
             schema = Schema,
@@ -648,6 +694,9 @@ internal static class Program
             "diagnostics/read" => DogfoodObservability.Describe(),
             "diagnostics/export" => await RpcDiagnosticsExportAsync(parameters),
             "auth/status" => await AuthStatusAsync(),
+            "auth/bundle/inspect" => await RpcAuthBundleInspectAsync(parameters),
+            "auth/export" => await RpcAuthExportAsync(parameters),
+            "auth/import" => await RpcAuthImportAsync(parameters),
             "models/list" => await ModelsAsync(),
             "realtime/voices" => await RpcCodexReadAsync("thread/realtime/listVoices", emptyParams: true),
             "remote/status" => await RpcCodexReadAsync("remoteControl/status/read", emptyParams: false),
@@ -723,6 +772,34 @@ internal static class Program
             "--output",
             RequiredProperty(p, "output")
         });
+    }
+
+    private static async Task<object> RpcAuthBundleInspectAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        return await AuthBundleInspectAsync(new[]
+        {
+            "--input",
+            RequiredProperty(p, "input")
+        });
+    }
+
+    private static async Task<object> RpcAuthExportAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        RequireRpcConfirmation(p, "Exporting renewable SIWC credentials");
+        return await Core.ExportCredentialAsync(
+            RequiredProperty(p, "output"),
+            PassphraseFromEnvironmentName(RequiredProperty(p, "passphrase_env")));
+    }
+
+    private static async Task<object> RpcAuthImportAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        RequireRpcConfirmation(p, "Importing renewable SIWC credentials");
+        return await Core.ImportCredentialAsync(
+            RequiredProperty(p, "input"),
+            PassphraseFromEnvironmentName(RequiredProperty(p, "passphrase_env")));
     }
 
     private static async Task<object> RpcRemoteEnableAsync(JsonElement? parameters)
@@ -1275,41 +1352,41 @@ internal static class Program
 
     private static async Task<SiwcCredential> RequireCredentialAsync()
     {
-        var credential = await CredentialStore.TryLoadAsync()
-            ?? throw new MachineException(
-                3,
-                "AUTH_REQUIRED",
-                "No local ChatGPT authorization is available. Complete Continue with ChatGPT in the SupraChat GUI first.");
-
-        var refreshed = await new SiwcClient().RefreshIfNeededAsync(credential);
-        if (!ReferenceEquals(refreshed, credential))
-            await CredentialStore.SaveAsync(refreshed);
-
-        if (!refreshed.HasPlanUsage)
-            throw new MachineException(
-                3,
-                "PLAN_SCOPE_REQUIRED",
-                $"Saved authorization does not include {SiwcProtocol.RequiredPlanScope}. Enable plan usage in the SupraChat GUI.");
-
-        return refreshed;
+        try
+        {
+            return await Core.GetUsableCredentialAsync(requirePlanUsage: true);
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("No local ChatGPT authorization", StringComparison.Ordinal))
+        {
+            throw new MachineException(3, "AUTH_REQUIRED", ex.Message);
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains(SiwcProtocol.RequiredPlanScope, StringComparison.Ordinal))
+        {
+            throw new MachineException(3, "PLAN_SCOPE_REQUIRED", ex.Message);
+        }
     }
 
     private static object CredentialSummary(SiwcCredential? credential) =>
-        credential is null
-            ? new
-            {
-                present = false,
-                plan_usage = false,
-                expires_at = (DateTimeOffset?)null,
-                scope_count = 0
-            }
-            : new
-            {
-                present = true,
-                plan_usage = credential.HasPlanUsage,
-                expires_at = (DateTimeOffset?)credential.ExpiresAt,
-                scope_count = credential.Scopes.Length
-            };
+        SupraChatCore.DescribeCredential(credential);
+
+    private static string PassphraseFromEnvironment(string[] args) =>
+        PassphraseFromEnvironmentName(RequiredOption(args, "--passphrase-env"));
+
+    private static string PassphraseFromEnvironmentName(string variableName)
+    {
+        if (string.IsNullOrWhiteSpace(variableName))
+            throw new MachineException(2, "USAGE", "Passphrase environment variable name is required.");
+
+        var value = Environment.GetEnvironmentVariable(variableName);
+        if (string.IsNullOrWhiteSpace(value))
+            throw new MachineException(
+                3,
+                "PASSPHRASE_REQUIRED",
+                $"Environment variable {variableName} is not set or is empty.");
+        return value;
+    }
 
     private static void RequireRpcConfirmation(JsonElement parameters, string operation)
     {
