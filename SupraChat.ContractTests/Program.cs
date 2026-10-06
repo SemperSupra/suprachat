@@ -497,6 +497,23 @@ var appXamlPath = Path.Combine("SupraChat", "App.axaml");
 Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\"", StringComparison.Ordinal),
     "application must follow the platform theme/high-contrast preference");
 
+var mainWindowXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
+foreach (var marker in new[]
+{
+    "WorkProjection.Heading",
+    "WorkProjection.Profile",
+    "WorkProjection.Refresh",
+    "WorkProjection.Mission",
+    "WorkProjection.State",
+    "WorkProjection.Frontier",
+    "WorkProjection.Details"
+})
+{
+    Require(mainWindowXaml.Contains(marker, StringComparison.Ordinal),
+        $"accessible human work-projection control missing: {marker}");
+}
+Require(browserProject.Contains("hic-work-projection-issue19-v1.json", StringComparison.Ordinal),
+    "desktop package does not include the HiC projection dogfood fixture");
 
 var workFixturePath = Path.Combine("oracles", "hic-work-projection-issue19-v1.json");
 var workSnapshot = WorkProjectionEngine.LoadSnapshot(workFixturePath);
