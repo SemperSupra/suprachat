@@ -159,7 +159,8 @@ jobs:
             throw 'Agent diagnostics correlation contract missing.'
           }
 
-          $snapshotJson = Get-Content (Join-Path $PWD 'oracles/hic-work-projection-issue19-v1.json') -Raw
+          $snapshotObject = Get-Content (Join-Path $PWD 'oracles/hic-work-projection-issue19-v1.json') -Raw | ConvertFrom-Json
+          $snapshotJson = $snapshotObject | ConvertTo-Json -Compress -Depth 20
           $projectionRequest = '{"jsonrpc":"2.0","id":4,"method":"work/projection/read","params":{"profile":"compact","snapshot":' + $snapshotJson + '}}'
           $projectionLines = $projectionRequest | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat work/projection/read stdio failed.' }
