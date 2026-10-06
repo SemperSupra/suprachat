@@ -13,6 +13,19 @@ internal static class BrokerVectorBindingTests
         var statusBefore = broker.Status();
         var statusAgain = broker.Status();
 
+        var absentBroker = new CredentialBrokerCore(
+            "urn:uuid:broker-no-credential",
+            credentialGeneration: 0,
+            credentialPresent: false,
+            clock: () => now);
+        var absentStatus = absentBroker.Status();
+        Require(!absentStatus.CredentialPresent && absentStatus.CredentialGeneration == 0,
+            "no-credential broker invented credential generation");
+        var absentAcquire = absentBroker.Acquire(new(
+            "req-no-credential", "consumer-a", "binding-a", new[] { "models.read" }));
+        Require(absentAcquire.Error == BrokerErrorCodes.AuthRequired,
+            "no-credential broker admitted a new lease");
+
         var first = broker.Acquire(new(
             "req-1", "consumer-a", "binding-a", new[] { "models.read" }, TimeSpan.FromSeconds(300)));
         var firstLeaseCount = broker.Status().ActiveLeaseCount;
@@ -33,6 +46,16 @@ internal static class BrokerVectorBindingTests
             "op-wrong", first.Lease!.LeaseId, "consumer-b", "binding-b", "models.read");
         var admitted = broker.TryAdmitProviderOperation(
             "op-1", first.Lease.LeaseId, "consumer-a", "binding-a", "models.read");
+        Require(admitted.Error is null && admitted.Admission is not null,
+            "valid active lease was not admitted");
+
+        broker.ObserveCredentialPresence(false);
+        var blockedWithoutCredential = broker.TryAdmitProviderOperation(
+            "op-no-credential", first.Lease.LeaseId, "consumer-a", "binding-a", "models.read");
+        Require(blockedWithoutCredential.Error == BrokerErrorCodes.AuthRequired,
+            "active lease admitted provider work without broker credential readiness");
+        broker.ObserveCredentialState(true, 8);
+
         var release = broker.Release("release-1", first.Lease.LeaseId);
         var releaseReplay = broker.Release("release-1", first.Lease.LeaseId);
         var deliveredAfterRevoke = broker.CanDeliverProviderResult(admitted.Admission!);
