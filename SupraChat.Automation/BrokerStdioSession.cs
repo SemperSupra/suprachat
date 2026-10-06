@@ -27,7 +27,26 @@ internal sealed class BrokerStdioSession
         IReadOnlyList<string> capabilities,
         TimeSpan? ttl)
     {
-        CredentialBrokerCore broker;
+        var request = new BrokerAcquireRequest(
+            requestId,
+            ConsumerId,
+            _consumerBinding,
+            capabilities,
+            ttl);
+
+        // Preserve the core invariant that an accepted replay/conflict is
+        // resolved before current credential readiness can change its outcome.
+        // Mark readiness false only for the probe so a genuinely new request
+        // cannot mint authority until GetUsableCredentialAsync succeeds.
+        var broker = await ObserveAsync(requireUsableCredential: false).ConfigureAwait(false);
+        broker.ObserveCredentialPresence(false);
+        var replayProbe = broker.Acquire(request);
+        if (replayProbe.Error != BrokerErrorCodes.AuthRequired)
+        {
+            _ = await ObserveAsync(requireUsableCredential: false).ConfigureAwait(false);
+            return replayProbe;
+        }
+
         try
         {
             broker = await ObserveAsync(requireUsableCredential: true).ConfigureAwait(false);
@@ -36,7 +55,7 @@ internal sealed class BrokerStdioSession
             ex.Message.Contains("No local ChatGPT authorization", StringComparison.Ordinal) ||
             ex.Message.Contains(SiwcProtocol.RequiredPlanScope, StringComparison.Ordinal))
         {
-            broker = await ObserveAsync(requireUsableCredential: false).ConfigureAwait(false);
+            _ = await ObserveAsync(requireUsableCredential: false).ConfigureAwait(false);
             return new BrokerAcquireResult(
                 requestId,
                 "REJECTED",
@@ -45,12 +64,7 @@ internal sealed class BrokerStdioSession
                 Replay: false);
         }
 
-        return broker.Acquire(new BrokerAcquireRequest(
-            requestId,
-            ConsumerId,
-            _consumerBinding,
-            capabilities,
-            ttl));
+        return broker.Acquire(request);
     }
 
     public async Task<BrokerLeaseView?> LeaseStatusAsync(string leaseId)
