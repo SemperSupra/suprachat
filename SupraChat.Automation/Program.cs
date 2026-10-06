@@ -794,7 +794,6 @@ internal static class Program
             {
                 lease_id = lease.LeaseId,
                 consumer_id = lease.ConsumerId,
-                consumer_binding = lease.ConsumerBinding,
                 capabilities = lease.Capabilities,
                 issued_at = lease.IssuedAt,
                 expires_at = lease.ExpiresAt,
