@@ -367,6 +367,33 @@ jobs:
             throw 'Packaged automation capability contract failed.'
           }
 
+          $projectionFixture = Join-Path $root 'oracles/hic-work-projection-issue19-v1.json'
+          if (!(Test-Path $projectionFixture)) {
+            throw 'Packaged HiC work-projection fixture missing.'
+          }
+          $packagedProjection = & $cli work-projection --fixture $projectionFixture --profile compact
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged compact work projection failed.' }
+          $packagedProjectionDoc = $packagedProjection | ConvertFrom-Json
+          if (-not $packagedProjectionDoc.ok -or
+              $packagedProjectionDoc.value.schema -ne 'suprachat-work-projection/v1' -or
+              $packagedProjectionDoc.value.workstream_id -ne 'github:SemperSupra/suprachat#19' -or
+              $packagedProjectionDoc.value.suppressed_detail_item_count -lt 1 -or
+              $packagedProjectionDoc.value.restricted_item_count -ne 0) {
+            throw 'Packaged compact work-projection contract failed.'
+          }
+
+          $packagedSnapshot = Get-Content $projectionFixture -Raw | ConvertFrom-Json
+          $packagedSnapshotJson = $packagedSnapshot | ConvertTo-Json -Compress -Depth 20
+          $projectionRequest = '{"jsonrpc":"2.0","id":"projection","method":"work/projection/read","params":{"profile":"compact","snapshot":' + $packagedSnapshotJson + '}}'
+          $projectionRpc = $projectionRequest | & $cli stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged agent work/projection/read failed.' }
+          $projectionRpcDoc = ($projectionRpc | Select-Object -Last 1) | ConvertFrom-Json
+          if ($projectionRpcDoc.id -ne 'projection' -or
+              $projectionRpcDoc.result.schema -ne 'suprachat-work-projection/v1' -or
+              $projectionRpcDoc.result.workstream_id -ne 'github:SemperSupra/suprachat#19') {
+            throw 'Packaged agent work-projection contract failed.'
+          }
+
           $packagedDiagnostics = & $cli diagnostics
           if ($LASTEXITCODE -ne 0) { throw 'Packaged diagnostics command failed.' }
           $packagedDiagnosticsDoc = $packagedDiagnostics | ConvertFrom-Json
