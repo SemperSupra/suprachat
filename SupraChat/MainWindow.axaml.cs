@@ -233,7 +233,8 @@ public partial class MainWindow : Window
             {
                 $"Observed: {projection.ObservedAt:O}",
                 $"Source: {projection.Source.System}:{projection.Source.Locator} generation={projection.Source.Generation}",
-                $"Withheld: items={projection.WithheldItemCount}, captures={projection.WithheldCaptureCount}, actions={projection.WithheldActionCount}",
+                $"Attention/detail suppressed: items={projection.SuppressedDetailItemCount}",
+                $"Restricted/unavailable: items={projection.RestrictedItemCount}, captures={projection.RestrictedCaptureCount}, actions={projection.UnavailableActionCount}",
                 "",
                 "Items"
             };
