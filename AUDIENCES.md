@@ -34,6 +34,7 @@ SupraChat.Automation capabilities
 SupraChat.Automation doctor
 SupraChat.Automation auth-status
 SupraChat.Automation models
+SupraChat.Automation work-projection --fixture <snapshot.json> --profile <rich|compact|restricted>
 SupraChat.Automation respond --model <id> --input <text> [--web-search]
 SupraChat.Automation responses-raw --model <id> [--body <json>]
 SupraChat.Automation codex-rpc --method <method> [--params <json>]
@@ -134,6 +135,15 @@ Automation/agent:
 6. Machine schemas are versioned. Breaking changes require a new schema/method version rather than silent reinterpretation.
 7. CI qualifies all three audience shells on every packaged desktop target.
 
+## Human-in-Command work projection
+
+The experimental HiC work-projection tranche uses one derived semantic core across all audiences:
+- native GUI: rich / compact / restricted projection profiles in the Automation & Agents work area;
+- accessible human: the same mission/state/frontier/details through labeled semantic controls and keyboard navigation;
+- automation: `work-projection` over an explicitly supplied local snapshot;
+- agent: `work/projection/read` with the snapshot object supplied in JSON-RPC params.
+
+Projection state is not durable workstream authority. Profile changes may reduce visible detail or allowed actions but must not change the underlying mission/current state/frontier. Exploration capture remains non-authoritative until an owning authority promotes or commissions work.
 
 ## Accessibility parity
 
