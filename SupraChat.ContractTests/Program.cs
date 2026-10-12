@@ -516,7 +516,7 @@ foreach (var marker in new[]
     "\"auth-import\"",
     "\"auth/bundle/inspect\"",
     "\"auth/export\"",
-    "\"auth/import\""
+    "\"auth/import\"",
     "\"work-projection\"",
     "\"work/projection/read\""
 })
