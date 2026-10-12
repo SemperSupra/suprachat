@@ -611,4 +611,80 @@ Require(leakRestricted.RestrictedItemCount > 0 &&
         leakRestricted.UnavailableActionCount > 0,
     "restricted projection did not report restricted/unavailable semantic content");
 
+// I4/E1: controller state is an ephemeral observation, never owner truth or
+// evidence of acceptance. The owning snapshot must remain identical.
+var controllerObservation = new ControllerObservation(
+    WorkProjectionEngine.ControllerObservationSchema,
+    workSnapshot.WorkstreamId,
+    "agent-dispatch",
+    "read-only-projection-rep",
+    "COMPLETED",
+    "public");
+var controllerParsed = WorkProjectionEngine.ParseControllerObservation(
+    JsonSerializer.Serialize(controllerObservation));
+var controllerRich = WorkProjectionEngine.Project(
+    workSnapshot,
+    WorkProjectionEngine.ContextForProfile("rich"),
+    controllerParsed);
+var controllerCompact = WorkProjectionEngine.Project(
+    workSnapshot,
+    WorkProjectionEngine.ContextForProfile("compact"),
+    controllerParsed);
+Require(controllerRich.Controller is not null &&
+        controllerCompact.Controller is not null &&
+        controllerRich.Controller.ExecutionState == "COMPLETED" &&
+        controllerRich.Controller.Acceptance == "NOT_ESTABLISHED" &&
+        controllerRich.Controller.Freshness == "UNKNOWN_NO_SOURCE_REVISION" &&
+        controllerRich.Controller.RequiresPointOfUseReconciliation,
+    "controller observation was promoted to acceptance/freshness or lost across profiles");
+Require(controllerRich.Mission == richProjection.Mission &&
+        controllerRich.AuthoritativeState == richProjection.AuthoritativeState &&
+        controllerRich.Frontier == richProjection.Frontier &&
+        controllerRich.Disposition == richProjection.Disposition &&
+        controllerRich.AllowedActions.SequenceEqual(richProjection.AllowedActions),
+    "controller observation changed owner truth or authority");
+Require(JsonSerializer.Serialize(workSnapshot) == workSnapshotBefore,
+    "controller composition mutated authoritative source");
+
+var restrictedController = WorkProjectionEngine.Project(
+    workSnapshot,
+    WorkProjectionEngine.ContextForProfile("restricted"),
+    controllerParsed with
+    {
+        InformationClass = "internal",
+        DelegationId = "SUPRACHAT_RESTRICTED_SENTINEL"
+    });
+Require(restrictedController.Controller is null &&
+        restrictedController.RestrictedControllerObservationCount == 1 &&
+        !JsonSerializer.Serialize(restrictedController).Contains(
+            "SUPRACHAT_RESTRICTED_SENTINEL", StringComparison.Ordinal),
+    "restricted controller observation leaked through projection");
+
+var mismatchedControllerRejected = false;
+try
+{
+    WorkProjectionEngine.Project(workSnapshot,
+        WorkProjectionEngine.ContextForProfile("rich"),
+        controllerParsed with { WorkstreamId = "github:wrong-owner#1" });
+}
+catch (InvalidOperationException)
+{
+    mismatchedControllerRejected = true;
+}
+Require(mismatchedControllerRejected,
+    "unbound controller observation was allowed to impersonate workstream state");
+
+var invalidControllerRejected = false;
+try
+{
+    WorkProjectionEngine.ParseControllerObservation(JsonSerializer.Serialize(
+        controllerParsed with { ExecutionState = "ACCEPTED" }));
+}
+catch (InvalidOperationException)
+{
+    invalidControllerRejected = true;
+}
+Require(invalidControllerRejected,
+    "provider completion was allowed to masquerade as acceptance");
+
 Console.WriteLine("SupraChat contract checks PASS");
