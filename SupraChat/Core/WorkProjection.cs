@@ -7,6 +7,14 @@ public static class WorkProjectionEngine
 {
     public const string SnapshotSchema = "suprachat-authoritative-work-snapshot/v1";
     public const string ProjectionSchema = "suprachat-work-projection/v1";
+    public const string ControllerObservationSchema = "suprachat-controller-observation/v1";
+
+    // Provider attempt states never establish owner acceptance.
+    private static readonly HashSet<string> AllowedExecutionStates = new(StringComparer.Ordinal)
+    {
+        "UNKNOWN", "READY", "RUNNING", "WAITING", "BLOCKED",
+        "COMPLETED", "FAILED", "CANCELLED"
+    };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -23,6 +31,14 @@ public static class WorkProjectionEngine
             ?? throw new InvalidOperationException("Work snapshot JSON was empty.");
         Validate(snapshot);
         return snapshot;
+    }
+
+    public static ControllerObservation ParseControllerObservation(string json)
+    {
+        var observation = JsonSerializer.Deserialize<ControllerObservation>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Controller observation JSON was empty.");
+        ValidateObservation(observation);
+        return observation;
     }
 
     public static ProjectionContext ContextForProfile(string profile) =>
@@ -64,9 +80,31 @@ public static class WorkProjectionEngine
 
     public static HumanWorkProjection Project(
         AuthoritativeWorkSnapshot snapshot,
-        ProjectionContext context)
+        ProjectionContext context,
+        ControllerObservation? observation = null)
     {
         Validate(snapshot);
+        ControllerExecutionProjection? controller = null;
+        if (observation is not null)
+        {
+            ValidateObservation(observation);
+            if (!string.Equals(observation.WorkstreamId, snapshot.WorkstreamId, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "Controller observation workstream does not match the owning snapshot.");
+
+            // The caller must bind this observation explicitly to its owner. The sidecar
+            // delegation projection is not an authoritative workstream source. No controller
+            // text, source locator, generation or actuation grant crosses this boundary.
+            if (context.AllowedInformationClasses.Contains(observation.InformationClass))
+            {
+                controller = new ControllerExecutionProjection(
+                    observation.DelegationId,
+                    observation.ExecutionState,
+                    Freshness: "UNKNOWN_NO_SOURCE_REVISION",
+                    Acceptance: "NOT_ESTABLISHED",
+                    RequiresPointOfUseReconciliation: true);
+            }
+        }
 
         var classVisibleItems = snapshot.Items
             .Where(x => context.AllowedInformationClasses.Contains(x.InformationClass))
@@ -107,7 +145,21 @@ public static class WorkProjectionEngine
             classVisibleItems.Length - visibleItems.Length,
             snapshot.Items.Length - classVisibleItems.Length,
             snapshot.Captures.Length - classVisibleCaptures.Length,
-            snapshot.Actions.Length - visibleActions.Length);
+            snapshot.Actions.Length - visibleActions.Length,
+            controller,
+            observation is not null && controller is null ? 1 : 0);
+    }
+
+    private static void ValidateObservation(ControllerObservation observation)
+    {
+        if (!string.Equals(observation.Schema, ControllerObservationSchema, StringComparison.Ordinal) ||
+            !string.Equals(observation.SourceSystem, "agent-dispatch", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(observation.WorkstreamId) ||
+            string.IsNullOrWhiteSpace(observation.DelegationId) ||
+            !AllowedExecutionStates.Contains(observation.ExecutionState) ||
+            observation.InformationClass is not ("public" or "internal" or "restricted"))
+            throw new InvalidOperationException(
+                "Controller observation lacks a supported schema, identity, source, state or disclosure class.");
     }
 
     private static void Validate(AuthoritativeWorkSnapshot snapshot)
@@ -227,4 +279,23 @@ public sealed record HumanWorkProjection(
     int SuppressedDetailItemCount,
     int RestrictedItemCount,
     int RestrictedCaptureCount,
-    int UnavailableActionCount);
+    int UnavailableActionCount,
+    ControllerExecutionProjection? Controller = null,
+    int RestrictedControllerObservationCount = 0);
+
+// Normalized, explicitly owner-bound, ephemeral input. It is not a GitHub/Sidecar
+// adapter and does not assert source freshness or authorization for any command.
+public sealed record ControllerObservation(
+    [property: JsonPropertyName("schema")] string Schema,
+    [property: JsonPropertyName("workstream_id")] string WorkstreamId,
+    [property: JsonPropertyName("source_system")] string SourceSystem,
+    [property: JsonPropertyName("delegation_id")] string DelegationId,
+    [property: JsonPropertyName("execution_state")] string ExecutionState,
+    [property: JsonPropertyName("information_class")] string InformationClass);
+
+public sealed record ControllerExecutionProjection(
+    string DelegationId,
+    string ExecutionState,
+    string Freshness,
+    string Acceptance,
+    bool RequiresPointOfUseReconciliation);

@@ -101,7 +101,7 @@ internal static class Program
         {
             new { name = "capabilities", description = "Read machine/product capability metadata." },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
-            new { name = "work-projection", description = "Project one authoritative work snapshot for a HiC surface context.", syntax = "work-projection --fixture <snapshot.json> --profile <rich|compact|restricted>" },
+            new { name = "work-projection", description = "Project one authoritative work snapshot for a HiC surface context.", syntax = "work-projection --fixture <snapshot.json> --profile <rich|compact|restricted> [--controller-observation <normalized-observation.json>]" },
             new { name = "accessibility-preferences", description = "Read effective local accessibility preferences." },
             new { name = "accessibility-set", description = "Set local accessibility preferences.", syntax = "accessibility-set [--scale <0.8-2.0>] [--reduced-motion <true|false>]" },
             new { name = "parity", description = "Read machine-readable human/accessibility/automation/agent parity by capability." },
@@ -229,9 +229,14 @@ internal static class Program
         try
         {
             var snapshot = WorkProjectionEngine.LoadSnapshot(fixture);
+            var observationFile = Option(args, "--controller-observation");
+            var observation = observationFile is null
+                ? null
+                : WorkProjectionEngine.ParseControllerObservation(File.ReadAllText(observationFile));
             return WorkProjectionEngine.Project(
                 snapshot,
-                WorkProjectionEngine.ContextForProfile(profile));
+                WorkProjectionEngine.ContextForProfile(profile),
+                observation);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
                                    JsonException or InvalidOperationException or ArgumentException)
@@ -254,9 +259,18 @@ internal static class Program
         try
         {
             var source = WorkProjectionEngine.ParseSnapshot(snapshot.GetRawText());
+            ControllerObservation? observation = null;
+            if (p.TryGetProperty("controller_observation", out var observed))
+            {
+                if (observed.ValueKind != JsonValueKind.Object)
+                    throw new MachineException(2, "INVALID_PARAMS",
+                        "controller_observation must be a normalized object.");
+                observation = WorkProjectionEngine.ParseControllerObservation(observed.GetRawText());
+            }
             return WorkProjectionEngine.Project(
                 source,
-                WorkProjectionEngine.ContextForProfile(profile));
+                WorkProjectionEngine.ContextForProfile(profile),
+                observation);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
         {
