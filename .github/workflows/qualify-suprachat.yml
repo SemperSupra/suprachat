@@ -82,6 +82,59 @@ jobs:
           if ($accessDoc.value.automation.screen_scraping_required) { throw 'Automation accessibility regressed to screen scraping.' }
           if ($accessDoc.value.agent.screen_scraping_required) { throw 'Agent accessibility regressed to screen scraping.' }
 
+          $projectionFixture = Join-Path $PWD 'oracles/hic-work-projection-issue19-v1.json'
+          $projection = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $projectionFixture --profile compact
+          if ($LASTEXITCODE -ne 0) { throw 'Compact work projection failed.' }
+          $projectionDoc = $projection | ConvertFrom-Json
+          if (-not $projectionDoc.ok -or
+              $projectionDoc.value.schema -ne 'suprachat-work-projection/v1' -or
+              $projectionDoc.value.workstream_id -ne 'github:SemperSupra/suprachat#19') {
+            throw 'Compact work projection contract failed.'
+          }
+
+          $leakFixture = Join-Path $PWD 'oracles/hic-work-projection-restricted-leak-v1.json'
+          $restrictedProjection = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $leakFixture --profile restricted
+          if ($LASTEXITCODE -ne 0) { throw 'Restricted work projection failed.' }
+          if (($restrictedProjection -join [Environment]::NewLine).Contains('SUPRACHAT_RESTRICTED_SENTINEL')) {
+            throw 'Restricted work projection leaked sentinel.'
+          }
+
+          # A native caller may overlay normalized read-only controller status, but
+          # execution completion must never imply owner acceptance or freshness.
+          $observationFile = Join-Path $env:RUNNER_TEMP 'suprachat-controller-observation.json'
+          $observation = @{
+            schema = 'suprachat-controller-observation/v1'
+            workstream_id = 'github:SemperSupra/suprachat#19'
+            source_system = 'agent-dispatch'
+            delegation_id = 'qual-readonly'
+            execution_state = 'COMPLETED'
+            information_class = 'public'
+          }
+          $observation | ConvertTo-Json -Compress | Set-Content -Encoding utf8 $observationFile
+          $overlay = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $projectionFixture --profile compact --controller-observation $observationFile
+          if ($LASTEXITCODE -ne 0) { throw 'CLI controller observation failed.' }
+          $overlayDoc = $overlay | ConvertFrom-Json
+          if (-not $overlayDoc.ok -or
+              $overlayDoc.value.controller.execution_state -ne 'COMPLETED' -or
+              $overlayDoc.value.controller.acceptance -ne 'NOT_ESTABLISHED' -or
+              $overlayDoc.value.controller.freshness -ne 'UNKNOWN_NO_SOURCE_REVISION' -or
+              -not $overlayDoc.value.controller.requires_point_of_use_reconciliation -or
+              $overlayDoc.value.frontier -ne $projectionDoc.value.frontier) {
+            throw 'CLI controller overlay changed owner truth or acceptance/freshness.'
+          }
+
+          $observation.information_class = 'internal'
+          $observation.delegation_id = 'SUPRACHAT_RESTRICTED_SENTINEL'
+          $observation | ConvertTo-Json -Compress | Set-Content -Encoding utf8 $observationFile
+          $restrictedOverlay = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $projectionFixture --profile restricted --controller-observation $observationFile
+          if ($LASTEXITCODE -ne 0) { throw 'CLI restricted controller observation failed.' }
+          $restrictedOverlayDoc = $restrictedOverlay | ConvertFrom-Json
+          if ($restrictedOverlayDoc.value.controller -or
+              $restrictedOverlayDoc.value.restricted_controller_observation_count -ne 1 -or
+              ($restrictedOverlay -join [Environment]::NewLine).Contains('SUPRACHAT_RESTRICTED_SENTINEL')) {
+            throw 'CLI restricted controller observation leaked.'
+          }
+
           $catalog = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- catalog
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat.Automation catalog failed.' }
           $catalogDoc = $catalog | ConvertFrom-Json
@@ -140,6 +193,39 @@ jobs:
               $diagResponse.result.schema -ne 'suprachat-dogfood-observability/v2' -or
               $diagResponse.result.trace_id.Length -ne 32) {
             throw 'Agent diagnostics correlation contract missing.'
+          }
+
+          $snapshotObject = Get-Content (Join-Path $PWD 'oracles/hic-work-projection-issue19-v1.json') -Raw | ConvertFrom-Json
+          $snapshotJson = $snapshotObject | ConvertTo-Json -Compress -Depth 20
+          $projectionRequest = '{"jsonrpc":"2.0","id":4,"method":"work/projection/read","params":{"profile":"compact","snapshot":' + $snapshotJson + '}}'
+          $projectionLines = $projectionRequest | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'SupraChat work/projection/read stdio failed.' }
+          $projectionResponse = ($projectionLines | Select-Object -Last 1) | ConvertFrom-Json
+          if ($projectionResponse.id -ne 4 -or
+              $projectionResponse.result.schema -ne 'suprachat-work-projection/v1' -or
+              $projectionResponse.result.workstream_id -ne 'github:SemperSupra/suprachat#19') {
+            throw 'Agent work projection contract missing.'
+          }
+
+          $controllerObservationJson = @{
+            schema = 'suprachat-controller-observation/v1'
+            workstream_id = 'github:SemperSupra/suprachat#19'
+            source_system = 'agent-dispatch'
+            delegation_id = 'rpc-readonly'
+            execution_state = 'COMPLETED'
+            information_class = 'public'
+          } | ConvertTo-Json -Compress -Depth 10
+          $overlayRequest = '{"jsonrpc":"2.0","id":5,"method":"work/projection/read","params":{"profile":"compact","snapshot":' + $snapshotJson + ',"controller_observation":' + $controllerObservationJson + '}}'
+          $overlayLines = $overlayRequest | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'Agent controller observation stdio failed.' }
+          $overlayResponse = ($overlayLines | Select-Object -Last 1) | ConvertFrom-Json
+          if ($overlayResponse.id -ne 5 -or
+              $overlayResponse.result.controller.execution_state -ne 'COMPLETED' -or
+              $overlayResponse.result.controller.acceptance -ne 'NOT_ESTABLISHED' -or
+              $overlayResponse.result.controller.freshness -ne 'UNKNOWN_NO_SOURCE_REVISION' -or
+              -not $overlayResponse.result.controller.requires_point_of_use_reconciliation -or
+              $overlayResponse.result.frontier -ne $projectionResponse.result.frontier) {
+            throw 'JSON-RPC controller overlay changed owner truth or acceptance/freshness.'
           }
 
       - name: Publish self-contained application
@@ -336,6 +422,33 @@ jobs:
           $capDoc = $cap | ConvertFrom-Json
           if (-not $capDoc.ok -or -not $capDoc.value.audiences.automation.supported) {
             throw 'Packaged automation capability contract failed.'
+          }
+
+          $projectionFixture = Join-Path $root 'oracles/hic-work-projection-issue19-v1.json'
+          if (!(Test-Path $projectionFixture)) {
+            throw 'Packaged HiC work-projection fixture missing.'
+          }
+          $packagedProjection = & $cli work-projection --fixture $projectionFixture --profile compact
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged compact work projection failed.' }
+          $packagedProjectionDoc = $packagedProjection | ConvertFrom-Json
+          if (-not $packagedProjectionDoc.ok -or
+              $packagedProjectionDoc.value.schema -ne 'suprachat-work-projection/v1' -or
+              $packagedProjectionDoc.value.workstream_id -ne 'github:SemperSupra/suprachat#19' -or
+              $packagedProjectionDoc.value.suppressed_detail_item_count -lt 1 -or
+              $packagedProjectionDoc.value.restricted_item_count -ne 0) {
+            throw 'Packaged compact work-projection contract failed.'
+          }
+
+          $packagedSnapshot = Get-Content $projectionFixture -Raw | ConvertFrom-Json
+          $packagedSnapshotJson = $packagedSnapshot | ConvertTo-Json -Compress -Depth 20
+          $projectionRequest = '{"jsonrpc":"2.0","id":"projection","method":"work/projection/read","params":{"profile":"compact","snapshot":' + $packagedSnapshotJson + '}}'
+          $projectionRpc = $projectionRequest | & $cli stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged agent work/projection/read failed.' }
+          $projectionRpcDoc = ($projectionRpc | Select-Object -Last 1) | ConvertFrom-Json
+          if ($projectionRpcDoc.id -ne 'projection' -or
+              $projectionRpcDoc.result.schema -ne 'suprachat-work-projection/v1' -or
+              $projectionRpcDoc.result.workstream_id -ne 'github:SemperSupra/suprachat#19') {
+            throw 'Packaged agent work-projection contract failed.'
           }
 
           $packagedDiagnostics = & $cli diagnostics
@@ -1115,11 +1228,34 @@ jobs:
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
-                $element = $window.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $idCondition)
+                $element = $null
+                $lastLookupError = $null
+                foreach ($attempt in 1..8) {
+                  try {
+                    # Avalonia can rebuild the UIA subtree while a tab selection is
+                    # materializing. Reacquire the process root each attempt rather
+                    # than retaining a stale AutomationElement across that rebuild.
+                    $processCondition = New-Object System.Windows.Automation.PropertyCondition(
+                      [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                      $p.Id)
+                    $currentWindow = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                      [System.Windows.Automation.TreeScope]::Descendants,
+                      $processCondition)
+                    if ($currentWindow) {
+                      $element = $currentWindow.FindFirst(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        $idCondition)
+                    }
+                    if ($element) { break }
+                  }
+                  catch {
+                    $lastLookupError = $_.Exception.Message
+                  }
+                  Start-Sleep -Milliseconds 250
+                }
                 if (-not $element) {
-                  throw "UI Automation element missing despite semantic peers being exposed: $automationId"
+                  $suffix = if ($lastLookupError) { " Last UIA error: $lastLookupError" } else { "" }
+                  throw "UI Automation element missing despite semantic peers being exposed: $automationId.$suffix"
                 }
 
                 $name = $element.Current.Name
@@ -1137,11 +1273,20 @@ jobs:
                 }
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @(
+                    'WorkProjection.Profile',
+                    'WorkProjection.Refresh',
+                    'WorkProjection.Mission',
+                    'WorkProjection.State',
+                    'WorkProjection.Frontier',
+                    'WorkProjection.Details',
+                    'Accessibility.Status'
+                  ) }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
+                  Start-Sleep -Milliseconds 300
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }

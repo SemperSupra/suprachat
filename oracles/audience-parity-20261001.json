@@ -1,6 +1,6 @@
 {
   "schema": "suprachat-audience-parity/v1",
-  "evidence_date": "2026-10-01",
+  "evidence_date": "2026-10-06",
   "product": "SupraChat",
   "platforms": [
     "windows",
@@ -481,6 +481,23 @@
       },
       "human_boundary": "Status/pairing-status/client-list are read-only. Enable/disable/pairing-start/client-revoke require an explicit one-shot human confirmation or machine confirm=true/--confirm; no operation auto-approves Codex server requests.",
       "notes": "Complete semantic lifecycle is implemented across GUI, CLI and JSON-RPC. Pairing/environment/client IDs are text-accessible; live authorized qualification on each OS remains pending."
+    },
+    {
+      "id": "hic_work_projection",
+      "consequential": true,
+      "access": {
+        "human": "implemented",
+        "accessible_human": "implemented",
+        "automation": "implemented",
+        "agent": "implemented"
+      },
+      "platforms": {
+        "windows": "qualify",
+        "macos": "qualify",
+        "linux": "qualify"
+      },
+      "human_boundary": "Projection reads are derived and non-authoritative. Consequential work remains gated by the owning workstream/controller authority; capture does not imply commitment.",
+      "notes": "One shared WorkProjectionEngine feeds the native accessible renderer, CLI work-projection command, and work/projection/read JSON-RPC method. Rich/compact/restricted are projection contexts over the same workstream, not separate authorities."
     }
   ]
 }
