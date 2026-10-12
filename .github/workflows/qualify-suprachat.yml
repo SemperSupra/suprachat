@@ -99,6 +99,42 @@ jobs:
             throw 'Restricted work projection leaked sentinel.'
           }
 
+          # A native caller may overlay normalized read-only controller status, but
+          # execution completion must never imply owner acceptance or freshness.
+          $observationFile = Join-Path $env:RUNNER_TEMP 'suprachat-controller-observation.json'
+          $observation = @{
+            schema = 'suprachat-controller-observation/v1'
+            workstream_id = 'github:SemperSupra/suprachat#19'
+            source_system = 'agent-dispatch'
+            delegation_id = 'qual-readonly'
+            execution_state = 'COMPLETED'
+            information_class = 'public'
+          }
+          $observation | ConvertTo-Json -Compress | Set-Content -Encoding utf8 $observationFile
+          $overlay = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $projectionFixture --profile compact --controller-observation $observationFile
+          if ($LASTEXITCODE -ne 0) { throw 'CLI controller observation failed.' }
+          $overlayDoc = $overlay | ConvertFrom-Json
+          if (-not $overlayDoc.ok -or
+              $overlayDoc.value.controller.execution_state -ne 'COMPLETED' -or
+              $overlayDoc.value.controller.acceptance -ne 'NOT_ESTABLISHED' -or
+              $overlayDoc.value.controller.freshness -ne 'UNKNOWN_NO_SOURCE_REVISION' -or
+              -not $overlayDoc.value.controller.requires_point_of_use_reconciliation -or
+              $overlayDoc.value.frontier -ne $projectionDoc.value.frontier) {
+            throw 'CLI controller overlay changed owner truth or acceptance/freshness.'
+          }
+
+          $observation.information_class = 'internal'
+          $observation.delegation_id = 'SUPRACHAT_RESTRICTED_SENTINEL'
+          $observation | ConvertTo-Json -Compress | Set-Content -Encoding utf8 $observationFile
+          $restrictedOverlay = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- work-projection --fixture $projectionFixture --profile restricted --controller-observation $observationFile
+          if ($LASTEXITCODE -ne 0) { throw 'CLI restricted controller observation failed.' }
+          $restrictedOverlayDoc = $restrictedOverlay | ConvertFrom-Json
+          if ($restrictedOverlayDoc.value.controller -or
+              $restrictedOverlayDoc.value.restricted_controller_observation_count -ne 1 -or
+              ($restrictedOverlay -join [Environment]::NewLine).Contains('SUPRACHAT_RESTRICTED_SENTINEL')) {
+            throw 'CLI restricted controller observation leaked.'
+          }
+
           $catalog = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- catalog
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat.Automation catalog failed.' }
           $catalogDoc = $catalog | ConvertFrom-Json
@@ -169,6 +205,27 @@ jobs:
               $projectionResponse.result.schema -ne 'suprachat-work-projection/v1' -or
               $projectionResponse.result.workstream_id -ne 'github:SemperSupra/suprachat#19') {
             throw 'Agent work projection contract missing.'
+          }
+
+          $controllerObservationJson = @{
+            schema = 'suprachat-controller-observation/v1'
+            workstream_id = 'github:SemperSupra/suprachat#19'
+            source_system = 'agent-dispatch'
+            delegation_id = 'rpc-readonly'
+            execution_state = 'COMPLETED'
+            information_class = 'public'
+          } | ConvertTo-Json -Compress -Depth 10
+          $overlayRequest = '{"jsonrpc":"2.0","id":5,"method":"work/projection/read","params":{"profile":"compact","snapshot":' + $snapshotJson + ',"controller_observation":' + $controllerObservationJson + '}}'
+          $overlayLines = $overlayRequest | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'Agent controller observation stdio failed.' }
+          $overlayResponse = ($overlayLines | Select-Object -Last 1) | ConvertFrom-Json
+          if ($overlayResponse.id -ne 5 -or
+              $overlayResponse.result.controller.execution_state -ne 'COMPLETED' -or
+              $overlayResponse.result.controller.acceptance -ne 'NOT_ESTABLISHED' -or
+              $overlayResponse.result.controller.freshness -ne 'UNKNOWN_NO_SOURCE_REVISION' -or
+              -not $overlayResponse.result.controller.requires_point_of_use_reconciliation -or
+              $overlayResponse.result.frontier -ne $projectionResponse.result.frontier) {
+            throw 'JSON-RPC controller overlay changed owner truth or acceptance/freshness.'
           }
 
       - name: Publish self-contained application
