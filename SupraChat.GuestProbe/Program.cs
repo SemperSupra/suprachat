@@ -9,13 +9,16 @@ using SupraChat.Core;
 const string schema = "suprachat-anonymous-chatgpt-probe/v1";
 const string marker = "GUEST_PROBE_OK";
 const string prompt = "Please reply with exactly GUEST_PROBE_OK and nothing else.";
-const string target = "https://chatgpt.com/";
+const string guestTarget = "https://chatgpt.com/";
+const string fixtureTarget = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000";
 const int observationSeconds = 45;
 
 string? output = null;
+string? fixtureCase = null;
 for (var i = 0; i < args.Length; i++)
 {
     if (args[i] == "--output" && i + 1 < args.Length) output = args[++i];
+    else if (args[i] == "--fixture-case" && i + 1 < args.Length) fixtureCase = args[++i];
     else if (args[i] == "--self-test")
     {
         if (Classify("Just a moment... Checking your browser", false) != "CHALLENGE_OR_BROWSER_CHECK" ||
@@ -26,13 +29,17 @@ for (var i = 0; i < args.Length; i++)
         Console.WriteLine("guest-probe classification self-test PASS");
         return 0;
     }
-    else throw new ArgumentException("Usage: [--output <path>] [--self-test]");
+    else throw new ArgumentException("Usage: [--output <path>] [--self-test] [--fixture-case <name>]");
 }
 
+if (fixtureCase is not null && fixtureCase is not ("success" or "wrong-turn" or "no-composer" or "no-send-control" or "login-gate" or "challenge"))
+    throw new ArgumentException("Unknown local fixture case");
+var target = fixtureCase is null ? guestTarget : fixtureTarget;
 var result = new ProbeReceipt
 {
     Schema = schema,
-    Source = "anonymous-ephemeral-browser",
+    Source = fixtureCase is null ? "anonymous-ephemeral-browser" : "synthetic-local-route",
+    FixtureCase = fixtureCase,
     TargetHost = "chatgpt.com",
     AuthSupplied = false,
     PersistentProfile = false,
@@ -46,6 +53,19 @@ try
     await using var session = await BrowserSession.StartAsync(headless: true);
     var page = session.Page;
     page.SetDefaultTimeout(8_000);
+    if (fixtureCase is not null)
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "fixture.html");
+        var fixtureHtml = (await File.ReadAllTextAsync(fixturePath))
+            .Replace("__FIXTURE_CASE__", fixtureCase, StringComparison.Ordinal);
+        await page.RouteAsync("https://chatgpt.com/**", async route =>
+            await route.FulfillAsync(new RouteFulfillOptions
+            {
+                Status = 200,
+                ContentType = "text/html",
+                Body = fixtureHtml
+            }));
+    }
     result.BrowserLaunched = true;
     try
     {
@@ -65,7 +85,7 @@ try
     }
 
     // Do not mistake the initial SPA shell for the fully hydrated guest UI.
-    await page.WaitForTimeoutAsync(12_000);
+    await page.WaitForTimeoutAsync(fixtureCase is null ? 12_000 : 250);
     result.FinalHost = SafeHost(page.Url);
     result.PageReached = result.FinalHost == "chatgpt.com";
     if (!result.PageReached)
@@ -92,6 +112,13 @@ try
         : title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase)
             ? "CHALLENGE_TITLE" : string.IsNullOrWhiteSpace(title) ? "EMPTY_TITLE" : "OTHER_TITLE";
     result.DocumentReadyState = await page.EvaluateAsync<string>("document.readyState");
+    if (result.NavigationHttpStatus is 403 or 429 ||
+        result.TitleClass == "CHALLENGE_TITLE")
+    {
+        result.FinalState = "PROVIDER_ACCESS_CHALLENGE";
+        await WriteAndExitAsync(result, output);
+        return 0;
+    }
     if (Classify(body, false) == "CHALLENGE_OR_BROWSER_CHECK")
     {
         result.FinalState = "CHALLENGE_OR_BROWSER_CHECK";
@@ -153,7 +180,7 @@ try
         return 0;
     }
 
-    var deadline = DateTimeOffset.UtcNow.AddSeconds(observationSeconds);
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(fixtureCase is null ? observationSeconds : 5);
     while (DateTimeOffset.UtcNow < deadline)
     {
         await page.WaitForTimeoutAsync(1_000);
@@ -260,6 +287,7 @@ internal sealed class ProbeReceipt
 {
     public string Schema { get; set; } = "";
     public string Source { get; set; } = "";
+    public string? FixtureCase { get; set; }
     public string TargetHost { get; set; } = "";
     public string? FinalHost { get; set; }
     public bool AuthSupplied { get; set; }
