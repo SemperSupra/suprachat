@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>ChatGPT - synthetic guest qualification fixture</title></head>
+<body>
+  <main id="surface"></main>
+  <script>
+    (() => {
+      const scenario = '__FIXTURE_CASE__';
+      const root = document.getElementById('surface');
+      const add = (tag, attrs = {}, text = '') => {
+        const node = document.createElement(tag);
+        for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+        node.textContent = text;
+        root.append(node);
+        return node;
+      };
+      if (scenario === 'challenge') {
+        add('h1', {}, 'Just a moment... Checking your browser');
+        return;
+      }
+      if (scenario === 'login-gate') {
+        add('h1', {}, 'Sign in or log in to continue');
+        return;
+      }
+      add('h1', {}, 'Synthetic ChatGPT fixture (not the actual service)');
+      if (scenario === 'no-composer') return;
+      const editor = add('textarea', {id: 'prompt-textarea', placeholder: 'Ask anything'});
+      if (scenario === 'no-send-control') return;
+      const send = add('button', {'data-testid': 'send-button'}, 'Send prompt');
+      send.addEventListener('click', () => {
+        send.disabled = true;
+        window.setTimeout(() => {
+          add('article',
+            {'data-message-author-role': 'assistant'},
+            scenario === 'wrong-turn' ? 'SYNTHETIC_DIFFERENT_ANSWER' : 'GUEST_PROBE_OK');
+          send.disabled = false;
+        }, 120);
+      });
+      void editor;
+    })();
+  </script>
+</body>
+</html>
