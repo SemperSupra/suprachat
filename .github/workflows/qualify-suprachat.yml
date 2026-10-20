@@ -70,6 +70,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat.Automation capabilities failed.' }
           $doc = $json | ConvertFrom-Json
           if (-not $doc.ok) { throw 'Automation capabilities response was not ok.' }
+          $controlRaw = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- chatgpt-control
+          if ($LASTEXITCODE -ne 0) { throw 'ChatGPT control descriptor CLI failed.' }
+          $control = $controlRaw | ConvertFrom-Json
+          if (-not $control.ok -or $control.value.browser_adapter -ne 'NOT_CONNECTED') {
+            throw 'Unqualified ChatGPT browser adapter was not marked NOT_CONNECTED.'
+          }
+          $inspectionRaw = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- chatgpt-session-inspect --url https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000
+          if ($LASTEXITCODE -ne 0) { throw 'ChatGPT conversation URL inspection CLI failed.' }
+          $inspection = $inspectionRaw | ConvertFrom-Json
+          if (-not $inspection.ok -or -not $inspection.value.recognized -or $inspection.value.adapter_state -ne 'NOT_CONNECTED') {
+            throw 'ChatGPT conversation inspection CLI invariant failed.'
+          }
+          $negativeRaw = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- chatgpt-session-inspect --url https://evil.example/c/123e4567-e89b-42d3-a456-426614174000
+          if ($LASTEXITCODE -ne 0) { throw 'ChatGPT invalid-origin inspection unexpectedly failed operationally.' }
+          $negative = $negativeRaw | ConvertFrom-Json
+          if (-not $negative.ok -or $negative.value.recognized) { throw 'ChatGPT invalid origin was accepted.' }
           if (-not $doc.value.audiences.automation.supported) { throw 'Automation audience not advertised.' }
           if (-not $doc.value.audiences.agent.supported) { throw 'Agent audience not advertised.' }
 
