@@ -49,11 +49,12 @@ try
     result.BrowserLaunched = true;
     try
     {
-        await page.GotoAsync(target, new PageGotoOptions
+        var navigationResponse = await page.GotoAsync(target, new PageGotoOptions
         {
             WaitUntil = WaitUntilState.DOMContentLoaded,
             Timeout = 40_000
         });
+        result.NavigationHttpStatus = navigationResponse?.Status;
     }
     catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
     {
@@ -63,7 +64,8 @@ try
         return 0;
     }
 
-    await page.WaitForTimeoutAsync(4_000);
+    // Do not mistake the initial SPA shell for the fully hydrated guest UI.
+    await page.WaitForTimeoutAsync(12_000);
     result.FinalHost = SafeHost(page.Url);
     result.PageReached = result.FinalHost == "chatgpt.com";
     if (!result.PageReached)
@@ -74,6 +76,22 @@ try
     }
 
     var body = await ReadPageTextAsync(page);
+    result.BodyTextChars = body.Length;
+    result.BodyChatGptNameObserved = body.Contains("ChatGPT", StringComparison.OrdinalIgnoreCase);
+    result.BodyGuestSignInObserved = Regex.IsMatch(body, @"(?i)\b(log in|login|sign up|sign in)\b");
+    result.TextareaCount = await page.Locator("textarea").CountAsync();
+    result.ContentEditableCount = await page.Locator("[contenteditable='true']").CountAsync();
+    result.TextboxRoleCount = await page.Locator("[role='textbox']").CountAsync();
+    result.PromptTestIdCount = await page.Locator("[data-testid*='prompt']").CountAsync();
+    result.IframeCount = await page.Locator("iframe").CountAsync();
+    result.ButtonCount = await page.Locator("button").CountAsync();
+    result.ScriptCount = await page.Locator("script").CountAsync();
+    var title = await page.TitleAsync();
+    result.TitleClass = title.Contains("ChatGPT", StringComparison.OrdinalIgnoreCase)
+        ? "CHATGPT_TITLE"
+        : title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase)
+            ? "CHALLENGE_TITLE" : string.IsNullOrWhiteSpace(title) ? "EMPTY_TITLE" : "OTHER_TITLE";
+    result.DocumentReadyState = await page.EvaluateAsync<string>("document.readyState");
     if (Classify(body, false) == "CHALLENGE_OR_BROWSER_CHECK")
     {
         result.FinalState = "CHALLENGE_OR_BROWSER_CHECK";
@@ -247,6 +265,19 @@ internal sealed class ProbeReceipt
     public bool AuthSupplied { get; set; }
     public bool PersistentProfile { get; set; }
     public bool BrowserLaunched { get; set; }
+    public int? NavigationHttpStatus { get; set; }
+    public string? TitleClass { get; set; }
+    public string? DocumentReadyState { get; set; }
+    public int BodyTextChars { get; set; }
+    public bool BodyChatGptNameObserved { get; set; }
+    public bool BodyGuestSignInObserved { get; set; }
+    public int TextareaCount { get; set; }
+    public int ContentEditableCount { get; set; }
+    public int TextboxRoleCount { get; set; }
+    public int PromptTestIdCount { get; set; }
+    public int IframeCount { get; set; }
+    public int ButtonCount { get; set; }
+    public int ScriptCount { get; set; }
     public bool PageReached { get; set; }
     public bool ComposerVisible { get; set; }
     public int PromptAttempts { get; set; }
