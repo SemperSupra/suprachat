@@ -8,4 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="../SupraChat/SupraChat.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="fixture.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
