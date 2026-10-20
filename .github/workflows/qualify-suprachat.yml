@@ -1220,6 +1220,22 @@ jobs:
           if (-not (Test-Path $cli)) { throw "Playwright .NET install script missing: $cli" }
           & $cli install --with-deps chromium
           if ($LASTEXITCODE -ne 0) { throw 'Playwright Chromium install failed' }
+      - name: Offline ChatGPT-shaped guest interaction and negative qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A expected
+          expected[success]='GUEST_TURN_CORRELATED'
+          expected[wrong-turn]='ASSISTANT_TURN_OBSERVED_MARKER_MISSING'
+          expected[no-composer]='COMPOSER_NOT_FOUND'
+          expected[no-send-control]='SEND_CONTROL_UNAVAILABLE'
+          expected[login-gate]='LOGIN_GATE'
+          expected[challenge]='CHALLENGE_OR_BROWSER_CHECK'
+          for scenario in success wrong-turn no-composer no-send-control login-gate challenge; do
+            receipt="out/anonymous-chatgpt/fixture-${scenario}.json"
+            dotnet run --project SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release --no-build -- --fixture-case "${scenario}" --output "${receipt}"
+            jq -e --arg state "${expected[$scenario]}" --arg scenario "${scenario}"               '.source == "synthetic-local-route" and .fixture_case == $scenario and .final_state == $state and .auth_supplied == false and .page_reached == true'               "${receipt}" >/dev/null
+          done
       - name: Single bounded anonymous chatgpt.com browser attempt
         shell: bash
         run: |
@@ -1230,7 +1246,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: suprachat-anonymous-guest-probe
-          path: out/anonymous-chatgpt/receipt.json
+          path: out/anonymous-chatgpt/*.json
           if-no-files-found: warn
           retention-days: 7
 
