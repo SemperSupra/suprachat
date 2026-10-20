@@ -1210,6 +1210,20 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Compile isolated public-safe guest probe
         run: dotnet build SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release
+      - name: Parse Windows local actor batch without executing it
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $issues = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path tools/qualify-chatgpt-windows-local.ps1).Path,
+            [ref]$tokens,
+            [ref]$issues) | Out-Null
+          if ($issues.Count -gt 0) {
+            $issues | ForEach-Object { Write-Host $_.Message }
+            throw 'Windows actor PowerShell parser failed'
+          }
+          Write-Host 'Windows actor PowerShell syntax PASS (execution separately gated)'
       - name: Deterministic guest-state taxonomy checks
         run: dotnet run --project SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release --no-build -- --self-test
       - name: Install Playwright Chromium with public OS dependencies
