@@ -10,6 +10,40 @@ static void Require(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+// #19 W0: ChatGPT *product conversation* is not an SIWC/Responses thread.
+var chatControl = ChatGptControlContract.Describe();
+var chatControlJson = JsonSerializer.Serialize(chatControl);
+Require(chatControlJson.Contains("chatgpt/conversation/prompt/submit", StringComparison.Ordinal),
+    "ChatGPT control operation identity missing");
+Require(chatControlJson.Contains("NOT_IMPLEMENTED", StringComparison.Ordinal),
+    "Unqualified ChatGPT browser control must not be advertised as ready");
+Require(chatControlJson.Contains("NOT_CONNECTED", StringComparison.Ordinal),
+    "Missing real browser binding must be explicit");
+var chatConversation = "123e4567-e89b-42d3-a456-426614174000";
+var chatRef = ChatGptControlContract.Inspect("https://chatgpt.com/c/" + chatConversation);
+Require(chatRef.Recognized && chatRef.ConversationId == chatConversation &&
+    chatRef.AdapterState == "NOT_CONNECTED", "Conversation URL inspection state drifted");
+var gptRef = ChatGptControlContract.Inspect("https://chatgpt.com/g/g-research/c/" + chatConversation);
+Require(gptRef.Recognized && gptRef.CanonicalUrl!.Contains("/g/g-research/c/", StringComparison.Ordinal),
+    "GPT-prefixed conversation binding was discarded");
+foreach (var invalid in new[]
+{
+    "", "https://evil.example/c/" + chatConversation,
+    "http://chatgpt.com/c/" + chatConversation,
+    "https://chatgpt.com.evil.example/c/" + chatConversation,
+    "https://chatgpt.com/c/" + chatConversation + "?access_token=secret",
+    "https://chatgpt.com/c/" + chatConversation + "#private",
+    "https://chatgpt.com/@other/c/" + chatConversation,
+    "https://chatgpt.com/c/not-a-uuid",
+    "https://chatgpt.com/",
+})
+{
+    var rejected = ChatGptControlContract.Inspect(invalid);
+    Require(!rejected.Recognized && rejected.ConversationId is null &&
+        rejected.CanonicalUrl is null && rejected.AdapterState == "NOT_CONNECTED",
+        "Unqualified/malformed conversation URL was accepted: " + invalid);
+}
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
