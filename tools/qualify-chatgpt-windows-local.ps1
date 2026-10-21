@@ -278,4 +278,8 @@ finally {
     Write-Host "Safe to share: $summary"
     Write-Host 'Do not share the private checkout or arbitrary browser files.'
     Get-Content -Raw $summary | Write-Host
+    if (@($script:Stages | Where-Object { $_.state -eq 'FAIL' }).Count -gt 0) {
+        Write-Host 'One or more stages failed; see the stage reason codes in summary.json.'
+        exit 1
+    }
 }
