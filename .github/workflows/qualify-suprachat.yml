@@ -1233,6 +1233,16 @@ jobs:
             }
           }
           Write-Host 'Windows actor PowerShell syntax PASS (execution separately gated)'
+          $actor = Get-Content -Raw tools/qualify-chatgpt-windows-local.ps1
+          if ($actor -match '(?mi)^\\s*&\\s*(docker|podman|nerdctl|wsl(?:\\.exe)?)\\b' -or
+              $actor -match '(?i)ci\\.ps1.{0,90}heavy') {
+            throw 'Windows local actor invokes container runtime against operator policy'
+          }
+          if ($actor -notmatch 'NativeBrowserSmoke' -or
+              $actor -notmatch 'WINDOWS_CONTAINER_HOST_PROHIBITED') {
+            throw 'Windows native browser smoke and no-container policy not enforced'
+          }
+          Write-Host 'Windows actor container-free execution policy PASS'
       - name: Validate native-browser launcher JavaScript syntax
         shell: bash
         run: node --check tools/run-bridge-native-browser-smoke.mjs
