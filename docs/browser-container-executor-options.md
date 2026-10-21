@@ -1,5 +1,7 @@
 # SupraChat #19 — container execution alternatives and host admission (2026-10-21)
 
+**Binding operator policy (October 21, 2026):** Do not install, start, or configure Docker Engine, Docker Desktop or another container daemon on the Windows development PC. Docker Desktop's resource-growth behavior is unacceptable to the operator. The Windows host will run native Playwright, Windows UIA and browser HIL only. Linux OCI heavy qualification belongs on an admitted TrueNAS Linux/GARM executor; public-safe OCI on free Ubuntu GHA. Historical Windows container options in the matrix below are feasibility comparisons, not authorization to provision the development PC.
+
 ## Canonical heavy gate
 
 Private userscripts source authority is `SupraShellScripts/userscripts-private` PR #105.
@@ -67,10 +69,7 @@ Desktop installs only support Linux containers. Windows Server containers
 have version/edition and Hyper-V isolation constraints; do not infer
 capability from a `docker.exe` command alone.
 
-After inspecting the user's actual host, choose one of: (a) use existing
-TrueNAS/Linux OCI for canonical gates; (b) optionally provision isolated
-Linux containers on Windows via WSL2; (c) investigate a separate Windows
-NanoServer/ServerCore testing lane, which cannot run the current Linux image.
+Given the explicit no-container-daemon policy for Windows, the selected plan is: (a) use admitted TrueNAS/Linux OCI for private canonical gates; (b) public Ubuntu GHA for sanitized OCI tests; (c) local native Windows Playwright/UIA; (d) Windows NanoServer/ServerCore studies only on disposable hosted Windows GHA, not the development PC.
 Never automatically enable machine-wide virtualization/features, install
 services, reboot the host or switch the user's Docker daemon mode.
 
