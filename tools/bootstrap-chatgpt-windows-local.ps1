@@ -75,7 +75,7 @@ if ($NeedDotnet) {
         $metadata = Invoke-RestMethod -Uri $metadataUrl -TimeoutSec 90 -ErrorAction Stop
         $release = @($metadata.releases | Where-Object { $_.sdk.version -eq $pin }) | Select-Object -First 1
         if (-not $release) { throw 'BOOTSTRAP_DOTNET_PIN_NOT_IN_MANIFEST' }
-        $asset = @($release.sdk.files | Where-Object { $_.name -eq ('dotnet-sdk-' + $pin + '-win-x64.zip') }) | Select-Object -First 1
+        $asset = @($release.sdk.files | Where-Object { $_.name -eq 'dotnet-sdk-win-x64.zip' -or $_.name -eq ('dotnet-sdk-' + $pin + '-win-x64.zip') }) | Select-Object -First 1
         if (-not $asset -or $asset.url -notmatch '^https://builds[.]dotnet[.]microsoft[.]com/dotnet/Sdk/10[.]0[.]402/') {
             throw 'BOOTSTRAP_DOTNET_ASSET_NOT_OFFICIAL'
         }
