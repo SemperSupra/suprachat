@@ -90,6 +90,7 @@ public static class ChatGptRelayObservation
                 !root.TryGetProperty("clients", out var clients) ||
                 clients.ValueKind != JsonValueKind.Array ||
                 !root.TryGetProperty("queueDepth", out var queue) ||
+                queue.ValueKind != JsonValueKind.Number ||
                 !queue.TryGetInt32(out var queueDepth) || queueDepth < 0 ||
                 !root.TryGetProperty("quarantineCounts", out var quarantine) ||
                 quarantine.ValueKind != JsonValueKind.Object ||
