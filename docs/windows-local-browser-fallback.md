@@ -17,11 +17,13 @@ was detected by the original ci.ps1. No request was sent to ChatGPT.
 
 ## Bounded corrective path
 
-The public actor now performs an actual runtime `info` capability probe
-before invoking the canonical container-heavy gate. If no usable daemon
-exists, it records `private-bridge-heavy-browser-ci=SKIP` with
-`CONTAINER_ENGINE_UNAVAILABLE` rather than misclassifying it as browser
-test failure. It separately runs `private-bridge-native-browser-smoke`.
+**Current Windows host policy supersedes the earlier runtime-probe plan:**
+Docker Engine/Desktop and any replacement container daemon are prohibited on
+the development box. The Windows actor never probes, installs, enables,
+starts or switches container engines. The legacy `-ContainerHeavy` switch is a
+no-op that emits `private-bridge-heavy-browser-ci=SKIP` with reason
+`WINDOWS_CONTAINER_HOST_PROHIBITED`. The independent native Playwright lane
+runs only with explicit `-NativeBrowserSmoke`; no Docker dependency.
 
 Native smoke uses version-pinned Playwright 1.62.0, installed only inside
 the disposable checkout's ownership-marked `.local/suprachat-qualification`
@@ -53,7 +55,7 @@ umbrella workspace is read-only discovery input, not a Git checkout.
     git -C $checkout pull --ff-only origin feat/19-chatgpt-control-contract-20261020
     if ($LASTEXITCODE -ne 0) { throw 'Public branch update failed' }
     $script = Join-Path $checkout 'tools\qualify-chatgpt-windows-local.ps1'
-    pwsh -NoProfile -ExecutionPolicy Bypass -File $script -WorkspaceRoot $workspace -IncludePrivateBridge -ContainerHeavy
+    pwsh -NoProfile -ExecutionPolicy Bypass -File $script -WorkspaceRoot $workspace -IncludePrivateBridge -NativeBrowserSmoke
 
 The default does not issue a real ChatGPT prompt. The exact private
 commit is validated on checkout; a mismatch aborts safely. Only the
