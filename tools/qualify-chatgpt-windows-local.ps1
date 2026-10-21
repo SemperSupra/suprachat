@@ -9,7 +9,8 @@ Only summary.json should be shared with the project.
 [CmdletBinding()]
 param(
     [switch]$IncludePrivateBridge,
-    [switch]$ContainerHeavy,
+    [switch]$ContainerHeavy, # Legacy: always SKIP on this Windows host; never probe a daemon.
+    [switch]$NativeBrowserSmoke,
     [switch]$SkipLiveGuest,
     [switch]$RunLiveGuest,
     [switch]$DiscoverOnly,
@@ -22,6 +23,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if ($NativeBrowserSmoke -and -not $IncludePrivateBridge) {
+    throw 'NATIVE_BROWSER_SMOKE_REQUIRES_PRIVATE_BRIDGE'
+}
 $PrivateExpectedHead = '5adceaae29266465fa5c49ff72ab865876c3129b'
 $PrivateBranch = 'fix/49-uncertain-submission-quarantine-20261021'
 $PublicRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -287,44 +291,12 @@ try {
                         & node tools/security-scan.mjs
                     } | Out-Null
                     if ($ContainerHeavy) {
-                        $containerReady = $false
-                        foreach ($candidate in @('docker', 'podman', 'nerdctl')) {
-                            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-                            try {
-                                & $candidate info *> $null
-                                if ($LASTEXITCODE -eq 0) { $containerReady = $true; break }
-                            } catch { }
-                        }
-                        if (-not $containerReady -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-                            try {
-                                $distros = @(& wsl.exe --list --quiet 2>$null |
-                                    ForEach-Object { ($_ -replace [char]0, '').Trim() } |
-                                    Where-Object { $_ })
-                                foreach ($distro in $distros) {
-                                    foreach ($candidate in @('docker', 'podman', 'nerdctl')) {
-                                        & wsl.exe -d $distro -- sh -lc "command -v $candidate >/dev/null 2>&1 && $candidate info >/dev/null 2>&1" *> $null
-                                        if ($LASTEXITCODE -eq 0) { $containerReady = $true; break }
-                                    }
-                                    if ($containerReady) { break }
-                                }
-                            } catch { }
-                        }
-                        if ($containerReady) {
-                            Add-Stage 'container-engine-discovery' 'PASS' 'USABLE_RUNTIME_CONFIRMED'
-                        } else {
-                            Add-Stage 'container-engine-discovery' 'SKIP' 'NO_USABLE_CONTAINER_RUNTIME'
-                        }
-                                                if ($containerReady) {
-                            Run-Stage 'private-bridge-heavy-browser-ci' {
-                                & (Join-Path $privateRoot 'ci.ps1') heavy -Script chatgpt-local-bridge
-                            } | Out-Null
-                        } else {
-                            Add-Stage 'private-bridge-heavy-browser-ci' 'SKIP' 'CONTAINER_ENGINE_UNAVAILABLE'
-                            # No privileged hypervisor/daemon installer is authorized.
-                            # A native Playwright fixture rep can still qualify the
-                            # browser path without being called canonical heavy PASS.
-                        }
-
+                        # Operator prohibits Docker Engine/Desktop or container-daemon
+                        # changes on the Windows development box because of resource
+                        # growth risk. A legacy flag must NOT trigger probing/install.
+                        Add-Stage 'private-bridge-heavy-browser-ci' 'SKIP' 'WINDOWS_CONTAINER_HOST_PROHIBITED'
+                    }
+                    if ($NativeBrowserSmoke) {
                         Run-Stage 'private-bridge-native-browser-smoke' {
                             $bootstrap = Join-Path $PSScriptRoot 'bootstrap-chatgpt-windows-local.ps1'
                             $null = . $bootstrap -ProjectRoot $PublicRepoRoot
@@ -357,6 +329,8 @@ try {
                             & node $runner --private-root $privateRoot --playwright-root $nodePkgRoot --receipt $nativeReceipt --browsers chromium,firefox,webkit
                             if ($LASTEXITCODE -ne 0) { throw 'NATIVE_BRIDGE_BROWSER_SMOKE_FAILED' }
                         } | Out-Null
+                    } else {
+                        Add-Stage 'private-bridge-native-browser-smoke' 'SKIP' 'OPT_IN_REQUIRED'
                     }
                 } finally { Pop-Location }
             }
