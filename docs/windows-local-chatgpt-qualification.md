@@ -7,6 +7,22 @@ an unattended agent, account use, credential transfer or GitHub write.
 
 Windows 10/11 (x64), PowerShell 7 and Git. The script first observes the tool inventory. If the .NET 10 SDK or Node.js 22+ is missing, it downloads the exact pinned portable .NET SDK 10.0.402 and Node.js v24.21.0 ZIPs, verifies SHA-512/SHA-256 against Microsoft's and Node.js's official release metadata, and expands them under the disposable checkout's .local directory. It uses process-local PATH and project-local NuGet/Playwright caches only. No administrator access, winget or system-wide installer is needed. Existing valid SDK/Node versions are reused. GitHub CLI is optional; the private repository uses the user's existing Git credentials. Docker, Podman, nerdctl, or WSL-backed Docker can enable the optional heavy container gate.
 
+## Important: workspace root versus executable checkout
+
+The parent folder C:\Users\Mark\Projects\SemperSupra\SupraChat is an umbrella
+workspace and is NOT itself a Git repository. There is no .git directory and
+no tools/qualify-chatgpt-windows-local.ps1 at that parent level. The public
+repo may exist at the child folder suprachat, but never assume it is the
+qualification branch or modify it in place. Reuse the previously cloned
+disposable checkout at:
+
+    C:\Users\Mark\AppData\Local\Temp\suprachat-qual-2a135668507f48ca93fa2529acba9c53
+
+Run Git with -C against the actual checkout and pass the script's absolute
+path to pwsh -File. Pass the established umbrella workspace separately using
+-WorkspaceRoot. A tested self-contained checkout-selection snippet is
+maintained in docs/windows-local-repeatability-contract.md.
+
 ## One batch (PowerShell 7)
 
     $dir = Join-Path $env:TEMP ("suprachat-qual-" + [guid]::NewGuid().ToString("N"))
