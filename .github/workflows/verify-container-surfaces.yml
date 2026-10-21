@@ -72,6 +72,19 @@ jobs:
             -not $receipt.window_os -or $receipt.authorization_to_install_or_enable) {
             throw 'Read-only container census invariant failure'
           }
+      - name: Launch pinned Windows Nano Server container on hosted Windows daemon
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $daemon = (& docker info --format '{{.OSType}}' | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $daemon -ne 'windows') {
+            throw 'This hosted runner does not expose a Windows Docker daemon'
+          }
+          $observed = & docker run --rm --isolation=process mcr.microsoft.com/windows/nanoserver:ltsc2025 cmd.exe /c echo SUPRACHAT_WINDOWS_CONTAINER_OK
+          if ($LASTEXITCODE -ne 0 -or -not (($observed | Out-String) -match 'SUPRACHAT_WINDOWS_CONTAINER_OK')) {
+            throw 'Actual Windows Nano Server container execution failed'
+          }
+          Write-Host 'Windows OCI Nano Server ltsc2025 execution PASS; canonical browser image still Linux-only'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
