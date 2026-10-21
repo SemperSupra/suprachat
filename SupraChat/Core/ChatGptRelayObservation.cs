@@ -103,14 +103,20 @@ public static class ChatGptRelayObservation
             {
                 if (client.ValueKind != JsonValueKind.Object ||
                     !client.TryGetProperty("conversationUrl", out var url) ||
-                    url.ValueKind != JsonValueKind.String ||
+                    (url.ValueKind != JsonValueKind.String && url.ValueKind != JsonValueKind.Null) ||
                     !client.TryGetProperty("browserState", out var state) ||
-                    state.ValueKind != JsonValueKind.String)
+                    state.ValueKind != JsonValueKind.String ||
+                    !client.TryGetProperty("busy", out var busy) ||
+                    (busy.ValueKind != JsonValueKind.True && busy.ValueKind != JsonValueKind.False))
                     return Unavailable("INVALID_RELAY_METADATA");
 
-                // Compare full canonical origin AND route, never just a GUID.
-                if (string.Equals(url.GetString(), inspection.CanonicalUrl, StringComparison.Ordinal) &&
-                    string.Equals(state.GetString(), "ready", StringComparison.Ordinal))
+                // The private relay legitimately reports null URLs while tabs
+                // are loading/unconfigured. They are never matching clients.
+                // Also exclude busy clients: readiness is NOT just a DOM label.
+                if (url.ValueKind == JsonValueKind.String &&
+                    string.Equals(url.GetString(), inspection.CanonicalUrl, StringComparison.Ordinal) &&
+                    string.Equals(state.GetString(), "ready", StringComparison.Ordinal) &&
+                    busy.ValueKind == JsonValueKind.False)
                     matching++;
             }
             return new ChatGptRelayState(
