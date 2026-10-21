@@ -56,8 +56,10 @@ var relayFixture = JsonSerializer.Serialize(new
 {
     clients = new object[]
     {
-        new {conversationUrl = relayTarget, browserState = "ready", id = "private-actor-id", token = "must-never-escape"},
-        new {conversationUrl = otherTarget, browserState = "ready", id = "different-actor-id"}
+        new {conversationUrl = relayTarget, browserState = "ready", busy = false, id = "private-actor-id", token = "must-never-escape"},
+        new {conversationUrl = otherTarget, browserState = "ready", busy = false, id = "different-actor-id"},
+        new {conversationUrl = (string?)null, browserState = "loading", busy = false, id = "unbound-tab"},
+        new {conversationUrl = relayTarget, browserState = "ready", busy = true, id = "assigned-tab"}
     },
     queueDepth = 2,
     quarantineCounts = new {clients = 1, conversations = 1},
@@ -84,6 +86,9 @@ Require(!ChatGptRelayObservation.Interpret(relayTarget, "{}").Connected &&
 Require(!ChatGptRelayObservation.Interpret(relayTarget,
     """{"clients":[],"queueDepth":"not-an-int","quarantineCounts":{"clients":0,"conversations":0}}""").Connected,
     "Non-numeric bridge metadata must fail closed");
+Require(!ChatGptRelayObservation.Interpret(relayTarget,
+    """{"clients":[{"conversationUrl":"https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000","browserState":"ready"}],"queueDepth":0,"quarantineCounts":{"clients":0,"conversations":0}}""").Connected,
+    "Client missing busy state must not be presented as ready");
 var missingToken = await ChatGptRelayObservation.ObserveAsync(relayTarget, 7654, null);
 Require(!missingToken.Connected && missingToken.ErrorCode == "NO_LOCAL_RELAY_TOKEN" &&
         !missingToken.MaySubmit, "Missing token must prevent all network calls");
