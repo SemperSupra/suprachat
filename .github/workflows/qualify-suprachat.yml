@@ -1325,6 +1325,11 @@ jobs:
           if (-not (Test-Path $marker)) { throw 'Dry-run cleanup deleted owned tools' }
           & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root -Apply
           if (Test-Path $owned) { throw 'Apply cleanup retained owned namespace' }
+          $exclude = Join-Path $root '.git/info/exclude'
+          if ((Get-Content -LiteralPath $exclude) -contains '# suprachat-qualification-owned-exclude/v1' -or
+              (Get-Content -LiteralPath $exclude) -contains '.local/suprachat-qualification/') {
+            throw 'Apply cleanup retained qualification-owned Git exclude entries'
+          }
           & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root -Apply
           if (-not (Test-Path (Join-Path $root 'tools/qualify-chatgpt-windows-local.ps1'))) {
             throw 'Cleanup touched repository source'
