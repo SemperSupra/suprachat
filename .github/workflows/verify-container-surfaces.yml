@@ -51,7 +51,7 @@ jobs:
           retention-days: 7
 
   windows-container-census:
-    name: Windows hosted runner: native Hyper-V WSL Docker census
+    name: Windows hosted runner native Hyper-V WSL Docker census
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
