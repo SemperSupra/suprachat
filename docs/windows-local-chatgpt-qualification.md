@@ -5,10 +5,7 @@ an unattended agent, account use, credential transfer or GitHub write.
 
 ## Requirements
 
-Windows 10/11, PowerShell 7, Git and .NET SDK 10. The optional private
-browser/bridge checks require Node.js 22+ and GitHub CLI with existing
-read access to SupraShellScripts/userscripts-private. Docker Desktop or another
-supported Docker engine enables the existing private heavy browser gate.
+Windows 10/11 (x64), PowerShell 7 and Git. The script first observes the tool inventory. If the .NET 10 SDK or Node.js 22+ is missing, it downloads the exact pinned portable .NET SDK 10.0.402 and Node.js v24.21.0 ZIPs, verifies SHA-512/SHA-256 against Microsoft's and Node.js's official release metadata, and expands them under the disposable checkout's .local directory. It uses process-local PATH and project-local NuGet/Playwright caches only. No administrator access, winget or system-wide installer is needed. Existing valid SDK/Node versions are reused. GitHub CLI is optional; the private repository uses the user's existing Git credentials. Docker, Podman, nerdctl, or WSL-backed Docker can enable the optional heavy container gate.
 
 ## One batch (PowerShell 7)
 
@@ -20,22 +17,22 @@ supported Docker engine enables the existing private heavy browser gate.
 
 On Windows systems with Restricted execution policy, the process-local -ExecutionPolicy Bypass option avoids changing machine/user policy. It must be invoked with pwsh (PowerShell 7), not Windows PowerShell 5.1. If Group Policy enforces AllSigned or another restrictive policy, do not circumvent organizational controls; obtain the permitted execution path instead. Verify PowerShell 7 with Get-Command pwsh and inspect effective policies using Get-ExecutionPolicy -List.
 
-Remove -IncludePrivateBridge -ContainerHeavy for a public-only run. Add
--SkipLiveGuest to prohibit even the one anonymous harmless prompt.
+Remove -IncludePrivateBridge -ContainerHeavy for a public-only run. Add -SkipLiveGuest to prohibit even one anonymous benign prompt. Add -BootstrapOnly for a pure tooling-discovery/installation/verification pass; add -NoBootstrap to fail instead of downloading; add -ForcePortableTools to independently prove the installer path even when system tooling exists. Use a process-scoped PowerShell 7 -ExecutionPolicy Bypass only when locally permitted. If an organizational Group Policy forbids running scripts, use an approved execution mechanism rather than circumvent it.
 
 ## Scope
 
-1. Compile standalone .NET browser probe and install Chromium.
-2. Run six offline synthetic browser scenarios, with assertions.
-3. In a new isolated Chromium context without profile/cookies/login, navigate
+1. Observe the actual Git/SDK/Node inventory, plan only missing tools, install verified portable ZIPs into .local, and verify versions from the resulting process environment. The exact versions and checksum evidence are preserved in the local receipt.
+2. Compile standalone .NET browser probe and install Chromium.
+3. Run six offline synthetic browser scenarios, with assertions.
+4. In a new isolated Chromium context without profile/cookies/login, navigate
    to https://chatgpt.com and, only when a recognized guest send control
    exists, attempt ONE harmless message: Please reply with exactly
    GUEST_PROBE_OK and nothing else.
-4. If opted into private repo access, clone EXACT private PR #104 head
+5. If opted into private repo access, clone EXACT private PR #104 head
    577ec904abe36ab58e0980bf1bbcacb24c7db701 and run Node tests,
    build/validation/security and optional container heavy qualification.
    Fail closed if the private PR's branch head has changed.
-5. Leave only metadata-only receipts and private checkout on disk:
+6. Leave only metadata-only receipts and private checkout on disk:
    $HOME\SupraChatQualification\<UTC-run-id>\summary.json
 
 The script neither controls an already signed-in ChatGPT conversation nor
@@ -56,3 +53,9 @@ separately authorizing any signed-in, real-conversation submission. All
 local/authenticated HIL, independent validation, merges and releases
 remain separately gated. The local script exits when the batch is complete;
 it does not create a background worker.
+
+## Recovery after the first 2026-10-21 actor receipt
+
+The first Windows actor successfully cloned the public recovery branch but detected `No .NET SDKs were found`. The private preflight returned a generic failure because it unnecessarily required `gh` and did not self-provision Node. This is **TOOLING_NOT_PRESENT**, not a ChatGPT/browser test regression. Update the existing disposable checkout with `git pull --ff-only` (do not reclone), then invoke the script with the same PowerShell 7 process-scoped entrypoint. The script now performs Discover -> Plan -> Apply -> Verify and records actionable stages.
+
+The .local directory is excluded only in the checkout's local Git exclude; removing the disposable checkout removes the tool installation. Large SDK and browser downloads require network access to official Microsoft, Node.js, NuGet and Playwright hosts. If blocked, the receipt records a dependency/bootstrap blocker rather than using unofficial mirrors, bypassing proxies, or installing globally.
