@@ -60,7 +60,7 @@ checkouts are separate owner-managed items and are not removed by cleanup.
 The default runs offline tests only. Repeating a successful bootstrap
 reuses verified local installed versions; repeated cleanup is a no-op.
 The -ForcePortableTools option deliberately rewrites the pinned local
-toolchain and is NOT a no-op. Docker image builds, NuGet and Playwright
+toolchain and is NOT a no-op. Native browser tooling, NuGet and Playwright
 caches, and timestamped receipts may mutate local disposable state while
 keeping the same accepted test result.
 
@@ -92,7 +92,7 @@ actual disposable checkout first, and pass WorkspaceRoot independently.
     if (-not (Test-Path $runnerScript)) { throw 'Actor script not present in checkout' }
     pwsh -NoProfile -ExecutionPolicy Bypass -File $runnerScript -WorkspaceRoot $workspace -DiscoverOnly
     if ($LASTEXITCODE -ne 0) { throw 'Discovery failed' }
-    pwsh -NoProfile -ExecutionPolicy Bypass -File $runnerScript -WorkspaceRoot $workspace -IncludePrivateBridge -ContainerHeavy
+    pwsh -NoProfile -ExecutionPolicy Bypass -File $runnerScript -WorkspaceRoot $workspace -IncludePrivateBridge -NativeBrowserSmoke
 
 Do not run with -RunLiveGuest unless an external prompt is desired. Share
 only the newly emitted summary.json and keep private bridge checkout files
