@@ -49,8 +49,13 @@ $env:DOTNET_NOLOGO = '1'
 
 # This is a LOCAL Git exclusion; the published repository is untouched.
 $exclude = Join-Path $project '.git/info/exclude'
-if ((Test-Path $exclude) -and -not ((Get-Content $exclude) -contains '.local/')) {
-    Add-Content -LiteralPath $exclude -Value '.local/'
+$ownedExclude = '.local/suprachat-qualification/'
+$ownedExcludeMarker = '# suprachat-qualification-owned-exclude/v1'
+if (Test-Path -LiteralPath $exclude) {
+    $existingExclusions = @(Get-Content -LiteralPath $exclude)
+    if ($existingExclusions -notcontains $ownedExclude) {
+        Add-Content -LiteralPath $exclude -Value @($ownedExcludeMarker, $ownedExclude)
+    }
 }
 
 function Download-VerifiedZip(
