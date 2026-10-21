@@ -20,8 +20,26 @@ if (-not $IsWindows -or
 }
 
 $project = [IO.Path]::GetFullPath($ProjectRoot)
-$toolRoot = Join-Path $project '.local'
+$toolRoot = Join-Path $project '.local/suprachat-qualification'
+$ownerMarker = Join-Path $toolRoot '.suprachat-tools-owned.json'
 $downloads = Join-Path $toolRoot '_downloads'
+if ((Test-Path -LiteralPath $toolRoot) -and -not (Test-Path -LiteralPath $ownerMarker)) {
+    throw 'BOOTSTRAP_UNOWNED_LOCAL_NAMESPACE'
+}
+New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
+if (-not (Test-Path -LiteralPath $ownerMarker)) {
+    @{
+        schema = 'suprachat-owned-tools/v1'
+        kind = 'ephemeral-checkout-toolchain'
+        project_full_path = $project
+    } | ConvertTo-Json | Set-Content -LiteralPath $ownerMarker -Encoding utf8
+} else {
+    $marker = Get-Content -Raw -LiteralPath $ownerMarker | ConvertFrom-Json
+    if ($marker.schema -ne 'suprachat-owned-tools/v1' -or
+        $marker.project_full_path -ne $project) {
+        throw 'BOOTSTRAP_LOCAL_NAMESPACE_OWNERSHIP_MISMATCH'
+    }
+}
 New-Item -ItemType Directory -Force -Path $downloads | Out-Null
 $env:DOTNET_CLI_HOME = Join-Path $toolRoot 'dotnet-home'
 $env:NUGET_PACKAGES = Join-Path $toolRoot 'nuget'
