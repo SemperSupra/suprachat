@@ -1215,13 +1215,20 @@ jobs:
         run: |
           $tokens = $null
           $issues = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path tools/qualify-chatgpt-windows-local.ps1).Path,
-            [ref]$tokens,
-            [ref]$issues) | Out-Null
-          if ($issues.Count -gt 0) {
-            $issues | ForEach-Object { Write-Host $_.Message }
-            throw 'Windows actor PowerShell parser failed'
+          foreach ($path in @(
+            'tools/qualify-chatgpt-windows-local.ps1',
+            'tools/bootstrap-chatgpt-windows-local.ps1'
+          )) {
+            $tokens = $null
+            $issues = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path).Path,
+              [ref]$tokens,
+              [ref]$issues) | Out-Null
+            if ($issues.Count -gt 0) {
+              $issues | ForEach-Object { Write-Host $_.Message }
+              throw "Windows actor PowerShell parser failed: $path"
+            }
           }
           Write-Host 'Windows actor PowerShell syntax PASS (execution separately gated)'
       - name: Deterministic guest-state taxonomy checks
@@ -1261,6 +1268,35 @@ jobs:
         with:
           name: suprachat-anonymous-guest-probe
           path: out/anonymous-chatgpt/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+
+  portable-tool-bootstrap-windows:
+    # Disposable Windows-only bootstrap verification. No GH private source,
+    # account cookies, browser login, or machine installer is used.
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/19-chatgpt-control-contract-20261020'
+    name: Verify stateless Windows .local SDK and Node bootstrap
+    runs-on: windows-2025
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Force portable SDK and Node in isolated repo checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File tools/qualify-chatgpt-windows-local.ps1 -IncludePrivateBridge -BootstrapOnly -ForcePortableTools -SkipLiveGuest
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Portable bootstrap/verification failed'
+          }
+      - name: Preserve provisioning receipt without installed executables
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suprachat-windows-portable-tooling
+          path: ~/SupraChatQualification/**/summary.json
           if-no-files-found: warn
           retention-days: 7
 
