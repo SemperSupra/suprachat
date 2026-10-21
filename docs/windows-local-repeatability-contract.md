@@ -69,13 +69,30 @@ NOT idempotent. To authorize exactly one benign anonymous attempt on each
 explicit invocation, add -RunLiveGuest. This is not suitable for unattended
 retry loops. No signed-in ChatGPT prompt is authorized or automated.
 
-## Normal batch
+## Normal batch — workspace root is NOT a Git checkout
 
-From the disposable public SupraChat checkout, after fast-forwarding only
-to the intended reviewed source commit:
+The established Windows work root has several child folders and no .git
+directory at its root. Do not issue git pull or use relative tools/ paths
+from C:\Users\Mark\Projects\SemperSupra\SupraChat. Resolve a separate,
+actual disposable checkout first, and pass WorkspaceRoot independently.
 
-    git pull --ff-only origin feat/19-chatgpt-control-contract-20261020
-    pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\qualify-chatgpt-windows-local.ps1 -WorkspaceRoot 'C:\Users\Mark\Projects\SemperSupra\SupraChat' -IncludePrivateBridge -ContainerHeavy
+    $workspace = 'C:\Users\Mark\Projects\SemperSupra\SupraChat'
+    $checkout = 'C:\Users\Mark\AppData\Local\Temp\suprachat-qual-2a135668507f48ca93fa2529acba9c53'
+    $branch = 'feat/19-chatgpt-control-contract-20261020'
+    if (Test-Path (Join-Path $checkout '.git')) {
+        $actual = (& git -C $checkout branch --show-current).Trim()
+        if ($actual -ne $branch) { throw "Unexpected checkout branch: $actual" }
+        git -C $checkout pull --ff-only origin $branch
+    } else {
+        $checkout = Join-Path $env:TEMP ('suprachat-qual-' + [guid]::NewGuid().ToString('N'))
+        git clone --depth 1 --branch $branch https://github.com/SemperSupra/suprachat.git $checkout
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'Checkout update/clone failed' }
+    $runnerScript = Join-Path $checkout 'tools\qualify-chatgpt-windows-local.ps1'
+    if (-not (Test-Path $runnerScript)) { throw 'Actor script not present in checkout' }
+    pwsh -NoProfile -ExecutionPolicy Bypass -File $runnerScript -WorkspaceRoot $workspace -DiscoverOnly
+    if ($LASTEXITCODE -ne 0) { throw 'Discovery failed' }
+    pwsh -NoProfile -ExecutionPolicy Bypass -File $runnerScript -WorkspaceRoot $workspace -IncludePrivateBridge -ContainerHeavy
 
 Do not run with -RunLiveGuest unless an external prompt is desired. Share
 only the newly emitted summary.json and keep private bridge checkout files
