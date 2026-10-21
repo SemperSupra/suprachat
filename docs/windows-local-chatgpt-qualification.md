@@ -5,7 +5,7 @@ an unattended agent, account use, credential transfer or GitHub write.
 
 ## Requirements
 
-Windows 10/11 (x64), PowerShell 7 and Git. The script first observes the tool inventory. If the .NET 10 SDK or Node.js 22+ is missing, it downloads the exact pinned portable .NET SDK 10.0.402 and Node.js v24.21.0 ZIPs, verifies SHA-512/SHA-256 against Microsoft's and Node.js's official release metadata, and expands them under the disposable checkout's .local directory. It uses process-local PATH and project-local NuGet/Playwright caches only. No administrator access, winget or system-wide installer is needed. Existing valid SDK/Node versions are reused. GitHub CLI is optional; the private repository uses the user's existing Git credentials. Docker, Podman, nerdctl, or WSL-backed Docker can enable the optional heavy container gate.
+Windows 10/11 (x64), PowerShell 7 and Git. The script first observes the tool inventory. If the .NET 10 SDK or Node.js 22+ is missing, it downloads the exact pinned portable .NET SDK 10.0.402 and Node.js v24.21.0 ZIPs, verifies SHA-512/SHA-256 against Microsoft's and Node.js's official release metadata, and expands them under the disposable checkout's .local directory. It uses process-local PATH and project-local NuGet/Playwright caches only. No administrator access, winget or system-wide installer is needed. Existing valid SDK/Node versions are reused. GitHub CLI is optional; the private repository uses the user's existing Git credentials. Docker Engine/Desktop and other container daemons are explicitly prohibited on the Windows development box. Canonical Linux OCI heavy qualification belongs on an admitted TrueNAS Linux executor.
 
 ## Important: workspace root versus executable checkout
 
@@ -29,11 +29,11 @@ maintained in docs/windows-local-repeatability-contract.md.
     git clone --depth 1 --branch feat/19-chatgpt-control-contract-20261020 https://github.com/SemperSupra/suprachat.git $dir
     if ($LASTEXITCODE -ne 0) { throw "SupraChat clone failed" }
     Set-Location $dir
-    pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\qualify-chatgpt-windows-local.ps1 -IncludePrivateBridge -ContainerHeavy
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\qualify-chatgpt-windows-local.ps1 -IncludePrivateBridge -NativeBrowserSmoke
 
 On Windows systems with Restricted execution policy, the process-local -ExecutionPolicy Bypass option avoids changing machine/user policy. It must be invoked with pwsh (PowerShell 7), not Windows PowerShell 5.1. If Group Policy enforces AllSigned or another restrictive policy, do not circumvent organizational controls; obtain the permitted execution path instead. Verify PowerShell 7 with Get-Command pwsh and inspect effective policies using Get-ExecutionPolicy -List.
 
-Remove -IncludePrivateBridge -ContainerHeavy for a public-only run. Add -SkipLiveGuest to prohibit even one anonymous benign prompt. Add -BootstrapOnly for a pure tooling-discovery/installation/verification pass; add -NoBootstrap to fail instead of downloading; add -ForcePortableTools to independently prove the installer path even when system tooling exists. Use a process-scoped PowerShell 7 -ExecutionPolicy Bypass only when locally permitted. If an organizational Group Policy forbids running scripts, use an approved execution mechanism rather than circumvent it.
+Remove -IncludePrivateBridge -NativeBrowserSmoke for a public-only run. Add -SkipLiveGuest to prohibit even one anonymous benign prompt. Add -BootstrapOnly for a pure tooling-discovery/installation/verification pass; add -NoBootstrap to fail instead of downloading; add -ForcePortableTools to independently prove the installer path even when system tooling exists. Use a process-scoped PowerShell 7 -ExecutionPolicy Bypass only when locally permitted. If an organizational Group Policy forbids running scripts, use an approved execution mechanism rather than circumvent it.
 
 ## Scope
 
@@ -46,7 +46,7 @@ Remove -IncludePrivateBridge -ContainerHeavy for a public-only run. Add -SkipLiv
    GUEST_PROBE_OK and nothing else.
 5. If opted into private repo access, clone EXACT private PR #104 head
    577ec904abe36ab58e0980bf1bbcacb24c7db701 and run Node tests,
-   build/validation/security and optional container heavy qualification.
+   build/validation/security and optional native Playwright fixture qualification. No Windows container engine is probed or started.
    Fail closed if the private PR's branch head has changed.
 6. Leave only metadata-only receipts and private checkout on disk:
    $HOME\SupraChatQualification\<UTC-run-id>\summary.json
