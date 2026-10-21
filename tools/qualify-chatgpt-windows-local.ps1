@@ -287,16 +287,70 @@ try {
                         & node tools/security-scan.mjs
                     } | Out-Null
                     if ($ContainerHeavy) {
-                        if ((Get-Command docker -ErrorAction SilentlyContinue) -or
-                            (Get-Command podman -ErrorAction SilentlyContinue) -or
-                            (Get-Command nerdctl -ErrorAction SilentlyContinue) -or
-                            (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+                        $containerReady = Run-Stage 'container-engine-discovery' {
+                            $usable = $false
+                            foreach ($candidate in @('docker', 'podman', 'nerdctl')) {
+                                if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+                                & $candidate info *> $null
+                                if ($LASTEXITCODE -eq 0) { $usable = $true; break }
+                            }
+                            if (-not $usable -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+                                $distros = @(& wsl.exe --list --quiet 2>$null |
+                                    ForEach-Object { ($_ -replace [char]0, '').Trim() } |
+                                    Where-Object { $_ })
+                                foreach ($distro in $distros) {
+                                    foreach ($bin in @('docker', 'podman', 'nerdctl')) {
+                                        & wsl.exe -d $distro -- sh -lc "command -v $bin >/dev/null 2>&1 && $bin info >/dev/null 2>&1" *> $null
+                                        if ($LASTEXITCODE -eq 0) { $usable = $true; break }
+                                    }
+                                    if ($usable) { break }
+                                }
+                            }
+                            if (-not $usable) { throw 'CONTAINER_ENGINE_UNAVAILABLE' }
+                        }
+                        if ($containerReady) {
                             Run-Stage 'private-bridge-heavy-browser-ci' {
                                 & (Join-Path $privateRoot 'ci.ps1') heavy -Script chatgpt-local-bridge
                             } | Out-Null
                         } else {
-                            Add-Stage 'private-bridge-heavy-browser-ci' 'SKIP' 'CONTAINER_RUNTIME_NOT_DISCOVERED'
+                            Add-Stage 'private-bridge-heavy-browser-ci' 'SKIP' 'CONTAINER_ENGINE_UNAVAILABLE'
+                            # No privileged hypervisor/daemon installer is authorized.
+                            # A native Playwright fixture rep can still qualify the
+                            # browser path without being called canonical heavy PASS.
                         }
+
+                        Run-Stage 'private-bridge-native-browser-smoke' {
+                            $bootstrap = Join-Path $PSScriptRoot 'bootstrap-chatgpt-windows-local.ps1'
+                            $null = . $bootstrap -ProjectRoot $PublicRepoRoot
+                            $toolOwnedRoot = Join-Path $PublicRepoRoot '.local/suprachat-qualification'
+                            $nodePkgRoot = Join-Path $toolOwnedRoot 'native-playwright'
+                            $playwrightManifest = Join-Path $nodePkgRoot 'node_modules/playwright/package.json'
+                            $installPlaywright = $true
+                            if (Test-Path -LiteralPath $playwrightManifest) {
+                                $metadata = Get-Content -Raw -LiteralPath $playwrightManifest | ConvertFrom-Json
+                                if ($metadata.version -eq '1.62.0') { $installPlaywright = $false }
+                            }
+                            if ($installPlaywright) {
+                                $nodeBin = (Get-Command node -ErrorAction Stop).Source
+                                $npmCli = Join-Path (Split-Path -Parent $nodeBin) 'node_modules/npm/bin/npm-cli.js'
+                                if (-not (Test-Path -LiteralPath $npmCli)) { throw 'NPM_CLI_UNAVAILABLE' }
+                                New-Item -ItemType Directory -Force -Path $nodePkgRoot | Out-Null
+                                & node $npmCli install --prefix $nodePkgRoot --ignore-scripts --no-audit --no-fund --save-exact 'playwright@1.62.0'
+                                if ($LASTEXITCODE -ne 0) { throw 'PLAYWRIGHT_NPM_INSTALL_FAILED' }
+                            }
+                            if (-not (Test-Path -LiteralPath $playwrightManifest) -or
+                                (Get-Content -Raw -LiteralPath $playwrightManifest | ConvertFrom-Json).version -ne '1.62.0') {
+                                throw 'PLAYWRIGHT_PIN_VERIFICATION_FAILED'
+                            }
+                            $cli = Join-Path $nodePkgRoot 'node_modules/playwright/cli.js'
+                            if (-not (Test-Path -LiteralPath $cli)) { throw 'PLAYWRIGHT_CLI_NOT_FOUND' }
+                            & node $cli install chromium firefox webkit
+                            if ($LASTEXITCODE -ne 0) { throw 'PLAYWRIGHT_BROWSERS_INSTALL_FAILED' }
+                            $runner = Join-Path $PSScriptRoot 'run-bridge-native-browser-smoke.mjs'
+                            $nativeReceipt = Join-Path $WorkRoot 'native-bridge-browser-smoke.json'
+                            & node $runner --private-root $privateRoot --playwright-root $nodePkgRoot --receipt $nativeReceipt --browsers chromium,firefox,webkit
+                            if ($LASTEXITCODE -ne 0) { throw 'NATIVE_BRIDGE_BROWSER_SMOKE_FAILED' }
+                        } | Out-Null
                     }
                 } finally { Pop-Location }
             }
