@@ -11,6 +11,9 @@ param(
     [switch]$IncludePrivateBridge,
     [switch]$ContainerHeavy,
     [switch]$SkipLiveGuest,
+    [switch]$RunLiveGuest,
+    [switch]$DiscoverOnly,
+    [string]$WorkspaceRoot = (Join-Path $HOME 'Projects/SemperSupra/SupraChat'),
     [switch]$NoBootstrap,
     [switch]$BootstrapOnly,
     [switch]$ForcePortableTools,
@@ -28,7 +31,20 @@ $WorkRoot = Join-Path ([IO.Path]::GetFullPath($ReceiptRoot)) $RunId
 New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
 $script:Stages = [System.Collections.Generic.List[object]]::new()
 $script:SourcePrivate = $null
-$script:Tooling = [ordered]@{ dotnet_before = $null; node_before = $null; dotnet_after = $null; node_after = $null; bootstrap = $null; scope = 'project-local-or-existing' }
+$script:Tooling = [ordered]@{
+    dotnet_before = $null
+    node_before = $null
+    dotnet_after = $null
+    node_after = $null
+    dotnet_origin = 'not-qualified'
+    node_origin = 'not-qualified'
+    workspace_present = $null
+    workspace_dirs_searched = 0
+    workspace_sdk10 = $null
+    workspace_node22 = $null
+    bootstrap = $null
+    scope = 'project-local-or-existing'
+}
 
 function Add-Stage([string]$Name, [string]$State, [string]$Reason = '') {
     $script:Stages.Add([ordered]@{
@@ -102,12 +118,46 @@ try {
         Require-Command 'git'
         $script:Tooling.dotnet_before = Discover-DotnetSdk10
         $script:Tooling.node_before = Discover-Node22
-        Write-Host "Discovered: .NET 10 SDK=$($script:Tooling.dotnet_before ?? 'MISSING'); Node >=22=$($script:Tooling.node_before ?? 'MISSING')"
-        Write-Host 'Scope: project .local; no permanent machine installation'
+        Write-Host "Discovered on PATH: .NET 10 SDK=$($script:Tooling.dotnet_before ?? 'MISSING'); Node >=22=$($script:Tooling.node_before ?? 'MISSING')"
+    }
+    $workspaceObserved = Run-Stage 'discover-existing-suprachat-workspace' {
+        $discoveryScript = Join-Path $PSScriptRoot 'discover-chatgpt-windows-workspace.ps1'
+        $snapshot = & $discoveryScript -WorkspaceRoot $WorkspaceRoot
+        $script:Tooling.workspace_present = [bool]$snapshot.workspace_present
+        $script:Tooling.workspace_dirs_searched = [int]$snapshot.searched_directories
+        $script:Tooling.workspace_sdk10 = $snapshot.dotnet_sdk10
+        $script:Tooling.workspace_node22 = $snapshot.node22
+        if (-not $ForcePortableTools) {
+            if (-not $script:Tooling.dotnet_before -and $snapshot.selected_dotnet_path) {
+                $dir = Split-Path -Parent $snapshot.selected_dotnet_path
+                $env:DOTNET_ROOT = $dir
+                $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
+                $script:Tooling.dotnet_origin = 'existing-workspace'
+            }
+            if (-not $script:Tooling.node_before -and $snapshot.selected_node_path) {
+                $dir = Split-Path -Parent $snapshot.selected_node_path
+                $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
+                $script:Tooling.node_origin = 'existing-workspace'
+            }
+        }
+        $script:Tooling.dotnet_before = Discover-DotnetSdk10
+        $script:Tooling.node_before = Discover-Node22
+        if ($script:Tooling.dotnet_before -and $script:Tooling.dotnet_origin -eq 'not-qualified') {
+            $script:Tooling.dotnet_origin = 'existing-path'
+        }
+        if ($script:Tooling.node_before -and $script:Tooling.node_origin -eq 'not-qualified') {
+            $script:Tooling.node_origin = 'existing-path'
+        }
+        Write-Host "Workspace exists=$($snapshot.workspace_present); bounded_dirs=$($snapshot.searched_directories)"
+        Write-Host "Workspace discovery (read-only): SDK10=$($snapshot.dotnet_sdk10 ?? 'NONE'); Node22=$($snapshot.node22 ?? 'NONE')"
+    }
+    if ($DiscoverOnly) {
+        Add-Stage 'tool-plan' 'SKIP' 'DISCOVER_ONLY_NO_INSTALL'
+        return
     }
     $needDotnet = [bool]($ForcePortableTools -or -not $script:Tooling.dotnet_before)
     $needNode = [bool]($IncludePrivateBridge -and ($ForcePortableTools -or -not $script:Tooling.node_before))
-    if (-not $observed) {
+    if (-not $observed -or -not $workspaceObserved) {
         Add-Stage 'tool-plan' 'FAIL' 'TOOL_DISCOVERY_FAILED'
     } else {
         Add-Stage 'tool-plan' 'PASS' "dotnet_portable=$needDotnet,node_portable=$needNode"
@@ -118,6 +168,8 @@ try {
                 Run-Stage 'tool-apply-portable' {
                     $bootstrap = Join-Path $PSScriptRoot 'bootstrap-chatgpt-windows-local.ps1'
                     $script:Tooling.bootstrap = . $bootstrap -ProjectRoot $PublicRepoRoot -NeedDotnet:$needDotnet -NeedNode:$needNode -ForcePortable:$ForcePortableTools
+                    if ($needDotnet) { $script:Tooling.dotnet_origin = 'project-local-verified' }
+                    if ($needNode) { $script:Tooling.node_origin = 'project-local-verified' }
                 } | Out-Null
             }
         } else {
@@ -183,8 +235,8 @@ try {
                     } | Out-Null
                 }
 
-                if ($SkipLiveGuest) {
-                    Add-Stage 'real-anonymous-guest' 'SKIP' 'OPERATOR_SKIPPED'
+                if (-not $RunLiveGuest -or $SkipLiveGuest) {
+                    Add-Stage 'real-anonymous-guest' 'SKIP' 'DEFAULT_NO_EXTERNAL_SIDE_EFFECT'
                 } else {
                     Run-Stage 'real-anonymous-guest' {
                         $receipt = Invoke-Guest @() (Join-Path $WorkRoot 'guest-receipt.json')
@@ -266,7 +318,9 @@ finally {
         has_credentials = $false
         has_chatgpt_transcript = $false
         has_browser_cookie_material = $false
-        guest_probe_enabled = -not $SkipLiveGuest
+        guest_probe_enabled = [bool]($RunLiveGuest -and -not $SkipLiveGuest)
+        workspace_probe_enabled = $true
+        discover_only = [bool]$DiscoverOnly
         bootstrap_only = [bool]$BootstrapOnly
         tooling = $script:Tooling
         stages = @($script:Stages)
