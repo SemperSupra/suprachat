@@ -21,6 +21,7 @@ public static class ChatGptControlContract
         operations = new[]
         {
             Operation("chatgpt/conversation/inspect", "IMPLEMENTED_READ_ONLY", "suprachat", "read"),
+            Operation("chatgpt/bridge/observe", "IMPLEMENTED_READ_ONLY_LOCAL_RELAY", "suprachat", "observe"),
             Operation("chatgpt/conversation/bind", "NOT_IMPLEMENTED", "suprachat", "bind"),
             Operation("chatgpt/conversation/readiness", "NOT_IMPLEMENTED", "userscripts-bridge-adapter", "observe"),
             Operation("chatgpt/conversation/prompt/submit", "NOT_IMPLEMENTED", "userscripts-bridge-adapter", "submit"),
@@ -37,6 +38,7 @@ public static class ChatGptControlContract
             "Observation does not constitute authorization or accepted completion.",
             "Preparing terminal text does not authorize shell execution.",
             "Human, accessibility, CLI, and agent surfaces must share operation identity.",
+            "Local relay self-reported readiness is not independent browser attestation or authority to submit.",
             "Missing live adapter or uncertain turn completion must fail closed."
         }
     };
