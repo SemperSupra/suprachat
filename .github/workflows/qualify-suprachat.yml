@@ -1217,7 +1217,9 @@ jobs:
           $issues = $null
           foreach ($path in @(
             'tools/qualify-chatgpt-windows-local.ps1',
-            'tools/bootstrap-chatgpt-windows-local.ps1'
+            'tools/bootstrap-chatgpt-windows-local.ps1',
+            'tools/discover-chatgpt-windows-workspace.ps1',
+            'tools/cleanup-chatgpt-windows-local.ps1'
           )) {
             $tokens = $null
             $issues = $null
@@ -1291,6 +1293,43 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'Portable bootstrap/verification failed'
           }
+      - name: Prove workspace discovery, repeat apply, dry run and reversal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path .).Path
+          $owned = Join-Path $root '.local/suprachat-qualification'
+          $dotnet = Join-Path $owned 'dotnet/dotnet.exe'
+          $node = Join-Path $owned 'node-v24.21.0-win-x64/node.exe'
+          $marker = Join-Path $owned '.suprachat-tools-owned.json'
+          if (-not (Test-Path $marker) -or -not (Test-Path $dotnet) -or -not (Test-Path $node)) {
+            throw 'Project-local tool ownership or binaries missing'
+          }
+          $beforeDotnet = (Get-FileHash -Algorithm SHA256 $dotnet).Hash
+          $beforeNode = (Get-FileHash -Algorithm SHA256 $node).Hash
+          $observed = & tools/discover-chatgpt-windows-workspace.ps1 -WorkspaceRoot $root
+          if (-not $observed.read_only -or -not $observed.bounded -or
+              $observed.dotnet_sdk10 -ne '10.0.402' -or
+              $observed.node22 -ne 'v24.21.0') {
+            throw 'Workspace discovery did not reuse qualified existing executables'
+          }
+          $second = & tools/bootstrap-chatgpt-windows-local.ps1 -ProjectRoot $root -NeedDotnet -NeedNode
+          if ($second.dotnet_version -ne '10.0.402' -or $second.node_version -ne 'v24.21.0') {
+            throw 'Repeat bootstrap did not return same qualified versions'
+          }
+          if ((Get-FileHash -Algorithm SHA256 $dotnet).Hash -ne $beforeDotnet -or
+              (Get-FileHash -Algorithm SHA256 $node).Hash -ne $beforeNode) {
+            throw 'Repeat bootstrap changed qualified binaries'
+          }
+          & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root
+          if (-not (Test-Path $marker)) { throw 'Dry-run cleanup deleted owned tools' }
+          & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root -Apply
+          if (Test-Path $owned) { throw 'Apply cleanup retained owned namespace' }
+          & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root -Apply
+          if (-not (Test-Path (Join-Path $root 'tools/qualify-chatgpt-windows-local.ps1'))) {
+            throw 'Cleanup touched repository source'
+          }
+          Write-Host 'Workspace discover -> repeated apply -> verify -> dry-run -> reversal -> second reversal PASS'
       - name: Preserve provisioning receipt without installed executables
         if: always()
         uses: actions/upload-artifact@v4
