@@ -287,28 +287,34 @@ try {
                         & node tools/security-scan.mjs
                     } | Out-Null
                     if ($ContainerHeavy) {
-                        $containerReady = Run-Stage 'container-engine-discovery' {
-                            $usable = $false
-                            foreach ($candidate in @('docker', 'podman', 'nerdctl')) {
-                                if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+                        $containerReady = $false
+                        foreach ($candidate in @('docker', 'podman', 'nerdctl')) {
+                            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+                            try {
                                 & $candidate info *> $null
-                                if ($LASTEXITCODE -eq 0) { $usable = $true; break }
-                            }
-                            if (-not $usable -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+                                if ($LASTEXITCODE -eq 0) { $containerReady = $true; break }
+                            } catch { }
+                        }
+                        if (-not $containerReady -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+                            try {
                                 $distros = @(& wsl.exe --list --quiet 2>$null |
                                     ForEach-Object { ($_ -replace [char]0, '').Trim() } |
                                     Where-Object { $_ })
                                 foreach ($distro in $distros) {
-                                    foreach ($bin in @('docker', 'podman', 'nerdctl')) {
-                                        & wsl.exe -d $distro -- sh -lc "command -v $bin >/dev/null 2>&1 && $bin info >/dev/null 2>&1" *> $null
-                                        if ($LASTEXITCODE -eq 0) { $usable = $true; break }
+                                    foreach ($candidate in @('docker', 'podman', 'nerdctl')) {
+                                        & wsl.exe -d $distro -- sh -lc "command -v $candidate >/dev/null 2>&1 && $candidate info >/dev/null 2>&1" *> $null
+                                        if ($LASTEXITCODE -eq 0) { $containerReady = $true; break }
                                     }
-                                    if ($usable) { break }
+                                    if ($containerReady) { break }
                                 }
-                            }
-                            if (-not $usable) { throw 'CONTAINER_ENGINE_UNAVAILABLE' }
+                            } catch { }
                         }
                         if ($containerReady) {
+                            Add-Stage 'container-engine-discovery' 'PASS' 'USABLE_RUNTIME_CONFIRMED'
+                        } else {
+                            Add-Stage 'container-engine-discovery' 'SKIP' 'NO_USABLE_CONTAINER_RUNTIME'
+                        }
+                                                if ($containerReady) {
                             Run-Stage 'private-bridge-heavy-browser-ci' {
                                 & (Join-Path $privateRoot 'ci.ps1') heavy -Script chatgpt-local-bridge
                             } | Out-Null
