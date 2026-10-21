@@ -44,6 +44,50 @@ foreach (var invalid in new[]
         "Unqualified/malformed conversation URL was accepted: " + invalid);
 }
 
+
+// Read-only adapter bridge: no credential leakage, no authority promotion,
+// exact canonical conversation match and fail-closed malformed state handling.
+const string relayTarget = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000";
+const string otherTarget = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174001";
+var relayFixture = JsonSerializer.Serialize(new
+{
+    clients = new object[]
+    {
+        new {conversationUrl = relayTarget, browserState = "ready", id = "private-actor-id", token = "must-never-escape"},
+        new {conversationUrl = otherTarget, browserState = "ready", id = "different-actor-id"}
+    },
+    queueDepth = 2,
+    quarantineCounts = new {clients = 1, conversations = 1},
+    recent = new[] {new {prompt = "secret prompt", id = "private-request-id"}}
+});
+var observed = ChatGptRelayObservation.Interpret(relayTarget, relayFixture);
+var serializedObservation = JsonSerializer.Serialize(observed);
+Require(observed.Connected && observed.State == "RELAY_REPORTS_READY_UNVERIFIED" &&
+        observed.MatchingReadyClients == 1 && observed.QueueDepth == 2 &&
+        observed.QuarantinedClients == 1 && observed.QuarantinedConversations == 1 &&
+        !observed.MaySubmit, "Bridge observation must remain read-only metadata");
+Require(!serializedObservation.Contains("secret prompt", StringComparison.Ordinal) &&
+        !serializedObservation.Contains("must-never-escape", StringComparison.Ordinal) &&
+        !serializedObservation.Contains("private-request-id", StringComparison.Ordinal) &&
+        !serializedObservation.Contains("private-actor-id", StringComparison.Ordinal),
+        "Relay observation leaked private browser or request metadata");
+var unrelated = ChatGptRelayObservation.Interpret(
+    "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174002", relayFixture);
+Require(unrelated.Connected && unrelated.MatchingReadyClients == 0 && !unrelated.MaySubmit,
+    "Unrelated conversation was incorrectly reported as a ready client");
+Require(!ChatGptRelayObservation.Interpret(relayTarget, "{}").Connected &&
+        ChatGptRelayObservation.Interpret(relayTarget, "{}").ErrorCode == "INVALID_RELAY_METADATA",
+    "Malformed bridge metadata must fail closed");
+Require(!ChatGptRelayObservation.Interpret(relayTarget,
+    """{"clients":[],"queueDepth":"not-an-int","quarantineCounts":{"clients":0,"conversations":0}}""").Connected,
+    "Non-numeric bridge metadata must fail closed");
+var missingToken = await ChatGptRelayObservation.ObserveAsync(relayTarget, 7654, null);
+Require(!missingToken.Connected && missingToken.ErrorCode == "NO_LOCAL_RELAY_TOKEN" &&
+        !missingToken.MaySubmit, "Missing token must prevent all network calls");
+var invalidPort = await ChatGptRelayObservation.ObserveAsync(relayTarget, 0, "fake-token");
+Require(!invalidPort.Connected && invalidPort.ErrorCode == "INVALID_RELAY_PORT",
+    "Relay observer must reject invalid ports without network calls");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
