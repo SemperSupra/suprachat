@@ -45,4 +45,22 @@ $unsafe = @(Get-ChildItem -LiteralPath $namespace -Force -Recurse -ErrorAction S
     Select-Object -First 1)
 if ($unsafe.Count -gt 0) { throw 'CLEANUP_NESTED_REPARSE_POINT_REFUSED' }
 Remove-Item -LiteralPath $namespace -Recurse -Force -ErrorAction Stop
-Write-Host 'SupraChat-owned project-local tools removed. All other workspace files preserved.'
+# Reverse only the Git exclude pair introduced by this program. If the caller
+# already had an exclusion, preserve it. Never rewrite unrelated local rules.
+$excludePath = Join-Path $project '.git/info/exclude'
+if (Test-Path -LiteralPath $excludePath) {
+    $excludeLines = @(Get-Content -LiteralPath $excludePath)
+    $ownedMarker = '# suprachat-qualification-owned-exclude/v1'
+    $ownedLine = '.local/suprachat-qualification/'
+    $markerIndex = [array]::IndexOf([string[]]$excludeLines, $ownedMarker)
+    if ($markerIndex -ge 0 -and ($markerIndex + 1) -lt $excludeLines.Count -and
+        $excludeLines[$markerIndex + 1] -eq $ownedLine) {
+        $remainder = @(
+            for ($i = 0; $i -lt $excludeLines.Count; $i++) {
+                if ($i -ne $markerIndex -and $i -ne ($markerIndex + 1)) { $excludeLines[$i] }
+            }
+        )
+        Set-Content -LiteralPath $excludePath -Value $remainder -Encoding utf8
+    }
+}
+Write-Host 'Owned tooling and managed exclusion removed. Other workspace files preserved.'
