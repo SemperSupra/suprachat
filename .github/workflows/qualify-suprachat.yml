@@ -1233,6 +1233,9 @@ jobs:
             }
           }
           Write-Host 'Windows actor PowerShell syntax PASS (execution separately gated)'
+      - name: Validate native-browser launcher JavaScript syntax
+        shell: bash
+        run: node --check tools/run-bridge-native-browser-smoke.mjs
       - name: Deterministic guest-state taxonomy checks
         run: dotnet run --project SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release --no-build -- --self-test
       - name: Install Playwright Chromium with public OS dependencies
