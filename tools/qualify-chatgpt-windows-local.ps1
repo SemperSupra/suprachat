@@ -22,8 +22,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$PrivateExpectedHead = '577ec904abe36ab58e0980bf1bbcacb24c7db701'
-$PrivateBranch = 'fix/49-bound-conversation-cow-20261020'
+$PrivateExpectedHead = '5adceaae29266465fa5c49ff72ab865876c3129b'
+$PrivateBranch = 'fix/49-uncertain-submission-quarantine-20261021'
 $PublicRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RunId = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
 if (-not $ReceiptRoot) { $ReceiptRoot = Join-Path $HOME 'SupraChatQualification' }
