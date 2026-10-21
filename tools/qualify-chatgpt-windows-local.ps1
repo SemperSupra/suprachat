@@ -71,6 +71,25 @@ function Assert-Head([string]$Root, [string]$Expected) {
     }
 }
 
+
+function Discover-DotnetSdk10 {
+    $binary = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $binary) { return $null }
+    $inventory = @(& $binary.Source --list-sdks 2>$null)
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $matched = $inventory | Where-Object { $_ -match '^10[.]0[.][0-9]+\s' } | Select-Object -First 1
+    if ($matched) { return ($matched -split '\s+')[0] }
+    return $null
+}
+function Discover-Node22 {
+    $binary = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $binary) { return $null }
+    $version = (& $binary.Source --version 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v([0-9]+)[.]([0-9]+)[.]([0-9]+)$') { return $null }
+    if ([int]$Matches[1] -lt 22) { return $null }
+    return $version
+}
+
 function Invoke-Guest([string[]]$Arguments, [string]$File) {
     & dotnet run --project (Join-Path $PublicRepoRoot 'SupraChat.GuestProbe/SupraChat.GuestProbe.csproj') -c Release --no-build -- @Arguments --output $File | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "GUEST_PROBE_EXIT_$LASTEXITCODE" }
@@ -79,10 +98,52 @@ function Invoke-Guest([string[]]$Arguments, [string]$File) {
 }
 
 try {
-    $hasDotnet = Run-Stage 'dotnet-preflight' {
-        Require-Command 'dotnet'
-        & dotnet --version
+    $observed = Run-Stage 'discover-host-tooling' {
+        Require-Command 'git'
+        $script:Tooling.dotnet_before = Discover-DotnetSdk10
+        $script:Tooling.node_before = Discover-Node22
+        Write-Host "Discovered: .NET 10 SDK=$($script:Tooling.dotnet_before ?? 'MISSING'); Node >=22=$($script:Tooling.node_before ?? 'MISSING')"
+        Write-Host 'Scope: project .local; no permanent machine installation'
     }
+    $needDotnet = [bool]($ForcePortableTools -or -not $script:Tooling.dotnet_before)
+    $needNode = [bool]($IncludePrivateBridge -and ($ForcePortableTools -or -not $script:Tooling.node_before))
+    if (-not $observed) {
+        Add-Stage 'tool-plan' 'FAIL' 'TOOL_DISCOVERY_FAILED'
+    } else {
+        Add-Stage 'tool-plan' 'PASS' "dotnet_portable=$needDotnet,node_portable=$needNode"
+        if ($needDotnet -or $needNode) {
+            if ($NoBootstrap) {
+                Add-Stage 'tool-apply' 'FAIL' 'BOOTSTRAP_DISABLED'
+            } else {
+                Run-Stage 'tool-apply-portable' {
+                    $bootstrap = Join-Path $PSScriptRoot 'bootstrap-chatgpt-windows-local.ps1'
+                    $script:Tooling.bootstrap = . $bootstrap -ProjectRoot $PublicRepoRoot -NeedDotnet:$needDotnet -NeedNode:$needNode -ForcePortable:$ForcePortableTools
+                } | Out-Null
+            }
+        } else {
+            Add-Stage 'tool-apply-portable' 'SKIP' 'EXISTING_TOOLING_REUSABLE'
+        }
+    }
+    $hasDotnet = Run-Stage 'tool-verify-dotnet10' {
+        $found = Discover-DotnetSdk10
+        if (-not $found) { throw 'SDK10_UNAVAILABLE_AFTER_APPLY' }
+        $script:Tooling.dotnet_after = $found
+        Write-Host "Verified SDK $found"
+    }
+    $hasNode = $true
+    if ($IncludePrivateBridge) {
+        $hasNode = Run-Stage 'tool-verify-node22' {
+            $found = Discover-Node22
+            if (-not $found) { throw 'NODE22_UNAVAILABLE_AFTER_APPLY' }
+            $script:Tooling.node_after = $found
+            Write-Host "Verified Node $found"
+        }
+    }
+    if ($BootstrapOnly) {
+        Add-Stage 'qualification-batch' 'SKIP' 'BOOTSTRAP_ONLY'
+        return
+    }
+
 
     if ($hasDotnet) {
         $built = Run-Stage 'guest-probe-build' {
@@ -137,21 +198,21 @@ try {
     }
 
     if ($IncludePrivateBridge) {
-        $ready = Run-Stage 'private-bridge-tool-preflight' {
-            Require-Command 'gh'
-            Require-Command 'git'
-            Require-Command 'node'
-            $raw = (& node -p 'process.versions.node' | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0 -or [int]($raw.Split('.')[0]) -lt 22) {
-                throw 'NODE22_REQUIRED'
+        $ready = if ($hasNode) {
+            Run-Stage 'private-bridge-tool-preflight' {
+                Require-Command 'git'
+                Require-Command 'node'
+                if (-not (Discover-Node22)) { throw 'NODE22_REQUIRED' }
+                Write-Host 'Using existing Git credential manager or SSH configuration, not gh CLI'
             }
-            & gh auth status *> $null
-            if ($LASTEXITCODE -ne 0) { throw 'GH_AUTH_REQUIRED' }
+        } else {
+            Add-Stage 'private-bridge-tool-preflight' 'SKIP' 'NODE22_NOT_AVAILABLE'
+            $false
         }
         if ($ready) {
             $privateRoot = Join-Path $WorkRoot 'private-bridge-checkout'
             $cloned = Run-Stage 'pinned-private-bridge-checkout' {
-                & gh repo clone 'SupraShellScripts/userscripts-private' $privateRoot -- --branch $PrivateBranch --depth 1
+                & git clone --depth 1 --branch $PrivateBranch 'https://github.com/SupraShellScripts/userscripts-private.git' $privateRoot
                 if ($LASTEXITCODE -ne 0) { throw 'PRIVATE_CLONE_FAILED' }
                 Assert-Head $privateRoot $PrivateExpectedHead
                 $script:SourcePrivate = $PrivateExpectedHead
@@ -174,12 +235,15 @@ try {
                         & node tools/security-scan.mjs
                     } | Out-Null
                     if ($ContainerHeavy) {
-                        if (Get-Command docker -ErrorAction SilentlyContinue) {
+                        if ((Get-Command docker -ErrorAction SilentlyContinue) -or
+                            (Get-Command podman -ErrorAction SilentlyContinue) -or
+                            (Get-Command nerdctl -ErrorAction SilentlyContinue) -or
+                            (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
                             Run-Stage 'private-bridge-heavy-browser-ci' {
                                 & (Join-Path $privateRoot 'ci.ps1') heavy -Script chatgpt-local-bridge
                             } | Out-Null
                         } else {
-                            Add-Stage 'private-bridge-heavy-browser-ci' 'SKIP' 'DOCKER_NOT_AVAILABLE'
+                            Add-Stage 'private-bridge-heavy-browser-ci' 'SKIP' 'CONTAINER_RUNTIME_NOT_DISCOVERED'
                         }
                     }
                 } finally { Pop-Location }
@@ -203,6 +267,8 @@ finally {
         has_chatgpt_transcript = $false
         has_browser_cookie_material = $false
         guest_probe_enabled = -not $SkipLiveGuest
+        bootstrap_only = [bool]$BootstrapOnly
+        tooling = $script:Tooling
         stages = @($script:Stages)
     }
     $summary = Join-Path $WorkRoot 'summary.json'
