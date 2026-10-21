@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using System.Xml.Linq;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
@@ -87,6 +90,46 @@ Require(!missingToken.Connected && missingToken.ErrorCode == "NO_LOCAL_RELAY_TOK
 var invalidPort = await ChatGptRelayObservation.ObserveAsync(relayTarget, 0, "fake-token");
 Require(!invalidPort.Connected && invalidPort.ErrorCode == "INVALID_RELAY_PORT",
     "Relay observer must reject invalid ports without network calls");
+
+
+// Local socket oracle: real HTTP request to a fixed loopback relay fixture,
+// without touching ChatGPT, any browser, credentials, or any private source.
+using (var localRelay = new TcpListener(IPAddress.Loopback, 0))
+{
+    localRelay.Start();
+    var localPort = ((IPEndPoint)localRelay.LocalEndpoint).Port;
+    var server = Task.Run(async () =>
+    {
+        using var accepted = await localRelay.AcceptTcpClientAsync();
+        await using var stream = accepted.GetStream();
+        using var requestReader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+        var requestLine = await requestReader.ReadLineAsync();
+        Require(requestLine == "GET /state HTTP/1.1", "Unexpected observer HTTP method or route");
+        string? line;
+        var authHeaderSeen = false;
+        while (!string.IsNullOrEmpty(line = await requestReader.ReadLineAsync()))
+        {
+            if (line.StartsWith("Authorization: Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                authHeaderSeen = line.EndsWith("fixture-relay-token", StringComparison.Ordinal);
+            }
+        }
+        Require(authHeaderSeen, "Observer omitted the local bearer token from private request");
+        var body = Encoding.UTF8.GetBytes(relayFixture);
+        var httpHeaders = Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(httpHeaders);
+        await stream.WriteAsync(body);
+        await stream.FlushAsync();
+    });
+    var actualLoopback = await ChatGptRelayObservation.ObserveAsync(relayTarget, localPort, "fixture-relay-token");
+    await server;
+    localRelay.Stop();
+    Require(actualLoopback.Connected && actualLoopback.MatchingReadyClients == 1 &&
+            !actualLoopback.MaySubmit, "Real loopback-only observation drifted from synthetic contract");
+    Require(!JsonSerializer.Serialize(actualLoopback).Contains("fixture-relay-token", StringComparison.Ordinal),
+        "Observer leaked local bearer token into machine-readable output");
+}
 
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
