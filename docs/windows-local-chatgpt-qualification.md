@@ -16,7 +16,9 @@ supported Docker engine enables the existing private heavy browser gate.
     git clone --depth 1 --branch feat/19-chatgpt-control-contract-20261020 https://github.com/SemperSupra/suprachat.git $dir
     if ($LASTEXITCODE -ne 0) { throw "SupraChat clone failed" }
     Set-Location $dir
-    .\tools\qualify-chatgpt-windows-local.ps1 -IncludePrivateBridge -ContainerHeavy
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\qualify-chatgpt-windows-local.ps1 -IncludePrivateBridge -ContainerHeavy
+
+On Windows systems with Restricted execution policy, the process-local -ExecutionPolicy Bypass option avoids changing machine/user policy. It must be invoked with pwsh (PowerShell 7), not Windows PowerShell 5.1. If Group Policy enforces AllSigned or another restrictive policy, do not circumvent organizational controls; obtain the permitted execution path instead. Verify PowerShell 7 with Get-Command pwsh and inspect effective policies using Get-ExecutionPolicy -List.
 
 Remove -IncludePrivateBridge -ContainerHeavy for a public-only run. Add
 -SkipLiveGuest to prohibit even the one anonymous harmless prompt.
