@@ -119,6 +119,59 @@ Require(AccessibilityContract.Describe().Human.Shortcuts.Contains(
     $"{AccessibilityContract.PrimaryModifierName}+4"),
     "Session workbench shortcut missing from accessibility contract");
 
+
+// W2 metadata-only export: no implicit persistence, script/credential leakage,
+// or terminal/chat command payloads, including Markdown table-injection.
+var metadataWorkbench = new SessionWorkbench();
+var metadataOne = metadataWorkbench.Open("Alpha|injected\nrow", "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000", @"C:\private\workspace");
+var metadataTwo = metadataWorkbench.Open("Beta", "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000", @"C:\private\workspace");
+var draftSecret = "DO_NOT_EXPORT_TRANSCRIPT_TOKEN_" + Guid.NewGuid().ToString("N");
+var w2Transfer = metadataWorkbench.PreviewTransfer(metadataOne.Id, "terminal-to-chat", draftSecret);
+var w2Json = WorkbenchMetadataExport.Prepare(metadataWorkbench.Snapshot(), "json");
+var w2Markdown = WorkbenchMetadataExport.Prepare(metadataWorkbench.Snapshot(), "markdown");
+Require(w2Json.Schema == WorkbenchMetadataExport.Schema &&
+        w2Json.RequiresUserSelectedDestination && !w2Json.WasSaved &&
+        w2Markdown.RequiresUserSelectedDestination && !w2Markdown.WasSaved &&
+        w2Json.ContentBytes == System.Text.Encoding.UTF8.GetByteCount(w2Json.Content) &&
+        w2Markdown.ContentBytes == System.Text.Encoding.UTF8.GetByteCount(w2Markdown.Content),
+        "W2 export must be a reviewable byte-accurate preview, never an automatic file write");
+using (var exportedDocument = JsonDocument.Parse(w2Json.Content))
+{
+    var root = exportedDocument.RootElement;
+    Require(root.GetProperty("schema").GetString() == WorkbenchMetadataExport.Schema &&
+            root.GetProperty("export_scope").GetString() == "SESSION_METADATA_ONLY" &&
+            root.GetProperty("sessions").GetArrayLength() == 2 &&
+            root.GetProperty("collisions").GetArrayLength() == 2 &&
+            !root.GetProperty("exported_transcripts").GetBoolean() &&
+            !root.GetProperty("exported_credentials").GetBoolean(),
+            "W2 JSON export scope/collision metadata drift");
+}
+Require(w2Markdown.Content.Contains("Alpha\\|injected row", StringComparison.Ordinal) &&
+        w2Markdown.Content.Contains("C:\\\\private\\\\workspace", StringComparison.Ordinal) &&
+        !w2Markdown.Content.Contains("Alpha|injected\nrow", StringComparison.Ordinal) &&
+        !w2Markdown.Content.Contains("DO_NOT_EXPORT_TRANSCRIPT_TOKEN_", StringComparison.Ordinal) &&
+        !w2Json.Content.Contains(draftSecret, StringComparison.Ordinal) &&
+        !w2Json.Content.Contains("previewText", StringComparison.OrdinalIgnoreCase),
+        "W2 export leaked preview data or failed Markdown injection escaping");
+var invalidExportRejected = false;
+try { WorkbenchMetadataExport.Prepare(metadataWorkbench.Snapshot(), "html"); }
+catch (ArgumentException) { invalidExportRejected = true; }
+Require(invalidExportRejected, "W2 arbitrary/exportable HTML format must be rejected");
+var w2Xaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
+foreach (var controlId in new[]
+{
+    "Sessions.ExportHeading", "Sessions.ExportJsonPreview",
+    "Sessions.ExportMarkdownPreview", "Sessions.ExportSave",
+    "Sessions.ExportPreview", "Sessions.ExportStatus"
+})
+{
+    Require(w2Xaml.Contains($"AutomationProperties.AutomationId=\"{controlId}\"", StringComparison.Ordinal),
+        "W2 export accessibility ID missing: " + controlId);
+}
+Require(w2Xaml.Contains("Saving requires a separate file-picker action.", StringComparison.Ordinal) &&
+        w2Xaml.Contains("Transcripts, credentials, terminal logs and draft transfer text are excluded.", StringComparison.Ordinal),
+        "W2 export UI must disclose its privacy boundary and review requirement");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
