@@ -26,6 +26,8 @@ public sealed class DurableLedger : IDisposable
             DataSource = absolutePath, Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Private, Pooling = false, DefaultTimeout = 5
         }.ToString());
+        try
+        {
         _db.Open();
         Sql("PRAGMA busy_timeout=5000");
         if (!string.Equals(Scalar("PRAGMA journal_mode=WAL"), "wal", StringComparison.OrdinalIgnoreCase))
@@ -60,6 +62,15 @@ public sealed class DurableLedger : IDisposable
         }
         if (Scalar("PRAGMA integrity_check") != "ok")
             throw new InvalidDataException("STORE_CORRUPT_INTEGRITY_CHECK");
+        }
+        catch
+        {
+            // Constructor exceptions bypass IDisposable for the owning object.
+            // Release all SQLite native handles here before failing closed,
+            // including bad schema and deliberately corrupted databases.
+            _db.Dispose();
+            throw;
+        }
     }
 
     public DurableResult Execute(DurableRequest req)
