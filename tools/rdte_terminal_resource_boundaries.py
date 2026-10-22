@@ -48,9 +48,28 @@ def unix_probe():
                 limits[name] = run_unix_limit(spec, threshold, code, expected)
         else:
             limits[name] = run_unix_limit(spec, threshold, code, expected)
+    if platform.system() == "Darwin" and hasattr(resource, "RLIMIT_DATA"):
+        # RLIMIT_DATA and RLIMIT_AS are different limits: never silently
+        # substitute a file-size or data-segment result for a proven RSS cap.
+        same_fixed_memory_fixture = (
+            "import sys\ntry:\n b=bytearray(512*1024*1024)\n"
+            " b[::4096]=b'1'*len(b[::4096])\n print('ALLOCATED')\n"
+            "except MemoryError:\n print('MEMORY_REFUSED')\n sys.exit(77)"
+        )
+        limits["data_segment"] = run_unix_limit(
+            resource.RLIMIT_DATA, MEMORY_LIMIT, same_fixed_memory_fixture, "MEMORY_REFUSED"
+        )
     result["observations"] = limits
-    result["hard_resource_limits_available"] = any(
-        x["result"] == "LIMIT_OBSERVED" for x in limits.values())
+    result["memory_limit_observed"] = any(
+        limits[key]["result"] == "LIMIT_OBSERVED"
+        for key in ("address_space", "data_segment") if key in limits
+    )
+    result["file_size_limit_observed"] = limits["file_size"]["result"] == "LIMIT_OBSERVED"
+    result["cpu_quota_verified"] = False
+    result["process_tree_containment_verified"] = False
+    result["hard_resource_limits_available"] = (
+        result["memory_limit_observed"] or result["file_size_limit_observed"]
+    )
     result["cgroup_v2_controllers"] = []
     controller_path = "/sys/fs/cgroup/cgroup.controllers"
     if os.path.exists(controller_path):
@@ -87,6 +106,10 @@ def windows_probe():
     from ctypes import wintypes
     result = {"kind": "windows_job_object", "platform": "Windows",
               "hard_resource_limits_available": False,
+              "memory_limit_observed": False,
+              "file_size_limit_observed": False,
+              "cpu_quota_verified": False,
+              "process_tree_containment_verified": False,
               "readiness": "EXPERIMENTAL_NOT_ADMITTED"}
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     HANDLE = wintypes.HANDLE
@@ -168,6 +191,7 @@ def windows_probe():
         if "MEMORY_REFUSED" in stdout:
             result["observation"] = "PROCESS_MEMORY_CAP_OBSERVED"
             result["hard_resource_limits_available"] = True
+            result["memory_limit_observed"] = True
         elif "ALLOCATED" in stdout:
             result["observation"] = "PROCESS_MEMORY_CAP_NOT_ENFORCED"
         else:
