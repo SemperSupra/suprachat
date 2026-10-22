@@ -277,8 +277,8 @@ await using (var supervisor = new WorkbenchTerminalSupervisor(terminalWb))
         catch (InvalidOperationException) { duplicateRejected = true; }
         Require(duplicateRejected, "W3 duplicated a selected session process");
 
-        var secondSession = terminalWb.Open("Second terminal test");
-        var second = supervisor.Start(secondSession.Id, shellPath);
+        var secondTerminalSession = terminalWb.Open("Second terminal test");
+        var second = supervisor.Start(secondTerminalSession.Id, shellPath);
         Require(second.ProcessId != started.ProcessId && second.Running,
                 "W3 two independently owned process lanes not admitted");
 
@@ -299,7 +299,7 @@ await using (var supervisor = new WorkbenchTerminalSupervisor(terminalWb))
         catch (InvalidOperationException) { collisionRejected = true; }
         Require(collisionRejected, "W3 admitted a process into a colliding workspace");
 
-        var stoppedSecond = await supervisor.StopAsync(secondSession.Id);
+        var stoppedSecond = await supervisor.StopAsync(secondTerminalSession.Id);
         Require(stoppedSecond is {Running: false},
                 "W3 second child did not stop without touching other sessions");
 
