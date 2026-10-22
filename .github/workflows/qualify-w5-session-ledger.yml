@@ -1,0 +1,55 @@
+name: Qualify W5 concurrent session ledger
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionLedger.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - '.github/workflows/qualify-w5-session-ledger.yml'
+permissions:
+  contents: read
+jobs:
+  atomic-in-process-metadata-core:
+    if: github.head_ref == 'feat/19-w5-concurrent-idempotent-ledger-20261022'
+    name: W5 concurrent CAS + replay ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build public W5 ledger and automation contract
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Execute multi-client same-session CAS and idempotent outcome oracles
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Compare read-only CLI and agent contract without claiming cross-process writes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'SupraChat.Automation/SupraChat.Automation.csproj'
+          $cli = dotnet run --no-build -c Release --project $project -- session-ledger-contract | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $cli.ok -or
+              $cli.value.phase -ne 'W5_IN_PROCESS_CONCURRENT_CAS_CORE' -or
+              $cli.value.cross_process_transport_available -ne $false -or
+              $cli.value.persistent_recovery_available -ne $false) {
+            throw 'W5_CLI_CROSS_PROCESS_AUTHORITY_DRIFT'
+          }
+          $request = '{"jsonrpc":"2.0","id":51,"method":"session/ledger/read","params":{}}'
+          $rpc = $request | dotnet run --no-build -c Release --project $project -- stdio | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $rpc.id -ne 51 -or
+              $rpc.result.schema -ne $cli.value.schema -or
+              $rpc.result.max_sessions -ne $cli.value.max_sessions -or
+              $rpc.result.authenticated_audience_identity -ne $false -or
+              $rpc.result.provider_prompt_submit_available -ne $false) {
+            throw 'W5_CLI_AGENT_CONTRACT_PARITY_FAILED'
+          }
+          $source = Get-Content -Raw 'SupraChat/Core/SharedSessionLedger.cs'
+          if ($source -match '(?i)HttpClient|Process\.Start|File\.Write|SaveFilePicker|Clipboard\.') {
+            throw 'W5_PURE_CORE_ACQUIRED_HOST_OR_NETWORK_SIDE_EFFECTS'
+          }
+          Write-Host 'W5 concurrent ledger, idempotency and explicit missing-host boundary PASS'
