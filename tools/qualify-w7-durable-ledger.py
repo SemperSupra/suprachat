@@ -138,21 +138,30 @@ def main():
 
         # Corrupt schema must FAIL CLOSED (no empty-state fallback).
         invalid_version = pathlib.Path(tmp) / "wrong-version.sqlite"
-        with sqlite3.connect(str(invalid_version)) as db:
-            db.executescript("""
-              CREATE TABLE ledger_meta(singleton INTEGER PRIMARY KEY,
-               schema_version INTEGER NOT NULL,next_sequence INTEGER NOT NULL);
-              INSERT INTO ledger_meta VALUES(1,999,0);
-            """)
+        db = sqlite3.connect(str(invalid_version))
+        try:
+            with db:
+                db.executescript("""
+                  CREATE TABLE ledger_meta(singleton INTEGER PRIMARY KEY,
+                   schema_version INTEGER NOT NULL,next_sequence INTEGER NOT NULL);
+                  INSERT INTO ledger_meta VALUES(1,999,0);
+                """)
+        finally:
+            # Python sqlite3 connection's context manager commits but DOES NOT
+            # close handles. Windows will refuse subsequent file deletion.
+            db.close()
         v = subprocess.run(["dotnet", DLL, "serve", str(invalid_version)],
                            capture_output=True, text=True, timeout=8)
         assert v.returncode == 78 and '"ready":true' not in v.stdout
+        # File release is an independent correctness oracle on Windows.
+        invalid_version.unlink()
 
         corrupt = pathlib.Path(tmp) / "corrupt.sqlite"
         corrupt.write_bytes(b"not a sqlite store\0" * 256)
         z = subprocess.run(["dotnet", DLL, "serve", str(corrupt)],
                            capture_output=True, text=True, timeout=8)
         assert z.returncode == 78 and '"ready":true' not in z.stdout
+        corrupt.unlink()
 
         print(json.dumps({
             "schema": "suprachat-w7-durable-rdte-receipt/v1",
