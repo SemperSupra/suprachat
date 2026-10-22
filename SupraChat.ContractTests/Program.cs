@@ -119,6 +119,72 @@ Require(AccessibilityContract.Describe().Human.Shortcuts.Contains(
     $"{AccessibilityContract.PrimaryModifierName}+4"),
     "Session workbench shortcut missing from accessibility contract");
 
+
+// W2 one-use local transfer approval; never a real terminal/chat side effect.
+var approvalClock = DateTimeOffset.Parse("2026-10-22T09:00:00Z");
+var localTransferSessions = new SessionWorkbench();
+var alpha = localTransferSessions.Open("Alpha");
+var localDrafts = new WorkbenchLocalDrafts(localTransferSessions, () => approvalClock);
+var alphaReview = localDrafts.Prepare(alpha.Id, "chat-to-terminal", "echo local only");
+Require(alphaReview.RequiresExplicitUserAction && !alphaReview.WasApplied &&
+        !alphaReview.ChatSubmissionPermitted && !alphaReview.TerminalExecutionPermitted,
+        "W2 preview must not convey terminal or provider authority");
+var alteredReviewRejected = false;
+try { localDrafts.StageReviewed(alpha.Id, alphaReview.ReviewId, "echo changed content"); }
+catch (InvalidOperationException) { alteredReviewRejected = true; }
+Require(alteredReviewRejected && localDrafts.Read(alpha.Id).TerminalInputDraft == string.Empty,
+    "Changed preview text must fail closed before a local draft is staged");
+var alphaCommit = localDrafts.StageReviewed(alpha.Id, alphaReview.ReviewId, "echo local only");
+Require(alphaCommit.DraftStaged && !alphaCommit.ChatSubmitted &&
+        !alphaCommit.CommandExecuted && !alphaCommit.RemoteRequestCreated &&
+        alphaCommit.Destination == "LOCAL_TERMINAL_INPUT_BUFFER" &&
+        localDrafts.Read(alpha.Id).TerminalInputDraft == "echo local only",
+        "Approved local terminal draft leaked authority or failed to stage");
+var replayRejected = false;
+try { localDrafts.StageReviewed(alpha.Id, alphaReview.ReviewId, "echo local only"); }
+catch (InvalidOperationException) { replayRejected = true; }
+Require(replayRejected, "W2 approval must be single-use, never replayable");
+var beta = localTransferSessions.Open("Beta");
+Require(localDrafts.Read(beta.Id).TerminalInputDraft == string.Empty &&
+        localDrafts.Read(alpha.Id).TerminalInputDraft == "echo local only",
+        "W2 text drafts crossed a session boundary");
+var wrongSessionRejected = false;
+try { localDrafts.Prepare(alpha.Id, "terminal-to-chat", "unauthorized view"); }
+catch (InvalidOperationException) { wrongSessionRejected = true; }
+Require(wrongSessionRejected, "W2 transfer review in inactive session must be refused");
+var betaReview = localDrafts.Prepare(beta.Id, "terminal-to-chat", "unsent draft");
+var betaCommit = localDrafts.StageReviewed(beta.Id, betaReview.ReviewId, "unsent draft");
+Require(betaCommit.Destination == "LOCAL_CHAT_INPUT_BUFFER" &&
+        localDrafts.Read(beta.Id).ChatInputDraft == "unsent draft" &&
+        localDrafts.Read(alpha.Id).ChatInputDraft == string.Empty,
+        "W2 chat draft is not isolated or tries to submit");
+var expired = localDrafts.Prepare(beta.Id, "chat-to-terminal", "will expire");
+approvalClock = approvalClock.AddMinutes(3);
+var expiredRejected = false;
+try { localDrafts.StageReviewed(beta.Id, expired.ReviewId, "will expire"); }
+catch (InvalidOperationException) { expiredRejected = true; }
+Require(expiredRejected && localDrafts.Read(beta.Id).TerminalInputDraft == string.Empty,
+    "Expired one-time approval was improperly accepted");
+Require(localTransferSessions.Close(beta.Id), "W2 local session close failed");
+localDrafts.ForgetSession(beta.Id);
+var closedDraftRejected = false;
+try { localDrafts.Read(beta.Id); }
+catch (ArgumentException) { closedDraftRejected = true; }
+Require(closedDraftRejected, "Closed session local drafts must not remain readable");
+var localDraftXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
+foreach (var automationId in new[]
+{
+    "Sessions.StageLocalDraft", "Sessions.TerminalDraft",
+    "Sessions.ChatDraft", "Sessions.DraftStatus"
+})
+{
+    Require(localDraftXaml.Contains($"AutomationProperties.AutomationId=\"{automationId}\"", StringComparison.Ordinal),
+        "W2 accessible local-only draft control missing: " + automationId);
+}
+Require(localDraftXaml.Contains("never execute or submit", StringComparison.OrdinalIgnoreCase) &&
+        localDraftXaml.Contains("No command or chat submission controls are enabled.", StringComparison.Ordinal),
+    "W2 local UI must explicitly refuse all terminal and chat external effects");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
