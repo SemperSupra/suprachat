@@ -70,6 +70,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat.Automation capabilities failed.' }
           $doc = $json | ConvertFrom-Json
           if (-not $doc.ok) { throw 'Automation capabilities response was not ok.' }
+          $controlRaw = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- chatgpt-control
+          if ($LASTEXITCODE -ne 0) { throw 'ChatGPT control descriptor CLI failed.' }
+          $control = $controlRaw | ConvertFrom-Json
+          if (-not $control.ok -or $control.value.browser_adapter -ne 'NOT_CONNECTED') {
+            throw 'Unqualified ChatGPT browser adapter was not marked NOT_CONNECTED.'
+          }
+          $inspectionRaw = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- chatgpt-session-inspect --url https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000
+          if ($LASTEXITCODE -ne 0) { throw 'ChatGPT conversation URL inspection CLI failed.' }
+          $inspection = $inspectionRaw | ConvertFrom-Json
+          if (-not $inspection.ok -or -not $inspection.value.recognized -or $inspection.value.adapter_state -ne 'NOT_CONNECTED') {
+            throw 'ChatGPT conversation inspection CLI invariant failed.'
+          }
+          $negativeRaw = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- chatgpt-session-inspect --url https://evil.example/c/123e4567-e89b-42d3-a456-426614174000
+          if ($LASTEXITCODE -ne 0) { throw 'ChatGPT invalid-origin inspection unexpectedly failed operationally.' }
+          $negative = $negativeRaw | ConvertFrom-Json
+          if (-not $negative.ok -or $negative.value.recognized) { throw 'ChatGPT invalid origin was accepted.' }
           if (-not $doc.value.audiences.automation.supported) { throw 'Automation audience not advertised.' }
           if (-not $doc.value.audiences.agent.supported) { throw 'Agent audience not advertised.' }
 
@@ -1089,9 +1105,22 @@ jobs:
             else {
               Write-Host "UIA root: name='$($window.Current.Name)' class='$($window.Current.ClassName)' automationId='$($window.Current.AutomationId)' processId=$($window.Current.ProcessId)"
 
-              $allDescendants = $window.FindAll(
-                [System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.Condition]::TrueCondition)
+              # A hosted WebView UIA provider can transiently throw E_UNEXPECTED
+              # during tree composition. Retry only that COM error, at most
+              # four times; persistent provider or semantic failures still fail.
+              $allDescendants = $null
+              for ($attempt = 1; $attempt -le 4; $attempt++) {
+                try {
+                  $allDescendants = $window.FindAll(
+                    [System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition)
+                  break
+                } catch {
+                  if ($_.Exception.Message -notmatch '0x8000FFFF|E_UNEXPECTED' -or $attempt -eq 4) { throw }
+                  Write-Host "UIA transient FindAll provider error; retry $attempt/4."
+                  Start-Sleep -Milliseconds (250 * $attempt)
+                }
+              }
               $semanticPeers = @(
                 $allDescendants |
                   Where-Object { -not [string]::IsNullOrWhiteSpace($_.Current.AutomationId) }
@@ -1115,18 +1144,26 @@ jobs:
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
-                $element = $window.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $idCondition)
-                if (-not $element) {
-                  throw "UI Automation element missing despite semantic peers being exposed: $automationId"
+                for ($attempt = 1; $attempt -le 4; $attempt++) {
+                  try {
+                    $element = $window.FindFirst(
+                      [System.Windows.Automation.TreeScope]::Descendants,
+                      $idCondition)
+                    if (-not $element) {
+                      throw "UI Automation element missing despite semantic peers being exposed: $automationId"
+                    }
+                    $name = $element.Current.Name
+                    if ([string]::IsNullOrWhiteSpace($name)) {
+                      throw "UI Automation accessible name missing: $automationId"
+                    }
+                    return $element
+                  } catch {
+                    if ($_.Exception.Message -notmatch '0x8000FFFF|E_UNEXPECTED' -or $attempt -eq 4) { throw }
+                    Write-Host "UIA transient FindFirst provider error for $automationId; retry $attempt/4."
+                    Start-Sleep -Milliseconds (250 * $attempt)
+                  }
                 }
-
-                $name = $element.Current.Name
-                if ([string]::IsNullOrWhiteSpace($name)) {
-                  throw "UI Automation accessible name missing: $automationId"
-                }
-                return $element
+                throw "UIA semantic control unresolved: $automationId"
                 }
 
                 # Inactive tab content is not attached to the live UIA tree. Select each
@@ -1176,6 +1213,172 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+
+  anonymous-chatgpt-guest-probe:
+    # Single bounded public runner invocation for the #19 recovery PR, not
+    # recurring unsolicited prompts on unrelated builds.
+    # Provider-contacting guest probe is NEVER an automatic PR check.
+    # Explicit manual workflow_dispatch alone permits an anonymous attempt.
+    if: github.event_name == 'workflow_dispatch'
+    name: Anonymous ChatGPT browser surface probe (US runner)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile isolated public-safe guest probe
+        run: dotnet build SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release
+      - name: Parse Windows local actor batch without executing it
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $issues = $null
+          foreach ($path in @(
+            'tools/qualify-chatgpt-windows-local.ps1',
+            'tools/bootstrap-chatgpt-windows-local.ps1',
+            'tools/discover-chatgpt-windows-workspace.ps1',
+            'tools/cleanup-chatgpt-windows-local.ps1'
+          )) {
+            $tokens = $null
+            $issues = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path).Path,
+              [ref]$tokens,
+              [ref]$issues) | Out-Null
+            if ($issues.Count -gt 0) {
+              $issues | ForEach-Object { Write-Host $_.Message }
+              throw "Windows actor PowerShell parser failed: $path"
+            }
+          }
+          Write-Host 'Windows actor PowerShell syntax PASS (execution separately gated)'
+          $actor = Get-Content -Raw tools/qualify-chatgpt-windows-local.ps1
+          if ($actor -match '(?mi)^\s*&\s*(docker|podman|nerdctl|wsl(?:\.exe)?)\b' -or
+              $actor -match '(?i)ci\.ps1.{0,90}heavy') {
+            throw 'Windows local actor invokes container runtime against operator policy'
+          }
+          if ($actor -notmatch 'NativeBrowserSmoke' -or
+              $actor -notmatch 'WINDOWS_CONTAINER_HOST_PROHIBITED') {
+            throw 'Windows native browser smoke and no-container policy not enforced'
+          }
+          Write-Host 'Windows actor container-free execution policy PASS'
+      - name: Validate native-browser launcher JavaScript syntax
+        shell: bash
+        run: node --check tools/run-bridge-native-browser-smoke.mjs
+      - name: Deterministic guest-state taxonomy checks
+        run: dotnet run --project SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release --no-build -- --self-test
+      - name: Install Playwright Chromium with public OS dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cli = './SupraChat.GuestProbe/bin/Release/net10.0/playwright.ps1'
+          if (-not (Test-Path $cli)) { throw "Playwright .NET install script missing: $cli" }
+          & $cli install --with-deps chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Playwright Chromium install failed' }
+      - name: Offline ChatGPT-shaped guest interaction and negative qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A expected
+          expected[success]='GUEST_TURN_CORRELATED'
+          expected[wrong-turn]='ASSISTANT_TURN_OBSERVED_MARKER_MISSING'
+          expected[no-composer]='COMPOSER_NOT_FOUND'
+          expected[no-send-control]='SEND_CONTROL_UNAVAILABLE'
+          expected[login-gate]='LOGIN_GATE'
+          expected[challenge]='CHALLENGE_OR_BROWSER_CHECK'
+          for scenario in success wrong-turn no-composer no-send-control login-gate challenge; do
+            receipt="out/anonymous-chatgpt/fixture-${scenario}.json"
+            dotnet run --project SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release --no-build -- --fixture-case "${scenario}" --output "${receipt}"
+            jq -e --arg state "${expected[$scenario]}" --arg scenario "${scenario}"               '.source == "synthetic-local-route" and .fixture_case == $scenario and .final_state == $state and .auth_supplied == false and .page_reached == true'               "${receipt}" >/dev/null
+          done
+      - name: Single bounded anonymous chatgpt.com browser attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet run --project SupraChat.GuestProbe/SupraChat.GuestProbe.csproj -c Release --no-build -- --output out/anonymous-chatgpt/receipt.json
+      - name: Preserve metadata-only guest qualification receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suprachat-anonymous-guest-probe
+          path: out/anonymous-chatgpt/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+
+  portable-tool-bootstrap-windows:
+    # Disposable Windows-only bootstrap verification. No GH private source,
+    # account cookies, browser login, or machine installer is used.
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/19-chatgpt-control-contract-20261020'
+    name: Verify stateless Windows .local SDK and Node bootstrap
+    runs-on: windows-2025
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Force portable SDK and Node in isolated repo checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File tools/qualify-chatgpt-windows-local.ps1 -IncludePrivateBridge -BootstrapOnly -ForcePortableTools -SkipLiveGuest
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Portable bootstrap/verification failed'
+          }
+      - name: Prove workspace discovery, repeat apply, dry run and reversal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path .).Path
+          $owned = Join-Path $root '.local/suprachat-qualification'
+          $dotnet = Join-Path $owned 'dotnet/dotnet.exe'
+          $node = Join-Path $owned 'node-v24.21.0-win-x64/node.exe'
+          $marker = Join-Path $owned '.suprachat-tools-owned.json'
+          if (-not (Test-Path $marker) -or -not (Test-Path $dotnet) -or -not (Test-Path $node)) {
+            throw 'Project-local tool ownership or binaries missing'
+          }
+          $beforeDotnet = (Get-FileHash -Algorithm SHA256 $dotnet).Hash
+          $beforeNode = (Get-FileHash -Algorithm SHA256 $node).Hash
+          $observed = & tools/discover-chatgpt-windows-workspace.ps1 -WorkspaceRoot $root
+          if (-not $observed.read_only -or -not $observed.bounded -or
+              $observed.dotnet_sdk10 -ne '10.0.402' -or
+              $observed.node22 -ne 'v24.21.0') {
+            throw 'Workspace discovery did not reuse qualified existing executables'
+          }
+          $second = & tools/bootstrap-chatgpt-windows-local.ps1 -ProjectRoot $root -NeedDotnet -NeedNode
+          if ($second.dotnet_version -ne '10.0.402' -or $second.node_version -ne 'v24.21.0') {
+            throw 'Repeat bootstrap did not return same qualified versions'
+          }
+          if ((Get-FileHash -Algorithm SHA256 $dotnet).Hash -ne $beforeDotnet -or
+              (Get-FileHash -Algorithm SHA256 $node).Hash -ne $beforeNode) {
+            throw 'Repeat bootstrap changed qualified binaries'
+          }
+          & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root
+          if (-not (Test-Path $marker)) { throw 'Dry-run cleanup deleted owned tools' }
+          & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root -Apply
+          if (Test-Path $owned) { throw 'Apply cleanup retained owned namespace' }
+          $exclude = Join-Path $root '.git/info/exclude'
+          if ((Get-Content -LiteralPath $exclude) -contains '# suprachat-qualification-owned-exclude/v1' -or
+              (Get-Content -LiteralPath $exclude) -contains '.local/suprachat-qualification/') {
+            throw 'Apply cleanup retained qualification-owned Git exclude entries'
+          }
+          & tools/cleanup-chatgpt-windows-local.ps1 -ProjectRoot $root -Apply
+          if (-not (Test-Path (Join-Path $root 'tools/qualify-chatgpt-windows-local.ps1'))) {
+            throw 'Cleanup touched repository source'
+          }
+          Write-Host 'Workspace discover -> repeated apply -> verify -> dry-run -> reversal -> second reversal PASS'
+      - name: Preserve provisioning receipt without installed executables
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suprachat-windows-portable-tooling
+          path: ~/SupraChatQualification/**/summary.json
+          if-no-files-found: warn
+          retention-days: 7
 
   linux-desktop-oracle-census:
     if: github.event_name == 'workflow_dispatch'

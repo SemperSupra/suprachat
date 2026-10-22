@@ -45,6 +45,8 @@ internal static class Program
             return args[0] switch
             {
                 "capabilities" => WriteSuccess(Capabilities()),
+                "chatgpt-control" => WriteSuccess(ChatGptControlContract.Describe()),
+                "chatgpt-session-inspect" => WriteSuccess(ChatGptControlContract.Inspect(Option(args[1..], "--url"))),
                 "accessibility" => WriteSuccess(Accessibility()),
                 "accessibility-preferences" => WriteSuccess(await AccessibilityPreferencesAsync()),
                 "accessibility-set" => WriteSuccess(await SetAccessibilityPreferencesAsync(args[1..])),
@@ -103,6 +105,8 @@ internal static class Program
         commands = new object[]
         {
             new { name = "capabilities", description = "Read machine/product capability metadata." },
+            new { name = "chatgpt-control", description = "Read the ChatGPT product-conversation semantic-control contract; no browser connection." },
+            new { name = "chatgpt-session-inspect", description = "Inspect an existing ChatGPT conversation URL without connecting to the browser.", syntax = "chatgpt-session-inspect --url <https://chatgpt.com/c/UUID>" },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
             new { name = "accessibility-preferences", description = "Read effective local accessibility preferences." },
             new { name = "accessibility-set", description = "Set local accessibility preferences.", syntax = "accessibility-set [--scale <0.8-2.0>] [--reduced-motion <true|false>]" },
@@ -165,6 +169,8 @@ internal static class Program
         machine_methods = new[]
         {
             "capabilities/read",
+            "chatgpt/control/read",
+            "chatgpt/conversation/inspect",
             "accessibility/read",
             "accessibility/preferences/read",
             "accessibility/preferences/write",
@@ -683,6 +689,8 @@ internal static class Program
         return method switch
         {
             "capabilities/read" => Capabilities(),
+            "chatgpt/control/read" => ChatGptControlContract.Describe(),
+            "chatgpt/conversation/inspect" => ChatGptControlContract.Inspect(OptionalString(RequireObject(parameters), "url")),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
             "accessibility/preferences/write" => await RpcAccessibilityPreferencesWriteAsync(parameters),
