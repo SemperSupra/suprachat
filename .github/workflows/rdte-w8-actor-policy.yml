@@ -1,0 +1,47 @@
+name: RDTE W8 actor capability and impersonation
+on:
+  pull_request:
+    paths:
+      - 'tools/rdte-w8-actor-capabilities.mjs'
+      - '.github/workflows/rdte-w8-actor-policy.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-bound-capabilities:
+    if: github.head_ref == 'rdte/39-w8-actor-capability-policy-20261022'
+    name: W8 fixed actor capabilities ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify no native dependency or executable side effect
+        run: node --check tools/rdte-w8-actor-capabilities.mjs
+      - name: Qualify actor-scoped signature, impersonation, expiry, revocation and replay refusal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/rdte-w8-actor-capabilities.mjs | Set-Content -Encoding utf8 w8-actor-receipt.json
+          if ($LASTEXITCODE -ne 0) { throw 'W8_NEGATIVE_AUTHORIZATION_ORACLE_FAILED' }
+          $r = Get-Content -Raw w8-actor-receipt.json | ConvertFrom-Json
+          if ($r.schema -ne 'suprachat-w8-synthetic-actor-policy/v1' -or
+              $r.passed -lt 10 -or
+              $r.os_peer_credentials_integrated -ne $false -or
+              $r.w6_http_host_integrated -ne $false -or
+              $r.production_identity_admitted -ne $false -or
+              $r.browser_prompt_submitted -ne $false) {
+            throw 'W8_FALSE_PRODUCTION_IDENTITY_CLAIM'
+          }
+          Get-Content -Raw w8-actor-receipt.json | Write-Host
+      - name: Keep metadata-only synthetic fixture receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: w8-actor-capabilities-${{ matrix.os }}
+          path: w8-actor-receipt.json
+          retention-days: 7
