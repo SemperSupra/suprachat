@@ -145,8 +145,8 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
                 await entry.Process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
-            catch (InvalidOperationException) { }
             catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
             VerifyAndRelease(entry);
         }
         return Status(entry);
