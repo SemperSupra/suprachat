@@ -35,6 +35,28 @@ jobs:
           Write-Host 'Qualified existing absolute PowerShell child path; no Docker/WSL/privileged environment mutations'
           dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
           if ($LASTEXITCODE -ne 0) { throw 'W3_TERMINAL_LIFECYCLE_CONTRACT_FAILURE' }
+      - name: Verify CLI and agent JSON-RPC expose identical read-only lifecycle limits
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'SupraChat.Automation/SupraChat.Automation.csproj'
+          $cli = dotnet run -c Release --project $project -- terminal-lifecycle-contract | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $cli.ok -or
+              $cli.value.current_phase -ne 'W3_SUPERVISED_IDLE_PROCESS_ONLY' -or
+              $cli.value.command_input_available -ne $false -or
+              $cli.value.automated_start_available -ne $false) {
+            throw 'W3_CLI_READONLY_AUTHORITY_DRIFT'
+          }
+          $rpcRequest = '{"jsonrpc":"2.0","id":41,"method":"terminal/lifecycle/read","params":{}}'
+          $rpc = $rpcRequest | dotnet run --no-build -c Release --project $project -- stdio | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $rpc.id -ne 41 -or
+              $rpc.result.schema -ne $cli.value.schema -or
+              $rpc.result.max_owned_processes -ne $cli.value.max_owned_processes -or
+              $rpc.result.command_input_available -ne $false -or
+              $rpc.result.kernel_sandboxed -eq $true) {
+            throw 'W3_CLI_RPC_PARITY_FAILURE'
+          }
+          Write-Host 'W3 read-only CLI and agent lifecycle parity PASS'
       - name: Verify no automatic terminal command I/O or ChatGPT authority
         shell: pwsh
         run: |
