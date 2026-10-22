@@ -48,5 +48,7 @@ jobs:
             throw 'Unexpected provider/process/network authority in synthetic human projection'
           }
           Write-Host 'Shared human UI semantic IDs and no-provider guard PASS'
-      - name: Run independent-process, multi-participant, multi-session causal RDTE
-        run: python tools/qualify-shared-session-host.py SupraChat.SessionHost/bin/Release/net10.0/SupraChat.SessionHost.dll
+      - name: Compile real automation and agent JSON-RPC projection
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Run independent-process, GUI-core and agent JSON-RPC shared-session qualification
+        run: python tools/qualify-shared-session-host.py SupraChat.SessionHost/bin/Release/net10.0/SupraChat.SessionHost.dll SupraChat.Automation/bin/Release/net10.0/SupraChat.Automation.dll
