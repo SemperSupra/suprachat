@@ -174,7 +174,7 @@ public sealed class SharedSessionLedger
 
     private static void ValidateIdempotencyKey(string key)
     {
-        if (key.Length is < 12 or > 128 ||
+        if (string.IsNullOrEmpty(key) || key.Length is < 12 or > 128 ||
             key.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not ':' and not '.'))
             throw new ArgumentException("INVALID_IDEMPOTENCY_KEY");
     }
