@@ -226,11 +226,23 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
         {
             try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false); }
             catch (TimeoutException) { Terminate(e, "PIPE_DRAIN_TIMEOUT"); }
+            // A failed kill must never free the concurrency slot or be
+            // reported as successful resource cleanup.
+            var terminationVerified = false;
+            try { terminationVerified = e.Process.HasExited; }
+            catch (ObjectDisposedException) { }
             e.EndedAt = DateTimeOffset.UtcNow;
-            e.Ended = true;
-            e.Reason ??= "PROCESS_EXITED";
-            try { e.Process.StandardInput.Dispose(); } catch { }
-            e.Process.Dispose();
+            e.Ended = terminationVerified;
+            if (terminationVerified)
+            {
+                e.Reason ??= "PROCESS_EXITED";
+                try { e.Process.StandardInput.Dispose(); } catch { }
+                e.Process.Dispose();
+            }
+            else
+            {
+                e.Reason = "TERMINATION_UNVERIFIED";
+            }
         }
     }
 
