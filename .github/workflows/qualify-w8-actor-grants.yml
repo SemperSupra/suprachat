@@ -1,0 +1,27 @@
+name: Qualify W8 scoped audience capability RDTE
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.ActorAuthRdte/**'
+      - '.github/workflows/qualify-w8-actor-grants.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  signed-session-scopes:
+    name: W8 signed actor delegation ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build independent W8 authority RDTE
+        run: dotnet build SupraChat.ActorAuthRdte/SupraChat.ActorAuthRdte.csproj -c Release
+      - name: Exercise valid signed actor permissions and adversarial denials
+        run: dotnet run --project SupraChat.ActorAuthRdte/SupraChat.ActorAuthRdte.csproj -c Release --no-build
