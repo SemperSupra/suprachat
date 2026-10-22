@@ -134,6 +134,11 @@ try { localDrafts.StageReviewed(alpha.Id, alphaReview.ReviewId, "echo changed co
 catch (InvalidOperationException) { alteredReviewRejected = true; }
 Require(alteredReviewRejected && localDrafts.Read(alpha.Id).TerminalInputDraft == string.Empty,
     "Changed preview text must fail closed before a local draft is staged");
+var restoredTextRejected = false;
+try { localDrafts.StageReviewed(alpha.Id, alphaReview.ReviewId, "echo local only"); }
+catch (InvalidOperationException) { restoredTextRejected = true; }
+Require(restoredTextRejected, "An edited review must be consumed even if original text is restored");
+alphaReview = localDrafts.Prepare(alpha.Id, "chat-to-terminal", "echo local only");
 var alphaCommit = localDrafts.StageReviewed(alpha.Id, alphaReview.ReviewId, "echo local only");
 Require(alphaCommit.DraftStaged && !alphaCommit.ChatSubmitted &&
         !alphaCommit.CommandExecuted && !alphaCommit.RemoteRequestCreated &&
