@@ -527,6 +527,90 @@
           </StackPanel>
         </ScrollViewer>
       </TabItem>
+      <TabItem Header="Sessions"
+               AutomationProperties.AutomationId="Tab.Sessions"
+               AutomationProperties.AcceleratorKey="Command+4 / Control+4"
+               AutomationProperties.HelpText="Local workbench session metadata and explicit transfer previews. This prototype never launches terminal commands or sends ChatGPT prompts.">
+        <ScrollViewer>
+          <StackPanel Margin="20" Spacing="10" MaxWidth="1100">
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="Session workbench (preview)"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="1"
+                       AutomationProperties.AutomationId="Sessions.Heading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="W1 local session shell: associate one conversation reference with one inactive terminal slot. No browser binding, terminal process, persistent transcript, or automatic send is created." />
+
+            <TextBlock Text="New session metadata" FontWeight="SemiBold" />
+            <WrapPanel Orientation="Horizontal">
+              <TextBox x:Name="WorkbenchTitleInput" Width="185" Margin="0,0,8,8"
+                       Watermark="Session title (optional)" MaxLength="80"
+                       AutomationProperties.AutomationId="Sessions.NewTitle"
+                       AutomationProperties.Name="New workbench session title" />
+              <TextBox x:Name="WorkbenchUrlInput" Width="365" Margin="0,0,8,8"
+                       Watermark="https://chatgpt.com/c/UUID (optional)"
+                       AutomationProperties.AutomationId="Sessions.NewConversation"
+                       AutomationProperties.Name="Existing conversation reference; read-only metadata" />
+              <TextBox x:Name="WorkbenchWorkspaceInput" Width="270" Margin="0,0,8,8"
+                       Watermark="Workspace collision key (optional)"
+                       AutomationProperties.AutomationId="Sessions.NewWorkspace"
+                       AutomationProperties.Name="Workspace collision detection key" />
+            </WrapPanel>
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Create metadata session" Click="WorkbenchCreate_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.Create"
+                      AutomationProperties.HelpText="Create a non-executing session descriptor. No browser or terminal process starts." />
+              <Button Content="Close selected" Click="WorkbenchClose_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.Close" />
+              <Button Content="Move earlier" Click="WorkbenchMoveUp_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.MoveUp" />
+              <Button Content="Move later" Click="WorkbenchMoveDown_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.MoveDown" />
+            </WrapPanel>
+
+            <ListBox x:Name="WorkbenchList" MinHeight="120" MaxHeight="230"
+                     SelectionChanged="WorkbenchList_SelectionChanged"
+                     AutomationProperties.AutomationId="Sessions.List"
+                     AutomationProperties.Name="Workbench session list">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Title}" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock x:Name="WorkbenchStatus" TextWrapping="Wrap"
+                       Text="No local sessions. Terminal execution and chat submission are disabled."
+                       AutomationProperties.AutomationId="Sessions.Status"
+                       AutomationProperties.Name="Session state and workspace collision warnings"
+                       AutomationProperties.LiveSetting="Polite" />
+
+            <Separator Margin="0,6,0,6" />
+            <TextBlock Text="Explicit transfer preview" FontSize="18" FontWeight="SemiBold"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Sessions.PreviewHeading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Enter text to preview a future transfer. Preview never inserts into a terminal, executes a command, or submits a chat turn; no commit action is available in this stage." />
+            <TextBox x:Name="WorkbenchTransferInput" AcceptsReturn="True" MinHeight="92" MaxLength="16384"
+                     TextWrapping="Wrap" Watermark="Content for preview only"
+                     AutomationProperties.AutomationId="Sessions.TransferInput"
+                     AutomationProperties.Name="Unsent preview input" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Preview chat to terminal" Click="WorkbenchPreviewToTerminal_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.PreviewToTerminal"
+                      AutomationProperties.HelpText="Show proposed insertion, but never run terminal commands." />
+              <Button Content="Preview terminal to chat" Click="WorkbenchPreviewToChat_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.PreviewToChat"
+                      AutomationProperties.HelpText="Show proposed draft, but never submit to ChatGPT." />
+            </WrapPanel>
+            <TextBox x:Name="WorkbenchTransferPreview" IsReadOnly="True"
+                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="92"
+                     AutomationProperties.AutomationId="Sessions.PreviewOutput"
+                     AutomationProperties.Name="Unapplied text preview" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="This session shell is temporary, local, and preview-only. It does not contain a terminal emulator, bind a live ChatGPT session, or persist preview content. No command or chat submission controls are enabled." />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
     </TabControl>
   </Grid>
 </Window>
