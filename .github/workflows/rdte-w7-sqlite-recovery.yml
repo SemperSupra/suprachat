@@ -1,0 +1,48 @@
+name: RDTE W7 crash-consistent metadata recovery
+on:
+  pull_request:
+    paths:
+      - 'tools/rdte_w7_sqlite_recovery.py'
+      - '.github/workflows/rdte-w7-sqlite-recovery.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-crash-replay:
+    if: github.head_ref == 'rdte/38-w7-sqlite-crash-recovery-20261022'
+    name: W7 crash/replay/lock/corruption ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify pure standard-library reference syntax
+        run: python -m py_compile tools/rdte_w7_sqlite_recovery.py
+      - name: Execute 100 deterministic actual crash and recovery repetitions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SUPRACHAT_W7_PUBLIC_FIXED_FIXTURE = 'yes'
+          python tools/rdte_w7_sqlite_recovery.py selftest | Set-Content -Encoding utf8 w7-receipt.json
+          if ($LASTEXITCODE -ne 0) { throw 'W7_CRASH_RECOVERY_FAILED' }
+          $r = Get-Content -Raw w7-receipt.json | ConvertFrom-Json
+          if ($r.schema -ne 'suprachat-w7-sqlite-durable-reference/v1' -or
+              $r.verified -lt 7 -or
+              $r.checks[1].repetitions -ne 100 -or
+              $r.durable_admission_granted -ne $false -or
+              $r.w6_host_integrated -ne $false -or
+              $r.chatgpt_message_sent -ne $false) {
+            throw 'W7_RECEIPT_AUTHORITY_OR_TEST_COUNT_DRIFT'
+          }
+          Get-Content -Raw w7-receipt.json | Write-Host
+      - name: Publish synthetic metadata-only crash receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: w7-synthetic-crash-${{ matrix.os }}
+          path: w7-receipt.json
+          retention-days: 7
