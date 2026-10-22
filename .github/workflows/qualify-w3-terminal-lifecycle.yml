@@ -53,7 +53,7 @@ jobs:
               $rpc.result.schema -ne $cli.value.schema -or
               $rpc.result.max_owned_processes -ne $cli.value.max_owned_processes -or
               $rpc.result.command_input_available -ne $false -or
-              $rpc.result.kernel_sandboxed -eq $true) {
+              $rpc.result.process_kernel_sandboxed -eq $true) {
             throw 'W3_CLI_RPC_PARITY_FAILURE'
           }
           Write-Host 'W3 read-only CLI and agent lifecycle parity PASS'
