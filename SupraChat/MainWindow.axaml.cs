@@ -292,11 +292,20 @@ public partial class MainWindow : Window
                 return;
             }
 
+            if (_pendingMetadataExport is null ||
+                !string.Equals(
+                    WorkbenchMetadataExport.Prepare(_workbenchSessions.Snapshot(), preview.Format).Content,
+                    preview.Content, StringComparison.Ordinal))
+            {
+                WorkbenchMetadataExportStatus.Text = "Export approval invalidated during file selection; nothing written.";
+                return;
+            }
+
             // No implicit path, silent autosave, browser upload or plaintext
             // transcript read. StorageProvider owns the selected destination.
             await using var output = await file.OpenWriteAsync();
             output.SetLength(0);
-            await using (var writer = new StreamWriter(output, new UTF8Encoding(false), leaveOpen: true))
+            await using (var writer = new StreamWriter(output, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true))
             {
                 await writer.WriteAsync(preview.Content.AsMemory());
                 await writer.FlushAsync();
