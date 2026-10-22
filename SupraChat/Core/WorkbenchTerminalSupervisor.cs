@@ -133,6 +133,22 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
         if (entry is null) return null;
         Terminate(entry, "OPERATOR_STOP");
         if (entry.Watcher is not null) await entry.Watcher.ConfigureAwait(false);
+        // The first watcher pass may have failed to verify termination.
+        // Keep the OS handle and retry once under a bounded wait; never
+        // report STOPPED just because a Kill() call was made.
+        if (!entry.Ended)
+        {
+            Terminate(entry, "STOP_RETRY");
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                await entry.Process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (InvalidOperationException) { }
+            catch (ObjectDisposedException) { }
+            VerifyAndRelease(entry);
+        }
         return Status(entry);
     }
 
@@ -155,7 +171,13 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
         }
         foreach (var entry in entries) Terminate(entry, "APPLICATION_SHUTDOWN");
         await Task.WhenAll(entries.Select(e => e.Watcher ?? Task.CompletedTask)).ConfigureAwait(false);
-        lock (_gate) _entries.Clear();
+        foreach (var entry in entries) VerifyAndRelease(entry);
+        lock (_gate)
+        {
+            if (_entries.Values.Any(e => !e.Ended))
+                throw new InvalidOperationException("CHILD_TERMINATION_NOT_VERIFIED");
+            _entries.Clear();
+        }
     }
 
     private static bool IsPowerShellExecutable(string path) =>
@@ -164,7 +186,7 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
 
     private static WorkbenchTerminalStatus Status(Entry e) =>
         new(Schema, e.SessionId, e.ProcessId, !e.Ended,
-            e.Ended ? e.Reason ?? "EXITED" : "SUPERVISED_IDLE_NO_INPUT",
+            e.Reason ?? (e.Ended ? "EXITED" : "SUPERVISED_IDLE_NO_INPUT"),
             Interlocked.Read(ref e.OutputBytes), MaximumOutputBytes,
             MaximumObservedRssBytes, (int)MaximumLifetime.TotalSeconds,
             e.StartedAt, e.EndedAt,
@@ -249,24 +271,32 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
         {
             try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false); }
             catch (TimeoutException) { Terminate(e, "PIPE_DRAIN_TIMEOUT"); }
-            // A failed kill must never free the concurrency slot or be
-            // reported as successful resource cleanup.
-            var terminationVerified = false;
-            try { terminationVerified = e.Process.HasExited; }
-            catch (ObjectDisposedException) { }
-            e.EndedAt = DateTimeOffset.UtcNow;
-            e.Ended = terminationVerified;
-            if (terminationVerified)
-            {
-                e.Reason ??= "PROCESS_EXITED";
-                try { e.Process.StandardInput.Dispose(); } catch { }
-                e.Process.Dispose();
-            }
-            else
-            {
-                e.Reason = "TERMINATION_UNVERIFIED";
-            }
+            VerifyAndRelease(e);
         }
+    }
+
+    private static void VerifyAndRelease(Entry entry)
+    {
+        if (entry.Ended) return;
+        bool exited;
+        try { exited = entry.Process.HasExited; }
+        catch (ObjectDisposedException)
+        {
+            // An already-disposed handle is not evidence of a verified exit.
+            entry.Reason = "TERMINATION_UNVERIFIED";
+            return;
+        }
+        if (!exited)
+        {
+            entry.Reason = "TERMINATION_UNVERIFIED";
+            return;
+        }
+
+        entry.EndedAt = DateTimeOffset.UtcNow;
+        entry.Ended = true;
+        entry.Reason ??= "PROCESS_EXITED";
+        try { entry.Process.StandardInput.Dispose(); } catch { }
+        entry.Process.Dispose();
     }
 
     private sealed class Entry
