@@ -1,0 +1,47 @@
+name: Qualify combined W2 session shell
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/WorkbenchMetadataExport.cs'
+      - 'SupraChat/Core/WorkbenchLocalDrafts.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - '.github/workflows/qualify-w2-combined.yml'
+permissions:
+  contents: read
+jobs:
+  combined-preview-and-review:
+    if: github.head_ref == 'feat/19-w2-integrated-shell-20261022'
+    name: W2 combined export and local transfer ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile combined W2 Avalonia UI
+        run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Execute combined W0 W1 W2 negative contracts
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Assert combined accessible IDs and no embedded authority
+        shell: pwsh
+        run: |
+          $ui = Get-Content -Raw 'SupraChat/MainWindow.axaml'
+          foreach ($id in 'Sessions.ExportSave', 'Sessions.ExportPreview', 'Sessions.StageLocalDraft', 'Sessions.TerminalDraft', 'Sessions.ChatDraft') {
+            if ($ui -notmatch [regex]::Escape($id)) { throw "Missing W2 combined accessible ID $id" }
+          }
+          $files = @('SupraChat/Core/WorkbenchLocalDrafts.cs', 'SupraChat/Core/WorkbenchMetadataExport.cs')
+          foreach ($path in $files) {
+            $source = Get-Content -Raw $path
+            $executable = [regex]::Replace($source, '(?m)^\s*//.*$', '')
+            if ($executable -match '(?i)\bHttpClient\b|\bProcess\.Start|\bClipboard\.|\bWebSocket\b') {
+              throw "Unexpected network/process/clipboard authority in $path"
+            }
+          }
+          Write-Host 'Combined W2 source and UI authority boundary PASS'

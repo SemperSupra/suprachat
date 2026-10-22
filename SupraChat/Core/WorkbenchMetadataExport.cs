@@ -24,7 +24,7 @@ public static class WorkbenchMetadataExport
         return new WorkbenchMetadataPreview(Schema, format, content,
             Encoding.UTF8.GetByteCount(content), WasSaved: false,
             RequiresUserSelectedDestination: true,
-            "Contains conversation URLs and workspace references. Review before saving. No transcript, transfer text, terminal output, or credential material is included.");
+            "Contains user-entered titles, conversation URLs and workspace references, which may themselves contain secrets. No credential store, transcript, transfer draft or terminal output is read.");
     }
 
     private static string FormatJson(WorkbenchSnapshot snapshot)
