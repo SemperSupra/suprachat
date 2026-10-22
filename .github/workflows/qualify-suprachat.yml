@@ -1175,7 +1175,7 @@ jobs:
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
                   @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') },
-                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput') }
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput', 'Sessions.SharedHeading', 'Sessions.SharedList', 'Sessions.SharedRefresh', 'Sessions.SharedCreate', 'Sessions.SharedJoin', 'Sessions.SharedAppend', 'Sessions.SharedStatus') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
@@ -1426,3 +1426,27 @@ jobs:
           path: out/desktop-oracle/macos/
           if-no-files-found: error
           retention-days: 7
+
+  shared-session-synthetic-rdte:
+    if: github.head_ref == 'exp/19-shared-multisession-core-rdte-20261022'
+    name: Shared session multiprocess causal RDTE ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build isolated shared session host and core
+        run: dotnet build SupraChat.SessionHost/SupraChat.SessionHost.csproj -c Release
+      - name: Build existing automation and agent JSON-RPC projection
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Prove two concurrent sessions with accessible and agent-facing shared-host clients
+        run: python tools/qualify-shared-session-host.py SupraChat.SessionHost/bin/Release/net10.0/SupraChat.SessionHost.dll SupraChat.Automation/bin/Release/net10.0/SupraChat.Automation.dll
