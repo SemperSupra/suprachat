@@ -156,8 +156,8 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
         {
             if (!e.Process.HasExited) e.Process.Kill(entireProcessTree: true);
         }
-        catch (InvalidOperationException) { }
         catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
         catch (System.ComponentModel.Win32Exception)
         {
             Interlocked.CompareExchange(ref e.Reason, "TERMINATION_FAILED", reason);
