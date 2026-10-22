@@ -32,7 +32,9 @@ jobs:
         shell: pwsh
         run: |
           $source = Get-Content -Raw 'SupraChat/Core/WorkbenchLocalDrafts.cs'
-          if ($source -match '(?i)HttpClient|File\.Write|Process\.Start|Clipboard|SaveFilePicker|ChatGptRelayObservation|WebSocket') {
+          # Do not treat explanatory "no clipboard/process" comments as I/O calls.
+          $executable = [regex]::Replace($source, '(?m)^\s*//.*$', '')
+          if ($executable -match '(?i)\bHttpClient\b|\bFile\.Write|\bProcess\.Start|\bClipboard\.|\bSaveFilePicker|\bChatGptRelayObservation\b|\bWebSocket\b') {
             throw 'W2 local draft model acquired forbidden host/network authority'
           }
           $xaml = Get-Content -Raw 'SupraChat/MainWindow.axaml'
