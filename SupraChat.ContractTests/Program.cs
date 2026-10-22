@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using System.Xml.Linq;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
@@ -42,6 +45,95 @@ foreach (var invalid in new[]
     Require(!rejected.Recognized && rejected.ConversationId is null &&
         rejected.CanonicalUrl is null && rejected.AdapterState == "NOT_CONNECTED",
         "Unqualified/malformed conversation URL was accepted: " + invalid);
+}
+
+
+// Read-only adapter bridge: no credential leakage, no authority promotion,
+// exact canonical conversation match and fail-closed malformed state handling.
+const string relayTarget = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000";
+const string otherTarget = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174001";
+var relayFixture = JsonSerializer.Serialize(new
+{
+    clients = new object[]
+    {
+        new {conversationUrl = relayTarget, browserState = "ready", busy = false, id = "private-actor-id", token = "must-never-escape"},
+        new {conversationUrl = otherTarget, browserState = "ready", busy = false, id = "different-actor-id"},
+        new {conversationUrl = (string?)null, browserState = "loading", busy = false, id = "unbound-tab"},
+        new {conversationUrl = relayTarget, browserState = "ready", busy = true, id = "assigned-tab"}
+    },
+    queueDepth = 2,
+    quarantineCounts = new {clients = 1, conversations = 1},
+    recent = new[] {new {prompt = "secret prompt", id = "private-request-id"}}
+});
+var observed = ChatGptRelayObservation.Interpret(relayTarget, relayFixture);
+var serializedObservation = JsonSerializer.Serialize(observed);
+Require(observed.Connected && observed.State == "RELAY_REPORTS_READY_UNVERIFIED" &&
+        observed.MatchingReadyClients == 1 && observed.QueueDepth == 2 &&
+        observed.QuarantinedClients == 1 && observed.QuarantinedConversations == 1 &&
+        !observed.MaySubmit, "Bridge observation must remain read-only metadata");
+Require(!serializedObservation.Contains("secret prompt", StringComparison.Ordinal) &&
+        !serializedObservation.Contains("must-never-escape", StringComparison.Ordinal) &&
+        !serializedObservation.Contains("private-request-id", StringComparison.Ordinal) &&
+        !serializedObservation.Contains("private-actor-id", StringComparison.Ordinal),
+        "Relay observation leaked private browser or request metadata");
+var unrelated = ChatGptRelayObservation.Interpret(
+    "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174002", relayFixture);
+Require(unrelated.Connected && unrelated.MatchingReadyClients == 0 && !unrelated.MaySubmit,
+    "Unrelated conversation was incorrectly reported as a ready client");
+Require(!ChatGptRelayObservation.Interpret(relayTarget, "{}").Connected &&
+        ChatGptRelayObservation.Interpret(relayTarget, "{}").ErrorCode == "INVALID_RELAY_METADATA",
+    "Malformed bridge metadata must fail closed");
+Require(!ChatGptRelayObservation.Interpret(relayTarget,
+    """{"clients":[],"queueDepth":"not-an-int","quarantineCounts":{"clients":0,"conversations":0}}""").Connected,
+    "Non-numeric bridge metadata must fail closed");
+Require(!ChatGptRelayObservation.Interpret(relayTarget,
+    """{"clients":[{"conversationUrl":"https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000","browserState":"ready"}],"queueDepth":0,"quarantineCounts":{"clients":0,"conversations":0}}""").Connected,
+    "Client missing busy state must not be presented as ready");
+var missingToken = await ChatGptRelayObservation.ObserveAsync(relayTarget, 7654, null);
+Require(!missingToken.Connected && missingToken.ErrorCode == "NO_LOCAL_RELAY_TOKEN" &&
+        !missingToken.MaySubmit, "Missing token must prevent all network calls");
+var invalidPort = await ChatGptRelayObservation.ObserveAsync(relayTarget, 0, "fake-token");
+Require(!invalidPort.Connected && invalidPort.ErrorCode == "INVALID_RELAY_PORT",
+    "Relay observer must reject invalid ports without network calls");
+
+
+// Local socket oracle: real HTTP request to a fixed loopback relay fixture,
+// without touching ChatGPT, any browser, credentials, or any private source.
+using (var localRelay = new TcpListener(IPAddress.Loopback, 0))
+{
+    localRelay.Start();
+    var localPort = ((IPEndPoint)localRelay.LocalEndpoint).Port;
+    var server = Task.Run(async () =>
+    {
+        using var accepted = await localRelay.AcceptTcpClientAsync();
+        await using var stream = accepted.GetStream();
+        using var requestReader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+        var requestLine = await requestReader.ReadLineAsync();
+        Require(requestLine == "GET /state HTTP/1.1", "Unexpected observer HTTP method or route");
+        string? line;
+        var authHeaderSeen = false;
+        while (!string.IsNullOrEmpty(line = await requestReader.ReadLineAsync()))
+        {
+            if (line.StartsWith("Authorization: Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                authHeaderSeen = line.EndsWith("fixture-relay-token", StringComparison.Ordinal);
+            }
+        }
+        Require(authHeaderSeen, "Observer omitted the local bearer token from private request");
+        var body = Encoding.UTF8.GetBytes(relayFixture);
+        var httpHeaders = Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(httpHeaders);
+        await stream.WriteAsync(body);
+        await stream.FlushAsync();
+    });
+    var actualLoopback = await ChatGptRelayObservation.ObserveAsync(relayTarget, localPort, "fixture-relay-token");
+    await server;
+    localRelay.Stop();
+    Require(actualLoopback.Connected && actualLoopback.MatchingReadyClients == 1 &&
+            !actualLoopback.MaySubmit, "Real loopback-only observation drifted from synthetic contract");
+    Require(!JsonSerializer.Serialize(actualLoopback).Contains("fixture-relay-token", StringComparison.Ordinal),
+        "Observer leaked local bearer token into machine-readable output");
 }
 
 var attempt = SiwcProtocol.CreateAuthorization(

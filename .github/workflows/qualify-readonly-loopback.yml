@@ -1,0 +1,48 @@
+name: Qualify read-only local bridge parity
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/ChatGptRelayObservation.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'tools/qualify-chatgpt-loopback.mjs'
+      - '.github/workflows/qualify-readonly-loopback.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-observer-parity:
+    if: github.head_ref == 'feat/19-readonly-relay-readiness-cow-20261021'
+    name: Local-only CLI and agent parity ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build read-only automation without provider or private source
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Verify cross-platform offline loopback test runner
+        run: node --check tools/qualify-chatgpt-loopback.mjs
+      - name: Check Windows native batch syntax and prohibit container-engine calls
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $issues = $null
+          $path = (Resolve-Path tools/qualify-chatgpt-windows-integration.ps1).Path
+          [System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$issues) | Out-Null
+          if ($issues.Count -gt 0) { $issues | ForEach-Object { Write-Host $_.Message }; throw 'WINDOWS_BATCH_SYNTAX_FAILED' }
+          $scriptText = Get-Content -Raw $path
+          if ($scriptText -match '(?mi)^\s*&\s*(docker|podman|nerdctl|wsl(?:\.exe)?)\b') { throw 'WINDOWS_CONTAINER_PROHIBITION_BROKEN' }
+          if ($scriptText -match '(?mi)^\s*&\s*(?:node|pwsh|powershell).*\bci\.ps1\s+heavy\b') { throw 'CANONICAL_HEAVY_ON_WINDOWS_REFUSED' }
+          Write-Host 'No Windows container engine and PowerShell parser PASS'
+      - name: Verify real local socket CLI and JSON-RPC parity
+        run: node tools/qualify-chatgpt-loopback.mjs --mode mock --public-root .
