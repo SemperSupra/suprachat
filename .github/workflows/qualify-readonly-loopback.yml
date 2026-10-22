@@ -31,5 +31,18 @@ jobs:
         run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
       - name: Verify cross-platform offline loopback test runner
         run: node --check tools/qualify-chatgpt-loopback.mjs
+      - name: Check Windows native batch syntax and prohibit container-engine calls
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $issues = $null
+          $path = (Resolve-Path tools/qualify-chatgpt-windows-integration.ps1).Path
+          [System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$issues) | Out-Null
+          if ($issues.Count -gt 0) { $issues | ForEach-Object { Write-Host $_.Message }; throw 'WINDOWS_BATCH_SYNTAX_FAILED' }
+          $scriptText = Get-Content -Raw $path
+          if ($scriptText -match '(?mi)^\s*&\s*(docker|podman|nerdctl|wsl(?:\.exe)?)\b') { throw 'WINDOWS_CONTAINER_PROHIBITION_BROKEN' }
+          if ($scriptText -match '(?mi)^\s*&\s*(?:node|pwsh|powershell).*\bci\.ps1\s+heavy\b') { throw 'CANONICAL_HEAVY_ON_WINDOWS_REFUSED' }
+          Write-Host 'No Windows container engine and PowerShell parser PASS'
       - name: Verify real local socket CLI and JSON-RPC parity
         run: node tools/qualify-chatgpt-loopback.mjs --mode mock --public-root .
