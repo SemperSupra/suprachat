@@ -1,0 +1,52 @@
+name: Qualify W6 cross-process session host
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionLedger.cs'
+      - 'SupraChat.Automation/SessionLedgerHost.cs'
+      - 'SupraChat.Automation/SessionLedgerClient.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.Automation/SupraChat.Automation.csproj'
+      - 'tools/qualify-w6-loopback-ledger.mjs'
+      - '.github/workflows/qualify-w6-shared-session-host.yml'
+permissions:
+  contents: read
+jobs:
+  shared-session-loopback:
+    if: github.head_ref == 'feat/19-w6-loopback-shared-session-host-20261022'
+    name: Cross-process W6 human automation agent ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build W6 shared-host and all in-process session contract code
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Verify Node cross-process harness syntax
+        run: node --check tools/qualify-w6-loopback-ledger.mjs
+      - name: Execute real token-authenticated loopback host and three independent client surfaces
+        run: node tools/qualify-w6-loopback-ledger.mjs
+      - name: Verify loopback-only and explicit no-provider authority
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw 'SupraChat.Automation/SessionLedgerHost.cs'
+          if ($source -notmatch 'IPAddress\.Loopback' -or
+              $source -notmatch 'SUPRACHAT_LEDGER_TOKEN' -or
+              $source -match 'IPAddress\.Any|ListenAnyIP|ChatGptRelayObservation|Process\.Start|UseUrls') {
+            throw 'W6_HOST_GAINED_EXTERNAL_BIND_OR_EXECUTION_AUTHORITY'
+          }
+          $client = Get-Content -Raw 'SupraChat.Automation/SessionLedgerClient.cs'
+          if ($client -notmatch '127\.0\.0\.1' -or
+              $client -match 'AllowAutoRedirect = true|UseProxy = true|UseCookies = true') {
+            throw 'W6_CLIENT_GAINED_REDIRECT_OR_PROXY_SURFACE'
+          }
+          Write-Host 'W6 authentic shared session boundary and no ChatGPT send PASS'

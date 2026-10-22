@@ -1,0 +1,51 @@
+name: Qualify W6 shared session host
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.Automation/SessionLedgerHost.cs'
+      - 'SupraChat.Automation/SessionLedgerClient.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.Automation/SupraChat.Automation.csproj'
+      - 'SupraChat/Core/SharedSessionLedger.cs'
+      - 'tools/qualify-w6-shared-ledger.mjs'
+      - '.github/workflows/qualify-w6-session-host.yml'
+permissions:
+  contents: read
+jobs:
+  independent-process-cas:
+    if: github.head_ref == 'feat/19-w6-loopback-shared-session-host-20261022'
+    name: Three audiences one process-hosted ledger ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build actual W6 executable host and clients
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Qualify actual independent CLI HTTP automation and agent JSON-RPC
+        run: node tools/qualify-w6-shared-ledger.mjs
+      - name: Check fixed loopback, no proxy, no redirect, no machine/ChatGPT execution
+        shell: pwsh
+        run: |
+          $hostSource = Get-Content -Raw 'SupraChat.Automation/SessionLedgerHost.cs'
+          $clientSource = Get-Content -Raw 'SupraChat.Automation/SessionLedgerClient.cs'
+          if ($hostSource -notmatch 'Listen\(IPAddress\.Loopback, port\)' -or
+              $clientSource -notmatch 'http://127\.0\.0\.1:' -or
+              $clientSource -notmatch 'AllowAutoRedirect = false' -or
+              $clientSource -notmatch 'UseProxy = false') {
+            throw 'W6_LOOPBACK_CONFINEMENT_DRIFT'
+          }
+          $executable = [regex]::Replace($hostSource + $clientSource, '(?m)^\s*//.*$', '')
+          if ($executable -match 'Process\.Start|ChatGptSend|Chromium|UseShellExecute|ShellExecute') {
+            throw 'W6_HOST_GAINS_EXECUTION_OR_PROVIDER_AUTHORITY'
+          }
+          Write-Host 'W6 source host/transport confinement PASS'
