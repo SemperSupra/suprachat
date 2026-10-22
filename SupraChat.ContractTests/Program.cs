@@ -291,6 +291,11 @@ await using (var supervisor = new WorkbenchTerminalSupervisor(terminalWb))
         var stoppedFirst = await supervisor.StopAsync(terminalSession.Id);
         Require(stoppedFirst is {Running: false, CommandInputAllowed: false},
                 "W3 explicit stop failed to terminate first owned child");
+        var repeatedStop = await supervisor.StopAsync(terminalSession.Id);
+        Require(repeatedStop is {Running: false, CommandInputAllowed: false},
+                "W3 repeated Stop must be idempotent after OS exit");
+        Require(stoppedFirst.EndedAt.HasValue && stoppedFirst.State != "TERMINATION_UNVERIFIED",
+                "W3 stopped child must carry verified exit evidence");
 
         var duplicateWorkspace = terminalWb.Open("Collision", workspaceKey: "shared-path");
         var anotherDuplicate = terminalWb.Open("Collision peer", workspaceKey: "shared-path");
@@ -306,6 +311,10 @@ await using (var supervisor = new WorkbenchTerminalSupervisor(terminalWb))
         await supervisor.ForgetSessionAsync(terminalSession.Id);
         Require(supervisor.Inspect(terminalSession.Id) is null,
                 "W3 forgotten session retained owned process metadata");
+        // Test scope disposal with one intentionally live owned child.
+        var lastSession = terminalWb.Open("Dispose cleanup test");
+        var lastChild = supervisor.Start(lastSession.Id, shellPath);
+        Require(lastChild.Running, "W3 disposal test requires a live child");
     }
 }
 var terminalXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
