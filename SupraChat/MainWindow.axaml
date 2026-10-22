@@ -606,6 +606,33 @@
                      AcceptsReturn="True" TextWrapping="Wrap" MinHeight="92"
                      AutomationProperties.AutomationId="Sessions.PreviewOutput"
                      AutomationProperties.Name="Unapplied text preview" />
+            <Separator Margin="0,10,0,6" />
+            <TextBlock Text="Reviewable session metadata export" FontSize="18" FontWeight="SemiBold"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Sessions.ExportHeading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Export includes session titles, conversation URLs, workspace references and collision warnings. Review carefully. Transcripts, credentials, terminal logs and draft transfer text are excluded. Saving requires a separate file-picker action." />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Preview JSON metadata" Margin="0,0,8,8"
+                      Click="WorkbenchExportJsonPreview_Click"
+                      AutomationProperties.AutomationId="Sessions.ExportJsonPreview" />
+              <Button Content="Preview Markdown metadata" Margin="0,0,8,8"
+                      Click="WorkbenchExportMarkdownPreview_Click"
+                      AutomationProperties.AutomationId="Sessions.ExportMarkdownPreview" />
+              <Button Content="Save reviewed metadata…" Margin="0,0,8,8"
+                      Click="WorkbenchExportSave_Click"
+                      AutomationProperties.AutomationId="Sessions.ExportSave"
+                      AutomationProperties.HelpText="Save only after preview, using an explicit destination picker. No automatic uploads." />
+            </WrapPanel>
+            <TextBox x:Name="WorkbenchMetadataExportPreview" IsReadOnly="True" AcceptsReturn="True"
+                     TextWrapping="Wrap" MinHeight="100" MaxHeight="300"
+                     AutomationProperties.AutomationId="Sessions.ExportPreview"
+                     AutomationProperties.Name="Reviewed session metadata export preview" />
+            <TextBlock x:Name="WorkbenchMetadataExportStatus" TextWrapping="Wrap"
+                       Text="No metadata export prepared. Nothing has been saved."
+                       AutomationProperties.AutomationId="Sessions.ExportStatus"
+                       AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap"
                        Text="This session shell is temporary, local, and preview-only. It does not contain a terminal emulator, bind a live ChatGPT session, or persist preview content. No command or chat submission controls are enabled." />
           </StackPanel>
