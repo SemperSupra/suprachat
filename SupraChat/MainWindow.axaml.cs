@@ -17,6 +17,8 @@ public partial class MainWindow : Window
     private readonly List<ResponseAttachment> _attachments = new();
     private readonly Queue<CodexProtocolEvent> _pendingServerRequests = new();
     private readonly SessionWorkbench _workbenchSessions = new();
+    private readonly WorkbenchLocalDrafts _workbenchLocalDrafts;
+    private string? _currentDraftReviewId;
     private bool _refreshingWorkbenchList;
 
     private SiwcCredential? _credential;
@@ -34,6 +36,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _workbenchLocalDrafts = new WorkbenchLocalDrafts(_workbenchSessions);
         InitializeComponent();
         RefreshWorkbenchList("No local sessions. Terminal execution and chat submission are disabled.");
         LoadCapabilityCatalog();
@@ -129,6 +132,17 @@ public partial class MainWindow : Window
         }
         var conversationCollisions = snapshot.Collisions.Count(c => c.Type == "DUPLICATE_CONVERSATION");
         var workspaceCollisions = snapshot.Collisions.Count(c => c.Type == "SHARED_WORKSPACE");
+        if (snapshot.ActiveSessionId is string activeId)
+        {
+            var drafts = _workbenchLocalDrafts.Read(activeId);
+            WorkbenchTerminalDraft.Text = drafts.TerminalInputDraft;
+            WorkbenchChatDraft.Text = drafts.ChatInputDraft;
+        }
+        else
+        {
+            WorkbenchTerminalDraft.Text = string.Empty;
+            WorkbenchChatDraft.Text = string.Empty;
+        }
         WorkbenchStatus.Text = $"{notice ?? "Session metadata updated."} " +
             $"{snapshot.Sessions.Count}/{snapshot.MaxSessions} sessions; " +
             $"duplicate-conversation warnings={conversationCollisions}; " +
@@ -138,8 +152,11 @@ public partial class MainWindow : Window
 
     private void ClearWorkbenchTransfer()
     {
+        _currentDraftReviewId = null;
+        _workbenchLocalDrafts.DiscardPending();
         WorkbenchTransferInput.Text = string.Empty;
         WorkbenchTransferPreview.Text = string.Empty;
+        WorkbenchDraftStatus.Text = "Previous transfer review discarded. Local drafts are unchanged.";
     }
 
     private void WorkbenchCreate_Click(object? sender, RoutedEventArgs e)
@@ -176,8 +193,9 @@ public partial class MainWindow : Window
             WorkbenchStatus.Text = "Select a session to close.";
             return;
         }
+        _workbenchLocalDrafts.ForgetSession(selected.Id);
         ClearWorkbenchTransfer();
-        RefreshWorkbenchList("Closed the local metadata session; no browser or process was stopped.");
+        RefreshWorkbenchList("Closed the local metadata session and erased its local drafts; no process was stopped.");
     }
 
     private void WorkbenchMove(int direction)
@@ -193,7 +211,8 @@ public partial class MainWindow : Window
             WorkbenchStatus.Text = "Session is already at the edge.";
             return;
         }
-        RefreshWorkbenchList("Reordered the local session list.");
+        ClearWorkbenchTransfer();
+        RefreshWorkbenchList("Reordered the local session list; pending transfer reviews invalidated.");
     }
 
     private void WorkbenchMoveUp_Click(object? sender, RoutedEventArgs e) => WorkbenchMove(-1);
@@ -208,14 +227,18 @@ public partial class MainWindow : Window
         }
         try
         {
-            var preview = _workbenchSessions.PreviewTransfer(
+            var preview = _workbenchLocalDrafts.Prepare(
                 selected.Id, direction, WorkbenchTransferInput.Text ?? string.Empty);
+            _currentDraftReviewId = preview.ReviewId;
             WorkbenchTransferPreview.Text = preview.PreviewText;
+            WorkbenchDraftStatus.Text = $"Review expires after {preview.ExpiresAfterSeconds} seconds. " +
+                "A separate click can stage into a local-only draft; no execute or submit authority.";
             WorkbenchStatus.Text = $"PREVIEW ONLY ({preview.PreviewBytes} UTF-8 bytes): " +
-                $"{preview.DestinationMode}. No transfer was applied or executed.";
+                "Nothing has been staged, transmitted, or executed.";
         }
-        catch (ArgumentException ex)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
+            _currentDraftReviewId = null;
             WorkbenchTransferPreview.Text = string.Empty;
             WorkbenchStatus.Text = $"Preview refused: {ex.Message}. No external changes made.";
         }
@@ -225,6 +248,36 @@ public partial class MainWindow : Window
         WorkbenchPreview("chat-to-terminal");
     private void WorkbenchPreviewToChat_Click(object? sender, RoutedEventArgs e) =>
         WorkbenchPreview("terminal-to-chat");
+
+    private void WorkbenchStageReviewed_Click(object? sender, RoutedEventArgs e)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected ||
+            _currentDraftReviewId is null)
+        {
+            WorkbenchDraftStatus.Text = "Review and select a session before staging text locally.";
+            return;
+        }
+        try
+        {
+            var receipt = _workbenchLocalDrafts.StageReviewed(
+                selected.Id, _currentDraftReviewId, WorkbenchTransferInput.Text ?? string.Empty);
+            _currentDraftReviewId = null;
+            WorkbenchTransferPreview.Text = string.Empty;
+            WorkbenchTransferInput.Text = string.Empty;
+            var drafts = _workbenchLocalDrafts.Read(selected.Id);
+            WorkbenchTerminalDraft.Text = drafts.TerminalInputDraft;
+            WorkbenchChatDraft.Text = drafts.ChatInputDraft;
+            WorkbenchDraftStatus.Text = $"Staged reviewed text into {receipt.Destination}. " +
+                "No ChatGPT submission, terminal execution or network request occurred.";
+        }
+        catch (InvalidOperationException)
+        {
+            _currentDraftReviewId = null;
+            _workbenchLocalDrafts.DiscardPending();
+            WorkbenchTransferPreview.Text = string.Empty;
+            WorkbenchDraftStatus.Text = "Approval was changed, stale, expired, or targeted a different session. Nothing staged.";
+        }
+    }
 
     private async Task LoadAccessibilityPreferencesAsync()
     {
