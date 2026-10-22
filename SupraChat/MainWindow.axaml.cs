@@ -21,6 +21,8 @@ public partial class MainWindow : Window
     private bool _refreshingWorkbenchList;
     private readonly WorkbenchLocalDrafts _workbenchLocalDrafts;
     private readonly WorkbenchTerminalSupervisor _workbenchTerminalSupervisor;
+    private bool _terminalShutdownInProgress;
+    private bool _verifiedTerminalShutdown;
     private string? _currentDraftReviewId;
     private WorkbenchMetadataPreview? _pendingMetadataExport;
 
@@ -2077,6 +2079,50 @@ public partial class MainWindow : Window
 
     private static string Short(string value) =>
         value.Length <= 12 ? value : value[..6] + "…" + value[^4..];
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        // Normal GUI close must not hide an unverified child termination.
+        // Cancellation precedes destruction of the accessible Sessions UI.
+        if (!_verifiedTerminalShutdown &&
+            _workbenchTerminalSupervisor.HasOutstandingChildren)
+        {
+            e.Cancel = true;
+            if (!_terminalShutdownInProgress)
+            {
+                _terminalShutdownInProgress = true;
+                _ = VerifyTerminalShutdownThenCloseAsync();
+            }
+        }
+        base.OnClosing(e);
+    }
+
+    private async Task VerifyTerminalShutdownThenCloseAsync()
+    {
+        try
+        {
+            await _workbenchTerminalSupervisor.DisposeAsync();
+            _verifiedTerminalShutdown = true;
+            Dispatcher.UIThread.Post(Close);
+        }
+        catch (InvalidOperationException)
+        {
+            _terminalShutdownInProgress = false;
+            RootTabs.SelectedIndex = 3;
+            WorkbenchTerminalStatus.Text =
+                "Application close refused: the OS exit of a supervised child " +
+                "was not verified. Inspect or stop the owned process, then close again. " +
+                "Forcibly terminating SupraChat can leave descendants running.";
+        }
+        catch (Exception)
+        {
+            _terminalShutdownInProgress = false;
+            RootTabs.SelectedIndex = 3;
+            WorkbenchTerminalStatus.Text =
+                "Application close blocked by an unexpected child cleanup error. " +
+                "Inspect process state before retrying; no automatic override.";
+        }
+    }
 
     protected override void OnClosed(EventArgs e)
     {
