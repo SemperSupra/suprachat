@@ -626,6 +626,33 @@
                        AutomationProperties.LiveSetting="Polite" />
 
             <Separator Margin="0,10,0,6" />
+            <TextBlock Text="Shared session host inventory (W6, read-only)" FontSize="18"
+                       FontWeight="SemiBold" AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Sessions.SharedHostHeading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Observe an explicitly started W6 shared ledger host on 127.0.0.1. Results are unverified host self-report. Existing desktop tabs are NOT YET bound to host session IDs. No remote write, browser control or chat submission is available." />
+            <WrapPanel Orientation="Horizontal">
+              <TextBox x:Name="WorkbenchLedgerPort" Width="190" Margin="0,0,8,8"
+                       Watermark="Host port (1024–65535)"
+                       AutomationProperties.AutomationId="Sessions.SharedHostPort"
+                       AutomationProperties.Name="Local W6 ledger TCP port" />
+              <Button Content="Read shared host inventory" Margin="0,0,8,8"
+                      Click="WorkbenchReadSharedLedger_Click"
+                      AutomationProperties.AutomationId="Sessions.SharedHostRead"
+                      AutomationProperties.HelpText="Read metadata from an already running local host without creating or changing sessions." />
+            </WrapPanel>
+            <TextBox x:Name="WorkbenchLedgerInventory" IsReadOnly="True"
+                     AcceptsReturn="True" TextWrapping="Wrap"
+                     MinHeight="70" MaxHeight="180"
+                     AutomationProperties.AutomationId="Sessions.SharedHostInventory"
+                     AutomationProperties.Name="Unbound and unverified shared host session metadata list" />
+            <TextBlock x:Name="WorkbenchLedgerStatus" TextWrapping="Wrap"
+                       Text="No shared host observation has been attempted."
+                       AutomationProperties.AutomationId="Sessions.SharedHostStatus"
+                       AutomationProperties.LiveSetting="Polite" />
+
+            <Separator Margin="0,10,0,6" />
             <TextBlock Text="Supervised terminal process lifecycle (W3 experimental)" FontSize="18"
                        FontWeight="SemiBold" AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="2"
