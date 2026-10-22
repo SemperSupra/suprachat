@@ -105,7 +105,7 @@ public sealed class SessionWorkbench
         return new("suprachat-workbench-transfer-preview/v1", sessionId, direction, previewText,
             Encoding.UTF8.GetByteCount(previewText),
             RequiresExplicitCommit: true, WasApplied: false, CommandExecutionPermitted: false,
-            direction == "chat-to-terminal" ? "INSERT_ONLY_NOT_EXECUTE" : "DRAFT_ONLY_NOT_SUBMIT");
+            DestinationMode: direction == "chat-to-terminal" ? "INSERT_ONLY_NOT_EXECUTE" : "DRAFT_ONLY_NOT_SUBMIT");
     }
 
     public static object DescribeContract() => new
@@ -142,7 +142,10 @@ public sealed class SessionWorkbench
         var value = workspace.Trim().Replace('\\', '/');
         if (value.Length > 512 || value.Any(char.IsControl))
             throw new ArgumentException("INVALID_WORKSPACE_KEY", nameof(workspace));
-        return value.TrimEnd('/');
+        var normalized = value.TrimEnd('/');
+        if (normalized.Length == 0)
+            throw new ArgumentException("INVALID_WORKSPACE_KEY", nameof(workspace));
+        return normalized;
     }
 }
 
