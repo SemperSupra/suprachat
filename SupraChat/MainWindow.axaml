@@ -606,8 +606,26 @@
                      AcceptsReturn="True" TextWrapping="Wrap" MinHeight="92"
                      AutomationProperties.AutomationId="Sessions.PreviewOutput"
                      AutomationProperties.Name="Unapplied text preview" />
+            <Button Content="Stage reviewed text locally (never execute or submit)"
+                    Click="WorkbenchStageReviewed_Click" Margin="0,5,0,7"
+                    AutomationProperties.AutomationId="Sessions.StageLocalDraft"
+                    AutomationProperties.HelpText="Single-use approval stages text in an isolated local draft buffer only." />
+            <TextBlock Text="Local terminal input draft (not connected, not executable)" FontWeight="SemiBold" />
+            <TextBox x:Name="WorkbenchTerminalDraft" IsReadOnly="True" AcceptsReturn="True"
+                     MinHeight="60" TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="Sessions.TerminalDraft"
+                     AutomationProperties.Name="Current session unexecuted terminal draft" />
+            <TextBlock Text="Local chat input draft (not connected, not submitted)" FontWeight="SemiBold" />
+            <TextBox x:Name="WorkbenchChatDraft" IsReadOnly="True" AcceptsReturn="True"
+                     MinHeight="60" TextWrapping="Wrap"
+                     AutomationProperties.AutomationId="Sessions.ChatDraft"
+                     AutomationProperties.Name="Current session unsent chat draft" />
+            <TextBlock x:Name="WorkbenchDraftStatus" TextWrapping="Wrap"
+                       Text="No local text transfer staged; no remote side effects."
+                       AutomationProperties.AutomationId="Sessions.DraftStatus"
+                       AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap"
-                       Text="This session shell is temporary, local, and preview-only. It does not contain a terminal emulator, bind a live ChatGPT session, or persist preview content. No command or chat submission controls are enabled." />
+                       Text="This session shell is temporary and local. Approved transfers enter inert per-session text drafts only. No terminal emulator, live browser binding, terminal execution, chat submission, filesystem persistence or remote request is provided." />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
