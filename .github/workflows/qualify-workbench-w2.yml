@@ -1,0 +1,42 @@
+name: Qualify reviewed W2 metadata export
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/WorkbenchMetadataExport.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - '.github/workflows/qualify-workbench-w2.yml'
+permissions:
+  contents: read
+jobs:
+  metadata-export-contract:
+    if: github.head_ref == 'feat/19-w2-reviewed-metadata-export-20261022'
+    name: W2 JSON Markdown privacy and export preview ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile W2 session export and Avalonia desktop shell
+        run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Run export secrecy collision and explicit review contract tests
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Verify no ChatGPT contact or credential import in W2 export model
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw 'SupraChat/Core/WorkbenchMetadataExport.cs'
+          if ($source -match '(?i)HttpClient|SaveFilePicker|File\.Write|Process\.Start|ChatGptRelayObservation|CredentialStore|Clipboard') {
+            throw 'W2 pure export model acquired forbidden I/O or credential surface'
+          }
+          $xaml = Get-Content -Raw 'SupraChat/MainWindow.axaml'
+          foreach ($id in 'Sessions.ExportSave', 'Sessions.ExportPreview', 'Sessions.ExportStatus') {
+            if ($xaml -notmatch [regex]::Escape($id)) { throw "Accessible export control missing: $id" }
+          }
+          Write-Host 'W2 preview-only source and accessible control policy PASS'
