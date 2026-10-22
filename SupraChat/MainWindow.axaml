@@ -631,7 +631,7 @@
                        AutomationProperties.HeadingLevel="2"
                        AutomationProperties.AutomationId="Sessions.ExportHeading" />
             <TextBlock TextWrapping="Wrap"
-                       Text="Export includes session titles, conversation URLs, workspace references and collision warnings. Review carefully. Transcripts, credentials, terminal logs and draft transfer text are excluded. Saving requires a separate file-picker action." />
+                       Text="Export includes session titles, conversation URLs, workspace references and collision warnings. Review carefully. Application-managed credentials, transcripts, terminal logs and transfer drafts are not read. User-entered titles, URLs and workspace references may themselves contain sensitive information. Saving requires a separate file-picker action." />
             <WrapPanel Orientation="Horizontal">
               <Button Content="Preview JSON metadata" Margin="0,0,8,8"
                       Click="WorkbenchExportJsonPreview_Click"
