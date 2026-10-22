@@ -37,9 +37,13 @@ public sealed class WorkbenchLocalDrafts
     {
         EnsureSelected(sessionId);
         if (!_reviews.TryGetValue(sessionId, out var pending) ||
-            pending.Id != reviewId ||
-            !string.Equals(pending.Content, stillVisibleInput, StringComparison.Ordinal))
+            pending.Id != reviewId)
             throw new InvalidOperationException("STALE_OR_CHANGED_TRANSFER_REVIEW");
+        if (!string.Equals(pending.Content, stillVisibleInput, StringComparison.Ordinal))
+        {
+            _reviews.Remove(sessionId); // an edited review cannot be restored and reused
+            throw new InvalidOperationException("STALE_OR_CHANGED_TRANSFER_REVIEW");
+        }
         // Expired reviews must never be silently accepted.
         if (_now() < pending.CreatedAt || _now() - pending.CreatedAt > MaximumApprovalAge)
         {
