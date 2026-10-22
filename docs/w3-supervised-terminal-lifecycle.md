@@ -40,7 +40,13 @@ operators must independently trust the binary provenance.
 | CPU/disk/network | none | **no CPU quota, disk isolation or network sandbox** |
 | Unknown child exit | fail closed; retain ownership/state | independent OS inspection needed |
 | Close | stop child first, then forget session | fail closed if exit was not verified |
+| Normal GUI close | cancel close, verify all owned child exits, then retry close | unverified exit keeps Sessions UI open; forced OS termination bypasses this |
 | Application shutdown | best-effort kill process tree | crash/OS-level kill may prevent cleanup |
+
+Normal window closing is cancelable. Outstanding child processes block close until
+a bounded disposal verifies their OS exit. Failed exit verification preserves the
+Sessions recovery interface, and the operator can inspect processes before retrying.
+This does not protect against forced OS kill, power loss, or process-tree escape.
 
 No Docker Desktop/Engine or substitute container runtime is installed or started
 on the Windows development machine. W3 uses ordinary local processes. The
