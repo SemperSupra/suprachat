@@ -200,7 +200,17 @@ public partial class MainWindow : Window
             WorkbenchStatus.Text = "Select a session to close.";
             return;
         }
-        await _workbenchTerminalSupervisor.ForgetSessionAsync(selected.Id);
+        try
+        {
+            await _workbenchTerminalSupervisor.ForgetSessionAsync(selected.Id);
+        }
+        catch (InvalidOperationException)
+        {
+            WorkbenchTerminalStatus.Text =
+                "Cannot close: child process termination was not verified. " +
+                "Inspect the OS process and stop it before retrying.";
+            return;
+        }
         if (!_workbenchSessions.Close(selected.Id))
         {
             WorkbenchStatus.Text = "Selected session no longer exists.";
