@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input;
@@ -18,6 +19,7 @@ public partial class MainWindow : Window
     private readonly Queue<CodexProtocolEvent> _pendingServerRequests = new();
     private readonly SessionWorkbench _workbenchSessions = new();
     private bool _refreshingWorkbenchList;
+    private WorkbenchMetadataPreview? _pendingMetadataExport;
 
     private SiwcCredential? _credential;
     private CodexAppServerClient? _codex;
@@ -116,6 +118,9 @@ public partial class MainWindow : Window
     private void RefreshWorkbenchList(string? notice = null)
     {
         var snapshot = _workbenchSessions.Snapshot();
+        _pendingMetadataExport = null;
+        WorkbenchMetadataExportPreview.Text = string.Empty;
+        WorkbenchMetadataExportStatus.Text = "Session metadata changed or selection refreshed; prior export approval cleared.";
         _refreshingWorkbenchList = true;
         try
         {
@@ -225,6 +230,97 @@ public partial class MainWindow : Window
         WorkbenchPreview("chat-to-terminal");
     private void WorkbenchPreviewToChat_Click(object? sender, RoutedEventArgs e) =>
         WorkbenchPreview("terminal-to-chat");
+
+    private void PrepareWorkbenchMetadataExport(string format)
+    {
+        try
+        {
+            var preview = WorkbenchMetadataExport.Prepare(_workbenchSessions.Snapshot(), format);
+            _pendingMetadataExport = preview;
+            WorkbenchMetadataExportPreview.Text = preview.Content;
+            WorkbenchMetadataExportStatus.Text = $"{format.ToUpperInvariant()} preview: " +
+                $"{preview.ContentBytes} UTF-8 bytes. {preview.DataWarning} " +
+                "Nothing has been saved or transmitted.";
+        }
+        catch (ArgumentException)
+        {
+            _pendingMetadataExport = null;
+            WorkbenchMetadataExportPreview.Text = string.Empty;
+            WorkbenchMetadataExportStatus.Text = "Metadata export preview rejected; no file was written.";
+        }
+    }
+
+    private void WorkbenchExportJsonPreview_Click(object? sender, RoutedEventArgs e) =>
+        PrepareWorkbenchMetadataExport("json");
+
+    private void WorkbenchExportMarkdownPreview_Click(object? sender, RoutedEventArgs e) =>
+        PrepareWorkbenchMetadataExport("markdown");
+
+    private async void WorkbenchExportSave_Click(object? sender, RoutedEventArgs e)
+    {
+        var preview = _pendingMetadataExport;
+        if (preview is null)
+        {
+            WorkbenchMetadataExportStatus.Text = "Preview metadata before choosing a save destination.";
+            return;
+        }
+
+        // Re-render after the user's explicit preview. Changed session state
+        // invalidates approval, even if no UI event was raised.
+        var current = WorkbenchMetadataExport.Prepare(_workbenchSessions.Snapshot(), preview.Format);
+        if (!string.Equals(current.Content, preview.Content, StringComparison.Ordinal))
+        {
+            _pendingMetadataExport = null;
+            WorkbenchMetadataExportPreview.Text = string.Empty;
+            WorkbenchMetadataExportStatus.Text = "Session state changed. Generate and review a fresh export before saving.";
+            return;
+        }
+
+        try
+        {
+            var top = TopLevel.GetTopLevel(this)
+                ?? throw new InvalidOperationException("Storage provider unavailable.");
+            var extension = preview.Format == "json" ? ".json" : ".md";
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Save reviewed SupraChat session metadata (contains workspace/conversation references)",
+                SuggestedFileName = "suprachat-session-metadata" + extension
+            });
+            if (file is null)
+            {
+                WorkbenchMetadataExportStatus.Text = "Export cancelled. No file was saved by SupraChat.";
+                return;
+            }
+
+            if (_pendingMetadataExport is null ||
+                !string.Equals(
+                    WorkbenchMetadataExport.Prepare(_workbenchSessions.Snapshot(), preview.Format).Content,
+                    preview.Content, StringComparison.Ordinal))
+            {
+                WorkbenchMetadataExportStatus.Text = "Export approval invalidated during file selection; nothing written.";
+                return;
+            }
+
+            // No implicit path, silent autosave, browser upload or plaintext
+            // transcript read. StorageProvider owns the selected destination.
+            await using var output = await file.OpenWriteAsync();
+            output.SetLength(0);
+            await using (var writer = new StreamWriter(output, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true))
+            {
+                await writer.WriteAsync(preview.Content.AsMemory());
+                await writer.FlushAsync();
+            }
+            _pendingMetadataExport = null;
+            WorkbenchMetadataExportStatus.Text =
+                $"Reviewed {preview.Format.ToUpperInvariant()} session metadata saved to the selected file. " +
+                "No transcripts, draft transfers, terminal output or credentials were exported.";
+        }
+        catch (Exception)
+        {
+            WorkbenchMetadataExportStatus.Text =
+                "Export failed. The selected destination might contain partial data; inspect it before retrying.";
+        }
+    }
 
     private async Task LoadAccessibilityPreferencesAsync()
     {
