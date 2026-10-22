@@ -169,6 +169,29 @@ def main():
             assert len(passed(call("session/list"))) == 2
             b_events = passed(call("session/events", session_id=b_id, after_revision=1))
             assert [e["revision"] for e in b_events["events"]] == [2, 3]
+
+            # Source-level red-team finding: persistence failures must NEVER
+            # be classified as ordinary lost client ACKs. Intentionally make
+            # the target data path a directory AFTER host startup, forcing
+            # File.Move failure during commit. The host must fail-stop.
+            fault_pipe = "suprachat_fault_" + uuid.uuid4().hex[:16]
+            fault_store = pathlib.Path(tmp) / "commit-refusal.json"
+            fault_host = launch(fault_store, fault_pipe)
+            try:
+                fault_store.mkdir()
+                bad_request = json.dumps({
+                    "action": "session/create", "title": "synthetic failure",
+                    "actor_id": "operator", "audience": "human",
+                    "operation_id": "fail-stop-write"
+                })
+                result = subprocess.run(["dotnet", DLL, "call", fault_pipe, bad_request],
+                                        capture_output=True, text=True, timeout=10)
+                assert result.returncode != 0, "commit refusal produced false ACK"
+                assert fault_host.wait(timeout=8) == 78, (
+                    "host continued after persistence uncertainty", fault_host.returncode
+                )
+            finally:
+                shutdown(fault_host)
             print(json.dumps({
                 "result": "PASS", "phase": "SYNTHETIC_LOCAL_RDTE",
                 "independent_sessions": 2,
@@ -177,6 +200,7 @@ def main():
                 "per_session_revision_fence": "PASS",
                 "cross_client_idempotent_replay": "PASS",
                 "restart_and_uncertainty_quarantine": "PASS",
+                "persistence_failure_fail_stop": "PASS",
                 "independent_B_progress": "PASS",
                 "provider_requests_sent": 0,
                 "terminal_commands_executed": 0
