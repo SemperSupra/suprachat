@@ -1,0 +1,42 @@
+name: Qualify W2 local-only transfers
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/WorkbenchLocalDrafts.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - '.github/workflows/qualify-workbench-w2-drafts.yml'
+permissions:
+  contents: read
+jobs:
+  one-shot-review:
+    if: github.head_ref == 'feat/19-w2-local-transfer-approval-20261022'
+    name: No-execute W2 draft transfer ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build accessible W2 Avalonia shell
+        run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Exercise stale and expired approval, replay and per-session isolation
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Enforce pure local draft source boundary
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw 'SupraChat/Core/WorkbenchLocalDrafts.cs'
+          if ($source -match '(?i)HttpClient|File\.Write|Process\.Start|Clipboard|SaveFilePicker|ChatGptRelayObservation|WebSocket') {
+            throw 'W2 local draft model acquired forbidden host/network authority'
+          }
+          $xaml = Get-Content -Raw 'SupraChat/MainWindow.axaml'
+          foreach ($id in 'Sessions.StageLocalDraft', 'Sessions.TerminalDraft', 'Sessions.ChatDraft', 'Sessions.DraftStatus') {
+            if ($xaml -notmatch [regex]::Escape($id)) { throw "W2 control missing: $id" }
+          }
+          Write-Host 'W2 review-to-local-draft guard PASS'
