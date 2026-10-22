@@ -626,6 +626,29 @@
                        AutomationProperties.LiveSetting="Polite" />
 
             <Separator Margin="0,10,0,6" />
+            <TextBlock Text="Selected conversation — local relay observation" FontSize="18"
+                       FontWeight="SemiBold" AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Sessions.BridgeHeading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Inspect the local relay for this session's existing ChatGPT conversation reference. Only 127.0.0.1 is contacted. A relay-reported ready tab is unverified and does not authorize sending any message. The relay token is read from the SUPRACHAT_CHATGPT_RELAY_TOKEN process environment and never displayed." />
+            <WrapPanel Orientation="Horizontal">
+              <TextBox x:Name="WorkbenchRelayPort" Width="180" Margin="0,0,8,8"
+                       Watermark="Local relay port (1–65535)"
+                       AutomationProperties.AutomationId="Sessions.BridgePort"
+                       AutomationProperties.Name="Explicit loopback relay TCP port" />
+              <Button Content="Observe selected session (read-only)" Margin="0,0,8,8"
+                      Click="WorkbenchObserveRelay_Click"
+                      AutomationProperties.AutomationId="Sessions.BridgeObserve"
+                      AutomationProperties.HelpText="Authenticated local metadata GET only, no ChatGPT provider message or browser control." />
+            </WrapPanel>
+            <TextBlock x:Name="WorkbenchRelayStatus" TextWrapping="Wrap"
+                       Text="Local relay observation not attempted. No ChatGPT submission authority."
+                       AutomationProperties.AutomationId="Sessions.BridgeStatus"
+                       AutomationProperties.Name="Unverified local relay readiness and safety status"
+                       AutomationProperties.LiveSetting="Polite" />
+
+            <Separator Margin="0,10,0,6" />
             <TextBlock Text="Supervised terminal process lifecycle (W3 experimental)" FontSize="18"
                        FontWeight="SemiBold" AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="2"
