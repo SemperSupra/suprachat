@@ -1175,7 +1175,7 @@ jobs:
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
                   @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') },
-                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput') }
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput', 'Sessions.SharedHeading', 'Sessions.SharedList', 'Sessions.SharedRefresh', 'Sessions.SharedCreate', 'Sessions.SharedJoin', 'Sessions.SharedAppend', 'Sessions.SharedStatus') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
