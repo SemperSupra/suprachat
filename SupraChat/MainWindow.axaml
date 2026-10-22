@@ -626,6 +626,35 @@
                        AutomationProperties.LiveSetting="Polite" />
 
             <Separator Margin="0,10,0,6" />
+            <TextBlock Text="Supervised terminal process lifecycle (W3 experimental)" FontSize="18"
+                       FontWeight="SemiBold" AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Sessions.TerminalLifecycleHeading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Explicitly start one idle PowerShell child for the selected session. No command input, PTY, terminal emulation, stdout display or ChatGPT transmission. Process time, memory and output are monitored, not kernel-enforced sandbox quotas. Do not use for untrusted code." />
+            <TextBox x:Name="WorkbenchShellPath" MinWidth="350"
+                     Watermark="Absolute path to an installed pwsh or pwsh.exe"
+                     AutomationProperties.AutomationId="Sessions.TerminalShellPath"
+                     AutomationProperties.Name="Explicit installed PowerShell executable path" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Start idle PowerShell child" Margin="0,0,8,8"
+                      Click="WorkbenchTerminalStart_Click"
+                      AutomationProperties.AutomationId="Sessions.TerminalStart"
+                      AutomationProperties.HelpText="Explicitly launch the selected session's idle PowerShell child. No input commands are sent." />
+              <Button Content="Stop selected child" Margin="0,0,8,8"
+                      Click="WorkbenchTerminalStop_Click"
+                      AutomationProperties.AutomationId="Sessions.TerminalStop" />
+              <Button Content="Refresh process status" Margin="0,0,8,8"
+                      Click="WorkbenchTerminalRefresh_Click"
+                      AutomationProperties.AutomationId="Sessions.TerminalRefresh" />
+            </WrapPanel>
+            <TextBlock x:Name="WorkbenchTerminalStatus" TextWrapping="Wrap"
+                       Text="No child process started. No PTY, command entry, terminal execution or OS sandbox."
+                       AutomationProperties.AutomationId="Sessions.TerminalStatus"
+                       AutomationProperties.Name="Selected session supervised child process status"
+                       AutomationProperties.LiveSetting="Polite" />
+
+            <Separator Margin="0,10,0,6" />
             <TextBlock Text="Reviewable session metadata export" FontSize="18" FontWeight="SemiBold"
                        AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="2"
@@ -653,7 +682,7 @@
                        AutomationProperties.AutomationId="Sessions.ExportStatus"
                        AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap"
-                       Text="Session metadata and reviewed drafts are local. No terminal emulator, live browser binding, terminal execution, chat submission, or remote transfer is enabled. Local file export is optional and requires explicit review and a save picker. No command or chat submission controls are enabled." />
+                       Text="Session metadata and reviewed drafts are local. The optional W3 process supervisor can start an idle PowerShell child, but provides no terminal emulator, command input, live browser binding, user-command execution or chat submission. Local file export is optional and requires explicit review and a save picker. No command or chat submission controls are enabled." />
           </StackPanel>
         </ScrollViewer>
       </TabItem>

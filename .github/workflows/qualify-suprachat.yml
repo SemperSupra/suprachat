@@ -1140,30 +1140,39 @@ jobs:
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
-                function Require-SemanticControl([string]$automationId) {
-                $idCondition = New-Object System.Windows.Automation.PropertyCondition(
-                  [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-                  $automationId)
-                for ($attempt = 1; $attempt -le 4; $attempt++) {
-                  try {
-                    $element = $window.FindFirst(
-                      [System.Windows.Automation.TreeScope]::Descendants,
-                      $idCondition)
-                    if (-not $element) {
-                      throw "UI Automation element missing despite semantic peers being exposed: $automationId"
+                function Require-SemanticControl([string]$automationId, [switch]$AfterTabTransition) {
+                  $idCondition = New-Object System.Windows.Automation.PropertyCondition(
+                    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                    $automationId)
+                  # Avalonia attaches tab-scoped peers asynchronously. A
+                  # temporarily absent peer may be retried for <= 3 seconds,
+                  # but a persistently missing or unnamed peer MUST fail.
+                  $maxAttempts = if ($AfterTabTransition) { 12 } else { 4 }
+                  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                    try {
+                      $element = $window.FindFirst(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        $idCondition)
+                      if ($null -eq $element) {
+                        if ($AfterTabTransition -and $attempt -lt $maxAttempts) {
+                          Write-Host "UIA peer still attaching: $automationId; retry $attempt/$maxAttempts."
+                          Start-Sleep -Milliseconds 250
+                          continue
+                        }
+                        throw "UI Automation element missing despite semantic peers being exposed: $automationId"
+                      }
+                      $name = $element.Current.Name
+                      if ([string]::IsNullOrWhiteSpace($name)) {
+                        throw "UI Automation accessible name missing: $automationId"
+                      }
+                      return $element
+                    } catch {
+                      if ($_.Exception.Message -notmatch '0x8000FFFF|E_UNEXPECTED' -or $attempt -eq $maxAttempts) { throw }
+                      Write-Host "UIA transient provider error for $automationId; retry $attempt/$maxAttempts."
+                      Start-Sleep -Milliseconds 250
                     }
-                    $name = $element.Current.Name
-                    if ([string]::IsNullOrWhiteSpace($name)) {
-                      throw "UI Automation accessible name missing: $automationId"
-                    }
-                    return $element
-                  } catch {
-                    if ($_.Exception.Message -notmatch '0x8000FFFF|E_UNEXPECTED' -or $attempt -eq 4) { throw }
-                    Write-Host "UIA transient FindFirst provider error for $automationId; retry $attempt/4."
-                    Start-Sleep -Milliseconds (250 * $attempt)
                   }
-                }
-                throw "UIA semantic control unresolved: $automationId"
+                  throw "UIA semantic control unresolved: $automationId"
                 }
 
                 # Inactive tab content is not attached to the live UIA tree. Select each
@@ -1175,13 +1184,13 @@ jobs:
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
                   @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') },
-                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput') }
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput', 'Sessions.TerminalStart', 'Sessions.TerminalStop', 'Sessions.TerminalStatus') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
                   foreach ($automationId in $area.controls) {
-                    $null = Require-SemanticControl $automationId
+                    $null = Require-SemanticControl -automationId $automationId -AfterTabTransition
                   }
                 }
 
@@ -1219,7 +1228,7 @@ jobs:
   anonymous-chatgpt-guest-probe:
     # Single bounded public runner invocation for the #19 recovery PR, not
     # recurring unsolicited prompts on unrelated builds.
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/19-chatgpt-control-contract-20261020'
+    if: github.event_name == 'workflow_dispatch'
     name: Anonymous ChatGPT browser surface probe (US runner)
     runs-on: ubuntu-24.04
     timeout-minutes: 12

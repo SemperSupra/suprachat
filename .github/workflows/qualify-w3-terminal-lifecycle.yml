@@ -1,0 +1,72 @@
+name: Qualify W3 supervised terminal lifecycle
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/WorkbenchTerminalSupervisor.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - '.github/workflows/qualify-w3-terminal-lifecycle.yml'
+permissions:
+  contents: read
+jobs:
+  supervised-idle-shell:
+    if: github.head_ref == 'feat/19-w3-supervised-terminal-lifecycle-20261022'
+    name: Explicit pwsh child start-stop W3 ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build supervised W3 Avalonia shell
+        run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Actual explicit disposable pwsh lifecycle and negative contract tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SUPRACHAT_TEST_PWSH = (Get-Command pwsh -ErrorAction Stop).Source
+          if (-not [IO.Path]::IsPathFullyQualified($env:SUPRACHAT_TEST_PWSH)) { throw 'PWSH_ABSOLUTE_PATH_REQUIRED' }
+          Write-Host 'Qualified existing absolute PowerShell child path; no Docker/WSL/privileged environment mutations'
+          dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+          if ($LASTEXITCODE -ne 0) { throw 'W3_TERMINAL_LIFECYCLE_CONTRACT_FAILURE' }
+      - name: Verify CLI and agent JSON-RPC expose identical read-only lifecycle limits
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'SupraChat.Automation/SupraChat.Automation.csproj'
+          $cli = dotnet run -c Release --project $project -- terminal-lifecycle-contract | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $cli.ok -or
+              $cli.value.current_phase -ne 'W3_SUPERVISED_IDLE_PROCESS_ONLY' -or
+              $cli.value.command_input_available -ne $false -or
+              $cli.value.automated_start_available -ne $false) {
+            throw 'W3_CLI_READONLY_AUTHORITY_DRIFT'
+          }
+          $rpcRequest = '{"jsonrpc":"2.0","id":41,"method":"terminal/lifecycle/read","params":{}}'
+          $rpc = $rpcRequest | dotnet run --no-build -c Release --project $project -- stdio | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $rpc.id -ne 41 -or
+              $rpc.result.schema -ne $cli.value.schema -or
+              $rpc.result.max_owned_processes -ne $cli.value.max_owned_processes -or
+              $rpc.result.command_input_available -ne $false -or
+              $rpc.result.process_kernel_sandboxed -eq $true) {
+            throw 'W3_CLI_RPC_PARITY_FAILURE'
+          }
+          Write-Host 'W3 read-only CLI and agent lifecycle parity PASS'
+      - name: Verify no automatic terminal command I/O or ChatGPT authority
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw 'SupraChat/Core/WorkbenchTerminalSupervisor.cs'
+          $noComments = [regex]::Replace($source, '(?m)^\s*//.*$', '')
+          if ($noComments -match '(?i)StandardInput\.(Write|WriteLine)|/send|ChatGptRelay|HttpClient|CommandExecuted:\s*true') {
+            throw 'W3 terminal no-command/no-provider boundary violated'
+          }
+          $xaml = Get-Content -Raw 'SupraChat/MainWindow.axaml'
+          foreach ($id in 'Sessions.TerminalStart', 'Sessions.TerminalStop', 'Sessions.TerminalRefresh', 'Sessions.TerminalStatus') {
+            if ($xaml -notmatch [regex]::Escape($id)) { throw "W3 accessibility ID missing: $id" }
+          }
+          Write-Host 'W3 explicit start and no-command/no-ChatGPT I/O boundary PASS'

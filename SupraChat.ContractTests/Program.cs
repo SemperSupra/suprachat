@@ -242,6 +242,102 @@ Require(localDraftXaml.Contains("never execute or submit", StringComparison.Ordi
         localDraftXaml.Contains("No command or chat submission controls are enabled.", StringComparison.Ordinal),
     "W2 local UI must explicitly refuse all terminal and chat external effects");
 
+
+// W3 supervised local-process lifecycle: no command-input channel and no
+// automatic shell launch from a preview. Only a human-analog, explicit Start
+// on a dedicated disposable hosted test runner can launch a controlled child.
+var terminalWb = new SessionWorkbench();
+var terminalSession = terminalWb.Open("Terminal test");
+await using (var supervisor = new WorkbenchTerminalSupervisor(terminalWb))
+{
+    var pathRefused = false;
+    try { supervisor.Start(terminalSession.Id, "pwsh"); }
+    catch (ArgumentException) { pathRefused = true; }
+    Require(pathRefused, "W3 must reject relative/unreviewed executable resolution");
+    pathRefused = false;
+    try { supervisor.Start(terminalSession.Id, "/usr/bin/not-pwsh"); }
+    catch (ArgumentException) { pathRefused = true; }
+    Require(pathRefused, "W3 must refuse executable aliases and arbitrary commands");
+
+    var shellPath = Environment.GetEnvironmentVariable("SUPRACHAT_TEST_PWSH");
+    if (!string.IsNullOrWhiteSpace(shellPath))
+    {
+        var started = supervisor.Start(terminalSession.Id, shellPath);
+        Require(started.Running && started.Schema == WorkbenchTerminalSupervisor.Schema &&
+                !started.CommandInputAllowed &&
+                !started.TerminalCommandsExecutedBySupraChat &&
+                !started.PtyAvailable && !started.KernelSandboxed &&
+                !started.ChatSubmissionAllowed &&
+                started.MaxOutputBytes <= 32 * 1024 &&
+                started.MaxLifetimeSeconds <= 90,
+                "W3 child lifecycle incorrectly promoted input/sandbox/chat authority");
+
+        var duplicateRejected = false;
+        try { supervisor.Start(terminalSession.Id, shellPath); }
+        catch (InvalidOperationException) { duplicateRejected = true; }
+        Require(duplicateRejected, "W3 duplicated a selected session process");
+
+        var secondTerminalSession = terminalWb.Open("Second terminal test");
+        var second = supervisor.Start(secondTerminalSession.Id, shellPath);
+        Require(second.ProcessId != started.ProcessId && second.Running,
+                "W3 two independently owned process lanes not admitted");
+
+        var thirdSession = terminalWb.Open("Third terminal test");
+        var overLimitRejected = false;
+        try { supervisor.Start(thirdSession.Id, shellPath); }
+        catch (InvalidOperationException) { overLimitRejected = true; }
+        Require(overLimitRejected, "W3 concurrency ceiling bypassed");
+
+        var stoppedFirst = await supervisor.StopAsync(terminalSession.Id);
+        Require(stoppedFirst is {Running: false, CommandInputAllowed: false},
+                "W3 explicit stop failed to terminate first owned child");
+        var repeatedStop = await supervisor.StopAsync(terminalSession.Id);
+        Require(repeatedStop is {Running: false, CommandInputAllowed: false},
+                "W3 repeated Stop must be idempotent after OS exit");
+        Require(stoppedFirst.EndedAt.HasValue && stoppedFirst.State != "TERMINATION_UNVERIFIED",
+                "W3 stopped child must carry verified exit evidence");
+
+        var duplicateWorkspace = terminalWb.Open("Collision", workspaceKey: "shared-path");
+        var anotherDuplicate = terminalWb.Open("Collision peer", workspaceKey: "shared-path");
+        var collisionRejected = false;
+        try { supervisor.Start(anotherDuplicate.Id, shellPath); }
+        catch (InvalidOperationException) { collisionRejected = true; }
+        Require(collisionRejected, "W3 admitted a process into a colliding workspace");
+
+        var stoppedSecond = await supervisor.StopAsync(secondTerminalSession.Id);
+        Require(stoppedSecond is {Running: false},
+                "W3 second child did not stop without touching other sessions");
+
+        await supervisor.ForgetSessionAsync(terminalSession.Id);
+        Require(supervisor.Inspect(terminalSession.Id) is null,
+                "W3 forgotten session retained owned process metadata");
+        // Test scope disposal with one intentionally live owned child.
+        var lastSession = terminalWb.Open("Dispose cleanup test");
+        var lastChild = supervisor.Start(lastSession.Id, shellPath);
+        Require(lastChild.Running && supervisor.HasOutstandingChildren,
+                "W3 disposal test requires a live child and outstanding-child gate");
+    }
+}
+// Ensure GUI close is cancelable before losing custody of a child.
+var windowSource = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml.cs"));
+Require(windowSource.Contains("protected override void OnClosing(WindowClosingEventArgs e)", StringComparison.Ordinal) &&
+        windowSource.Contains("_workbenchTerminalSupervisor.HasOutstandingChildren", StringComparison.Ordinal) &&
+        windowSource.Contains("e.Cancel = true", StringComparison.Ordinal) &&
+        windowSource.Contains("VerifyTerminalShutdownThenCloseAsync", StringComparison.Ordinal) &&
+        windowSource.Contains("Application close refused: the OS exit", StringComparison.Ordinal),
+        "W3 window must cancel close until owned child exit is verified");
+var terminalXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
+foreach (var automationId in new[] {
+    "Sessions.TerminalLifecycleHeading", "Sessions.TerminalShellPath",
+    "Sessions.TerminalStart", "Sessions.TerminalStop",
+    "Sessions.TerminalRefresh", "Sessions.TerminalStatus"
+})
+    Require(terminalXaml.Contains($"AutomationProperties.AutomationId=\"{automationId}\"", StringComparison.Ordinal),
+            "W3 accessible supervised child-process control missing: " + automationId);
+Require(terminalXaml.Contains("not kernel-enforced sandbox quotas", StringComparison.OrdinalIgnoreCase) &&
+        terminalXaml.Contains("No command input, PTY", StringComparison.OrdinalIgnoreCase),
+        "W3 must disclose its lifecycle-only and non-sandbox limits");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");

@@ -20,6 +20,9 @@ public partial class MainWindow : Window
     private readonly SessionWorkbench _workbenchSessions = new();
     private bool _refreshingWorkbenchList;
     private readonly WorkbenchLocalDrafts _workbenchLocalDrafts;
+    private readonly WorkbenchTerminalSupervisor _workbenchTerminalSupervisor;
+    private bool _terminalShutdownInProgress;
+    private bool _verifiedTerminalShutdown;
     private string? _currentDraftReviewId;
     private WorkbenchMetadataPreview? _pendingMetadataExport;
 
@@ -39,6 +42,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         _workbenchLocalDrafts = new WorkbenchLocalDrafts(_workbenchSessions);
+        _workbenchTerminalSupervisor = new WorkbenchTerminalSupervisor(_workbenchSessions);
         InitializeComponent();
         RefreshWorkbenchList("No local sessions. Terminal execution and chat submission are disabled.");
         LoadCapabilityCatalog();
@@ -148,6 +152,7 @@ public partial class MainWindow : Window
             WorkbenchTerminalDraft.Text = string.Empty;
             WorkbenchChatDraft.Text = string.Empty;
         }
+        RefreshWorkbenchTerminalStatus();
         WorkbenchStatus.Text = $"{notice ?? "Session metadata updated."} " +
             $"{snapshot.Sessions.Count}/{snapshot.MaxSessions} sessions; " +
             $"duplicate-conversation warnings={conversationCollisions}; " +
@@ -190,17 +195,32 @@ public partial class MainWindow : Window
         }
     }
 
-    private void WorkbenchClose_Click(object? sender, RoutedEventArgs e)
+    private async void WorkbenchClose_Click(object? sender, RoutedEventArgs e)
     {
-        if (WorkbenchList.SelectedItem is not WorkbenchSession selected ||
-            !_workbenchSessions.Close(selected.Id))
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected)
         {
             WorkbenchStatus.Text = "Select a session to close.";
             return;
         }
+        try
+        {
+            await _workbenchTerminalSupervisor.ForgetSessionAsync(selected.Id);
+        }
+        catch (InvalidOperationException)
+        {
+            WorkbenchTerminalStatus.Text =
+                "Cannot close: child process termination was not verified. " +
+                "Inspect the OS process and stop it before retrying.";
+            return;
+        }
+        if (!_workbenchSessions.Close(selected.Id))
+        {
+            WorkbenchStatus.Text = "Selected session no longer exists.";
+            return;
+        }
         _workbenchLocalDrafts.ForgetSession(selected.Id);
         ClearWorkbenchTransfer();
-        RefreshWorkbenchList("Closed the local metadata session and erased its local drafts; no process was stopped.");
+        RefreshWorkbenchList("Closed metadata session, erased local drafts and stopped any owned child.");
     }
 
     private void WorkbenchMove(int direction)
@@ -283,6 +303,67 @@ public partial class MainWindow : Window
             WorkbenchDraftStatus.Text = "Approval was changed, stale, expired, or targeted a different session. Nothing staged.";
         }
     }
+
+    private void RefreshWorkbenchTerminalStatus()
+    {
+        if (WorkbenchList?.SelectedItem is not WorkbenchSession selected)
+        {
+            WorkbenchTerminalStatus.Text = "No selected session child. Terminal input, PTY and chat submission unavailable.";
+            return;
+        }
+        var state = _workbenchTerminalSupervisor.Inspect(selected.Id);
+        WorkbenchTerminalStatus.Text = state is null
+            ? "No supervised PowerShell child for selected session."
+            : $"PowerShell child PID={state.ProcessId}; {state.State}; running={state.Running}; " +
+              $"discarded output={state.DiscardedOutputBytes}/{state.MaxOutputBytes} bytes; " +
+              $"max observed RSS={state.MaxObservedRssBytes} bytes; TTL={state.MaxLifetimeSeconds}s. " +
+              "Output is not retained; no command input or OS sandbox.";
+    }
+
+    private void WorkbenchTerminalStart_Click(object? sender, RoutedEventArgs e)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected)
+        {
+            WorkbenchTerminalStatus.Text = "Select a local workbench session before starting a child.";
+            return;
+        }
+        try
+        {
+            var state = _workbenchTerminalSupervisor.Start(
+                selected.Id, WorkbenchShellPath.Text ?? string.Empty);
+            WorkbenchTerminalStatus.Text =
+                $"Started supervised idle PowerShell PID={state.ProcessId}. " +
+                "No commands sent, no PTY and no kernel-enforced sandbox. " +
+                "Stop manually or auto-stop by observed resource/lifetime limits.";
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException
+            or System.ComponentModel.Win32Exception)
+        {
+            WorkbenchTerminalStatus.Text =
+                $"Child start refused: {ex.GetType().Name}. No command or chat send was attempted.";
+        }
+    }
+
+    private async void WorkbenchTerminalStop_Click(object? sender, RoutedEventArgs e)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected)
+        {
+            WorkbenchTerminalStatus.Text = "Select a session to stop its own child.";
+            return;
+        }
+        try
+        {
+            await _workbenchTerminalSupervisor.StopAsync(selected.Id);
+            RefreshWorkbenchTerminalStatus();
+        }
+        catch (Exception)
+        {
+            WorkbenchTerminalStatus.Text = "Child termination is uncertain. Inspect process state before retrying.";
+        }
+    }
+
+    private void WorkbenchTerminalRefresh_Click(object? sender, RoutedEventArgs e) =>
+        RefreshWorkbenchTerminalStatus();
 
     private void PrepareWorkbenchMetadataExport(string format)
     {
@@ -1999,6 +2080,50 @@ public partial class MainWindow : Window
     private static string Short(string value) =>
         value.Length <= 12 ? value : value[..6] + "…" + value[^4..];
 
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        // Normal GUI close must not hide an unverified child termination.
+        // Cancellation precedes destruction of the accessible Sessions UI.
+        if (!_verifiedTerminalShutdown &&
+            _workbenchTerminalSupervisor.HasOutstandingChildren)
+        {
+            e.Cancel = true;
+            if (!_terminalShutdownInProgress)
+            {
+                _terminalShutdownInProgress = true;
+                _ = VerifyTerminalShutdownThenCloseAsync();
+            }
+        }
+        base.OnClosing(e);
+    }
+
+    private async Task VerifyTerminalShutdownThenCloseAsync()
+    {
+        try
+        {
+            await _workbenchTerminalSupervisor.DisposeAsync();
+            _verifiedTerminalShutdown = true;
+            Dispatcher.UIThread.Post(Close);
+        }
+        catch (InvalidOperationException)
+        {
+            _terminalShutdownInProgress = false;
+            RootTabs.SelectedIndex = 3;
+            WorkbenchTerminalStatus.Text =
+                "Application close refused: the OS exit of a supervised child " +
+                "was not verified. Inspect or stop the owned process, then close again. " +
+                "Forcibly terminating SupraChat can leave descendants running.";
+        }
+        catch (Exception)
+        {
+            _terminalShutdownInProgress = false;
+            RootTabs.SelectedIndex = 3;
+            WorkbenchTerminalStatus.Text =
+                "Application close blocked by an unexpected child cleanup error. " +
+                "Inspect process state before retrying; no automatic override.";
+        }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         try
@@ -2008,6 +2133,7 @@ public partial class MainWindow : Window
             StopBrowserSessionAsync().GetAwaiter().GetResult();
             StopCodexAsync().GetAwaiter().GetResult();
             StopResponsesWebSocketAsync().GetAwaiter().GetResult();
+            _workbenchTerminalSupervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
         catch
         {
