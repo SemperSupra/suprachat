@@ -79,7 +79,9 @@ internal static class Program
                 {
                     AutoFlush = true
                 };
-                var line = await reader.ReadLineAsync();
+                string? line;
+                try { line = await reader.ReadLineAsync(); }
+                catch (IOException) { return; }  // client disconnected before admission
                 if (line is null || line.Length > 16_384)
                 {
                     await writer.WriteLineAsync(JsonSerializer.Serialize(
@@ -98,18 +100,22 @@ internal static class Program
                 {
                     reply = new SessionReply(false, "INVALID_REQUEST_JSON", null, false);
                 }
-                await writer.WriteLineAsync(JsonSerializer.Serialize(reply, Json));
-            }
-            catch (IOException)
-            {
-                // Client may have disconnected. A committed mutation remains
-                // replayable from the operation ID after process reconnect.
+                try
+                {
+                    await writer.WriteLineAsync(JsonSerializer.Serialize(reply, Json));
+                }
+                catch (IOException)
+                {
+                    // Lost ACK: the persisted operation receipt remains replayable.
+                    return;
+                }
             }
             catch (Exception)
             {
-                // Persistence uncertainty is fail-stop, not an excuse to emit
-                // success or admit further mutations in this process.
-                Environment.FailFast("SHARED_SESSION_HOST_FAIL_CLOSED");
+                // Includes failed durable commits (also IOException). Distinguish
+                // these from client disconnections; never keep admitting writes
+                // after uncertainty about the on-disk state.
+                Environment.Exit(78);
             }
         }
     }
