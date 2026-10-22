@@ -23,6 +23,27 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
     private readonly object _gate = new();
     private bool _disposed;
 
+    public static object DescribeCapabilities() => new
+    {
+        schema = Schema,
+        current_phase = "W3_SUPERVISED_IDLE_PROCESS_ONLY",
+        max_owned_processes = MaximumLiveProcesses,
+        max_runtime_seconds = (int)MaximumLifetime.TotalSeconds,
+        max_observed_rss_bytes = MaximumObservedRssBytes,
+        max_discarded_output_bytes = MaximumOutputBytes,
+        explicit_human_start_only = true,
+        source_binary_provenance_attested = false,
+        process_kernel_sandboxed = false,
+        rss_hard_limit = false,
+        cpu_quota_enforced = false,
+        command_input_available = false,
+        pty_available = false,
+        browser_connected = false,
+        chat_submission_available = false,
+        automated_start_available = false,
+        terminal_output_retained = false
+    };
+
     public WorkbenchTerminalSupervisor(SessionWorkbench workbench) =>
         _workbench = workbench ?? throw new ArgumentNullException(nameof(workbench));
 
