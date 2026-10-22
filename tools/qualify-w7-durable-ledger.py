@@ -101,7 +101,8 @@ def main():
         total = 100
         for i in range(total):
             key = f"w7-crash-cycle-{i:05d}"
-            action = request("open", key, f"crash-{i:03d}")
+            action = request("change", key, f"crash-{i:03d}",
+                             sessionId=sid, expectedVersion=1 + i)
             action["fault"] = "BEFORE_COMMIT" if i % 2 == 0 else "AFTER_COMMIT_BEFORE_REPLY"
             p = launch(store)
             try:
@@ -127,7 +128,9 @@ def main():
         try:
             final = send(p, {"action": "integrity"})
             assert final["sequence"] == 105, final
-            assert final["sessions"] == 102, final
+            assert final["sessions"] == 2, final
+            after = send(p, {"action": "inspect", "sessionId": sid})
+            assert after["Session"]["Version"] == 101, after
             assert send(p, stale)["IsReplay"]
             assert send(p, update)["IsReplay"]
         finally:
