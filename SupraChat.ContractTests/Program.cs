@@ -338,6 +338,85 @@ Require(terminalXaml.Contains("not kernel-enforced sandbox quotas", StringCompar
         terminalXaml.Contains("No command input, PTY", StringComparison.OrdinalIgnoreCase),
         "W3 must disclose its lifecycle-only and non-sandbox limits");
 
+
+// W5 independently concurrent human, automation and agent session metadata.
+// These callers share ONE in-process ledger. This does not demonstrate
+// process-to-process transport or authenticated client identities.
+var w5Ledger = new SharedSessionLedger();
+const string w5Target = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000";
+const string w5OpenKey = "w5-open-human-000000001";
+var w5Open = w5Ledger.Open(w5OpenKey, "human", "Research", w5Target);
+var w5Replay = w5Ledger.Open(w5OpenKey, "human", "Research", w5Target);
+Require(w5Open.Applied && !w5Open.IsReplay &&
+        w5Replay.Applied && w5Replay.IsReplay &&
+        w5Open.Session!.Id == w5Replay.Session!.Id &&
+        w5Ledger.InspectAll().Sequence == 1,
+    "W5 exact creation replay duplicated or changed authoritative session");
+var w5PayloadConflict = w5Ledger.Open(w5OpenKey, "human", "Different payload", w5Target);
+Require(!w5PayloadConflict.Applied && w5PayloadConflict.Status == "IDEMPOTENCY_KEY_PAYLOAD_CONFLICT" &&
+        w5Ledger.InspectAll().Sessions.Count == 1,
+    "W5 changed payload reused a consumed idempotency key");
+
+var w5Sid = w5Open.Session.Id;
+var w5Human = Task.Run(() => w5Ledger.Change(
+    "w5-human-change-0000001", "human", w5Sid, 0, "set-title", "Human proposal"));
+var w5Agent = Task.Run(() => w5Ledger.Change(
+    "w5-agent-change-0000001", "agent", w5Sid, 0, "set-title", "Agent proposal"));
+await Task.WhenAll(w5Human, w5Agent);
+var w5Concurrent = new[] {w5Human.Result, w5Agent.Result};
+Require(w5Concurrent.Count(o => o.Applied) == 1 &&
+        w5Concurrent.Count(o => !o.Applied && o.Status == "VERSION_CONFLICT") == 1 &&
+        w5Ledger.Inspect(w5Sid) is {Version: 1} &&
+        w5Ledger.InspectAll().Sequence == 2,
+    "W5 CAS allowed both clients to overwrite the same version");
+
+var w5Rejected = w5Concurrent.Single(o => !o.Applied);
+var w5LosingKey = w5Human.Result.Applied ? "w5-agent-change-0000001" : "w5-human-change-0000001";
+var w5LoserLabel = w5Human.Result.Applied ? "agent" : "human";
+var w5LosingPayload = w5Human.Result.Applied ? "Agent proposal" : "Human proposal";
+var w5ReplayedFailure = w5Ledger.Change(w5LosingKey, w5LoserLabel,
+    w5Sid, 0, "set-title", w5LosingPayload);
+Require(!w5ReplayedFailure.Applied && w5ReplayedFailure.IsReplay &&
+        w5ReplayedFailure.Status == "VERSION_CONFLICT" &&
+        w5ReplayedFailure.Sequence == w5Rejected.Sequence,
+    "W5 failed operation was not immutable under retry");
+
+var w5Automation = w5Ledger.Change("w5-automation-update-0001", "automation",
+    w5Sid, 1, "set-workspace", @"C:\w5\shared");
+Require(w5Automation.Applied && w5Automation.Session!.Version == 2 &&
+        w5Automation.Session.WorkspaceKey == "C:/w5/shared",
+    "W5 third audience failed to participate in same authoritative session");
+var w5Second = w5Ledger.Open("w5-open-agent-0000000002", "agent", "Second independent", w5Target);
+Require(w5Second.Applied && w5Second.Session!.Id != w5Sid,
+    "W5 cannot have concurrent independent sessions");
+var w5SecondChange = w5Ledger.Change("w5-automation-update-0002", "automation",
+    w5Second.Session.Id, 0, "set-title", "Second changed");
+Require(w5SecondChange.Applied && w5SecondChange.Session!.Version == 1 &&
+        w5Ledger.Inspect(w5Sid)!.Version == 2,
+    "W5 independence violated between multiple sessions");
+
+var w5InvalidHostRejected = false;
+try {
+    w5Ledger.Change("w5-agent-wrong-url-0001", "agent", w5Sid, 2,
+        "set-conversation", "https://attacker.invalid/c/123e4567-e89b-42d3-a456-426614174000");
+} catch (ArgumentException) { w5InvalidHostRejected = true; }
+Require(w5InvalidHostRejected, "W5 accepted a non-provider conversation reference");
+var w5Inventory = w5Ledger.InspectAll();
+Require(w5Inventory.Sessions.Count == 2 &&
+        w5Inventory.Sequence == w5Inventory.Events.Last().Sequence &&
+        w5Inventory.Events.All(e => e.Operation is "open" or "set-title" or "set-workspace") &&
+        !w5Inventory.AuthenticatedAudiences &&
+        !w5Inventory.DurableAcrossProcessRestart &&
+        !w5Inventory.CrossProcessTransportAvailable &&
+        !w5Inventory.ChatSubmissionAllowed &&
+        !w5Inventory.TerminalExecutionAllowed,
+    "W5 metadata ledger misrepresented authentication, transport or mutation authority");
+
+var w5Descriptor = JsonSerializer.Serialize(SharedSessionLedger.DescribeContract());
+Require(w5Descriptor.Contains("W5_IN_PROCESS_CONCURRENT_CAS_CORE", StringComparison.Ordinal) &&
+        w5Descriptor.Contains("\"cross_process_transport_available\":false", StringComparison.Ordinal),
+    "W5 static capability contract hides absent multi-process transport");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
