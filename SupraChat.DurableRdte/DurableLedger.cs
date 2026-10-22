@@ -75,9 +75,9 @@ public sealed class DurableLedger : IDisposable
         }
         if (req.Action is "inspect")
         {
-            var id = Require(req.SessionId,"INVALID_SESSION_ID",64);
+            var inspectedId = Require(req.SessionId,"INVALID_SESSION_ID",64);
             using var cmd = Command("SELECT id,title,version,created_sequence FROM sessions WHERE id=$id");
-            cmd.Parameters.AddWithValue("$id",id);
+            cmd.Parameters.AddWithValue("$id",inspectedId);
             using var reader = cmd.ExecuteReader();
             if (!reader.Read()) return new(Schema,false,false,"SESSION_NOT_FOUND",0);
             return new(Schema,true,false,"READ",0,new DurableSession(
