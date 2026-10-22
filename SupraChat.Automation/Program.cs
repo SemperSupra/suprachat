@@ -2,6 +2,7 @@ using Microsoft.Playwright;
 using System.Globalization;
 using System.Text.Json;
 using SupraChat.Core;
+using SupraChat.SessionCore;
 
 namespace SupraChat.Automation;
 
@@ -174,6 +175,7 @@ internal static class Program
             "chatgpt/control/read",
             "chatgpt/conversation/inspect",
             "workbench/read",
+            "session/shared/call",
             "accessibility/read",
             "accessibility/preferences/read",
             "accessibility/preferences/write",
@@ -687,6 +689,47 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Synthetic local RDTE only: delegate through the same named-pipe shared
+    /// registry that the accessible Sessions pane observes. No local workbench
+    /// copy, provider call, delegated identity or ChatGPT send is inferred.
+    /// </summary>
+    private static async Task<object> SharedSessionRpcAsync(JsonElement? parameters)
+    {
+        var input = RequireObject(parameters);
+        var pipeName = OptionalString(input, "pipe");
+        if (!SharedSessionClient.IsSafePipeName(pipeName ?? ""))
+            throw new MachineException(2, "INVALID_PARAMS", "An explicit local host pipe name is required.");
+        if (!input.TryGetProperty("request", out var requestJson) ||
+            requestJson.ValueKind != JsonValueKind.Object)
+            throw new MachineException(2, "INVALID_PARAMS", "A typed session request is required.");
+
+        SessionRequest? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<SessionRequest>(
+                requestJson.GetRawText(), SharedSessionClient.WireJson);
+        }
+        catch (JsonException)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", "Malformed typed session request.");
+        }
+        if (request is null)
+            throw new MachineException(2, "INVALID_PARAMS", "Empty typed session request.");
+        try
+        {
+            return await new SharedSessionClient(pipeName!).RequestAsync(request);
+        }
+        catch (Exception ex) when (ex is IOException or TimeoutException
+                                   or OperationCanceledException)
+        {
+            // Never turn a host disconnection/lost ACK into permission to replay
+            // a consequential operation under a different ID.
+            throw new MachineException(4, "SHARED_SESSION_OUTCOME_UNKNOWN",
+                "Local session host unavailable or acknowledgement uncertain. Reconcile using the same operation ID.");
+        }
+    }
+
     private static async Task<object> DispatchRpcAsync(string method, JsonElement? parameters)
     {
         return method switch
@@ -695,6 +738,7 @@ internal static class Program
             "chatgpt/control/read" => ChatGptControlContract.Describe(),
             "chatgpt/conversation/inspect" => ChatGptControlContract.Inspect(OptionalString(RequireObject(parameters), "url")),
             "workbench/read" => SessionWorkbench.DescribeContract(),
+            "session/shared/call" => await SharedSessionRpcAsync(parameters),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
             "accessibility/preferences/write" => await RpcAccessibilityPreferencesWriteAsync(parameters),
