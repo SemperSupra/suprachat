@@ -34,6 +34,7 @@ public static class AccessibilityContract
                 $"{PrimaryModifierName}+1",
                 $"{PrimaryModifierName}+2",
                 $"{PrimaryModifierName}+3",
+                $"{PrimaryModifierName}+4",
                 $"{PrimaryModifierName}+L"
             }),
         new AccessibilityAutomation(

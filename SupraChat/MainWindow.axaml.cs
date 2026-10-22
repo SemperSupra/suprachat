@@ -16,6 +16,8 @@ public partial class MainWindow : Window
     private readonly SupraChatCore _core = new();
     private readonly List<ResponseAttachment> _attachments = new();
     private readonly Queue<CodexProtocolEvent> _pendingServerRequests = new();
+    private readonly SessionWorkbench _workbenchSessions = new();
+    private bool _refreshingWorkbenchList;
 
     private SiwcCredential? _credential;
     private CodexAppServerClient? _codex;
@@ -33,6 +35,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        RefreshWorkbenchList("No local sessions. Terminal execution and chat submission are disabled.");
         LoadCapabilityCatalog();
         Opened += async (_, _) =>
         {
@@ -82,6 +85,11 @@ public partial class MainWindow : Window
                 RootTabs.SelectedIndex = 2;
                 e.Handled = true;
                 break;
+            case Key.D4:
+                RootTabs.SelectedIndex = 3;
+                WorkbenchList.Focus();
+                e.Handled = true;
+                break;
             case Key.L:
                 RootTabs.SelectedIndex = 1;
                 PromptBox.Focus();
@@ -104,6 +112,119 @@ public partial class MainWindow : Window
                 break;
         }
     }
+
+    private void RefreshWorkbenchList(string? notice = null)
+    {
+        var snapshot = _workbenchSessions.Snapshot();
+        _refreshingWorkbenchList = true;
+        try
+        {
+            WorkbenchList.ItemsSource = snapshot.Sessions;
+            WorkbenchList.SelectedItem = snapshot.Sessions
+                .FirstOrDefault(item => item.Id == snapshot.ActiveSessionId);
+        }
+        finally
+        {
+            _refreshingWorkbenchList = false;
+        }
+        var conversationCollisions = snapshot.Collisions.Count(c => c.Type == "DUPLICATE_CONVERSATION");
+        var workspaceCollisions = snapshot.Collisions.Count(c => c.Type == "SHARED_WORKSPACE");
+        WorkbenchStatus.Text = $"{notice ?? "Session metadata updated."} " +
+            $"{snapshot.Sessions.Count}/{snapshot.MaxSessions} sessions; " +
+            $"duplicate-conversation warnings={conversationCollisions}; " +
+            $"shared-workspace warnings={workspaceCollisions}. " +
+            "Browser submission and terminal execution DISABLED.";
+    }
+
+    private void ClearWorkbenchTransfer()
+    {
+        WorkbenchTransferInput.Text = string.Empty;
+        WorkbenchTransferPreview.Text = string.Empty;
+    }
+
+    private void WorkbenchCreate_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var session = _workbenchSessions.Open(
+                WorkbenchTitleInput.Text, WorkbenchUrlInput.Text, WorkbenchWorkspaceInput.Text);
+            ClearWorkbenchTransfer();
+            RefreshWorkbenchList($"Created {session.Title} as an in-memory descriptor only.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            WorkbenchStatus.Text = $"Create refused: {ex.Message}. No external changes made.";
+        }
+    }
+
+    private void WorkbenchList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingWorkbenchList || WorkbenchList.SelectedItem is not WorkbenchSession selected)
+            return;
+        if (_workbenchSessions.Select(selected.Id))
+        {
+            ClearWorkbenchTransfer();
+            RefreshWorkbenchList($"Selected {selected.Title}.");
+        }
+    }
+
+    private void WorkbenchClose_Click(object? sender, RoutedEventArgs e)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected ||
+            !_workbenchSessions.Close(selected.Id))
+        {
+            WorkbenchStatus.Text = "Select a session to close.";
+            return;
+        }
+        ClearWorkbenchTransfer();
+        RefreshWorkbenchList("Closed the local metadata session; no browser or process was stopped.");
+    }
+
+    private void WorkbenchMove(int direction)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected)
+        {
+            WorkbenchStatus.Text = "Select a session before reordering.";
+            return;
+        }
+        var index = _workbenchSessions.Snapshot().Sessions.ToList().FindIndex(s => s.Id == selected.Id);
+        if (!_workbenchSessions.Move(selected.Id, index + direction))
+        {
+            WorkbenchStatus.Text = "Session is already at the edge.";
+            return;
+        }
+        RefreshWorkbenchList("Reordered the local session list.");
+    }
+
+    private void WorkbenchMoveUp_Click(object? sender, RoutedEventArgs e) => WorkbenchMove(-1);
+    private void WorkbenchMoveDown_Click(object? sender, RoutedEventArgs e) => WorkbenchMove(1);
+
+    private void WorkbenchPreview(string direction)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected)
+        {
+            WorkbenchStatus.Text = "Select a session before previewing a transfer.";
+            return;
+        }
+        try
+        {
+            var preview = _workbenchSessions.PreviewTransfer(
+                selected.Id, direction, WorkbenchTransferInput.Text ?? string.Empty);
+            WorkbenchTransferPreview.Text = preview.PreviewText;
+            WorkbenchStatus.Text = $"PREVIEW ONLY ({preview.PreviewBytes} UTF-8 bytes): " +
+                $"{preview.DestinationMode}. No transfer was applied or executed.";
+        }
+        catch (ArgumentException ex)
+        {
+            WorkbenchTransferPreview.Text = string.Empty;
+            WorkbenchStatus.Text = $"Preview refused: {ex.Message}. No external changes made.";
+        }
+    }
+
+    private void WorkbenchPreviewToTerminal_Click(object? sender, RoutedEventArgs e) =>
+        WorkbenchPreview("chat-to-terminal");
+    private void WorkbenchPreviewToChat_Click(object? sender, RoutedEventArgs e) =>
+        WorkbenchPreview("terminal-to-chat");
 
     private async Task LoadAccessibilityPreferencesAsync()
     {

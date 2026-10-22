@@ -94,6 +94,31 @@ Require(tooManySessionsRejected && workbench.Snapshot().Sessions.Count == Sessio
 Require(JsonSerializer.Serialize(SessionWorkbench.DescribeContract()).Contains("transfer_commit_supported", StringComparison.Ordinal),
     "W0 workbench contract marker missing");
 
+
+// W1 UI instrumentation: stable, keyboard-reachable and explicitly non-executing.
+var workbenchXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
+foreach (var automationId in new[]
+{
+    "Tab.Sessions", "Sessions.Heading", "Sessions.NewTitle",
+    "Sessions.NewConversation", "Sessions.NewWorkspace",
+    "Sessions.Create", "Sessions.Close", "Sessions.MoveUp",
+    "Sessions.MoveDown", "Sessions.List", "Sessions.Status",
+    "Sessions.TransferInput", "Sessions.PreviewToTerminal",
+    "Sessions.PreviewToChat", "Sessions.PreviewOutput"
+})
+{
+    Require(workbenchXaml.Contains($"AutomationProperties.AutomationId=\"{automationId}\"", StringComparison.Ordinal),
+        "W1 accessible session control missing: " + automationId);
+}
+Require(workbenchXaml.Contains("Header=\"Sessions\"", StringComparison.Ordinal) &&
+        workbenchXaml.Contains("Command+4 / Control+4", StringComparison.Ordinal) &&
+        workbenchXaml.Contains("Preview never inserts into a terminal", StringComparison.Ordinal) &&
+        workbenchXaml.Contains("No command or chat submission controls are enabled.", StringComparison.Ordinal),
+    "W1 must be accessible and explicit about the no-execution boundary");
+Require(AccessibilityContract.Describe().Human.Shortcuts.Contains(
+    $"{AccessibilityContract.PrimaryModifierName}+4"),
+    "Session workbench shortcut missing from accessibility contract");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
