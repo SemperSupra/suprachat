@@ -117,7 +117,9 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
 
     public async Task ForgetSessionAsync(string sessionId)
     {
-        await StopAsync(sessionId).ConfigureAwait(false);
+        var result = await StopAsync(sessionId).ConfigureAwait(false);
+        if (result is {Running: true})
+            throw new InvalidOperationException("CHILD_TERMINATION_NOT_VERIFIED");
         lock (_gate) _entries.Remove(sessionId);
     }
 
