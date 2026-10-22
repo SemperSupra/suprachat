@@ -1218,7 +1218,9 @@ jobs:
   anonymous-chatgpt-guest-probe:
     # Single bounded public runner invocation for the #19 recovery PR, not
     # recurring unsolicited prompts on unrelated builds.
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/19-chatgpt-control-contract-20261020'
+    # Provider-contacting guest probe is NEVER an automatic PR check.
+    # Explicit manual workflow_dispatch alone permits an anonymous attempt.
+    if: github.event_name == 'workflow_dispatch'
     name: Anonymous ChatGPT browser surface probe (US runner)
     runs-on: ubuntu-24.04
     timeout-minutes: 12
