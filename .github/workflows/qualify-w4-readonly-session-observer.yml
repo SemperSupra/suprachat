@@ -31,6 +31,8 @@ jobs:
           node-version: '24'
       - name: Compile accessible W4 desktop and shared automation core
         run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Build machine CLI and JSON-RPC adapter used with --no-build
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
       - name: Execute fail-closed locale and bridge contract tests
         run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
       - name: Execute actual local socket with synthetic relay (CLI and JSON-RPC)
