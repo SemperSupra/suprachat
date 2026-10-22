@@ -625,7 +625,7 @@
                        AutomationProperties.AutomationId="Sessions.DraftStatus"
                        AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap"
-                       Text="This session shell is temporary and local. Approved transfers enter inert per-session text drafts only. No terminal emulator, live browser binding, terminal execution, chat submission, filesystem persistence or remote request is provided." />
+                       Text="This session shell is temporary and local. Approved transfers enter inert per-session text drafts only. No terminal emulator, live browser binding, terminal execution, filesystem persistence or remote request is provided. No command or chat submission controls are enabled." />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
