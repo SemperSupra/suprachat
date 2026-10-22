@@ -146,8 +146,8 @@ using (var exportedDocument = JsonDocument.Parse(w2Json.Content))
             !root.GetProperty("exported_credentials").GetBoolean(),
             "W2 JSON export scope/collision metadata drift");
 }
-Require(w2Markdown.Content.Contains("Alpha\\|injected row", StringComparison.Ordinal) &&
-        w2Markdown.Content.Contains("C:\\\\private\\\\workspace", StringComparison.Ordinal) &&
+Require(w2Markdown.Content.Contains("Alpha\\|injectedrow", StringComparison.Ordinal) &&
+        w2Markdown.Content.Contains("C:/private/workspace", StringComparison.Ordinal) &&
         !w2Markdown.Content.Contains("Alpha|injected\nrow", StringComparison.Ordinal) &&
         !w2Markdown.Content.Contains("DO_NOT_EXPORT_TRANSCRIPT_TOKEN_", StringComparison.Ordinal) &&
         !w2Json.Content.Contains(draftSecret, StringComparison.Ordinal) &&
