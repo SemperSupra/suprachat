@@ -80,3 +80,68 @@ python tools/qualify-shared-session-host.py SupraChat.SessionHost/bin/Release/ne
 The test uses only public synthetic fixtures. There is **no** need to
 install a container daemon on the Windows development machine and no
 authenticated ChatGPT account is contacted.
+
+## Second bounded increment — shared human and machine projections
+
+The current COW branch now adds:
+
+- A reusable `SharedSessionClient` in the session core. The existing Avalonia
+  Sessions tab has a **separate, explicitly labeled synthetic shared-host
+  panel**. A human participant can enter the local named-pipe identifier,
+  refresh/inspect shared session identity and ordered events, create a session,
+  join as a self-asserted human, and append a revision-fenced metadata note.
+  Accessible names, automation IDs and status announcements accompany controls.
+  Local W1/W2 workbench state is **not silently migrated or promoted**.
+- Existing `SupraChat.Automation stdio` JSON-RPC exposes
+  `session/shared/call` with `{"pipe":"...","request":{"action":"session/list"}}`
+  and other typed registry methods, all using the **same** named-pipe client.
+  This is machine/agent access via an existing surface, **not** an MCP
+  implementation or a second independently authoritative session store.
+- Public-safe qualification starts the actual shared host, uses multiple
+  independent client processes, and separately invokes the established
+  automation JSON-RPC process to observe and join the same sessions.
+  Windows/Linux/macOS build the real Avalonia projection and check semantic
+  automation IDs. Full application Windows UI Automation must also locate the
+  new shared control peers before this branch is promoted.
+
+### Reproduce without credentials or a browser
+
+From repository root, in a terminal you control, with a disposable absolute
+store path and selected user-only pipe name:
+
+```sh
+dotnet run --project SupraChat.SessionHost -- serve --pipe suprachat_rdte_local /absolute/path/to/disposable-session-metadata.json
+```
+
+Open the branch-built SupraChat GUI. In **Sessions -> Shared multi-session
+collaboration (synthetic local RDTE)**, use pipe `suprachat_rdte_local` and
+explicitly connect. A separate machine client in the same OS user context can
+call the host through `SupraChat.Automation stdio`:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"session/shared/call","params":{"pipe":"suprachat_rdte_local","request":{"action":"session/list"}}}
+```
+
+The directly callable host CLI is retained for deterministic automation tests;
+these interfaces all call the same registry. Neither the GUI nor automation
+starts a hidden local daemon or external ChatGPT action.
+
+**Safety limits:** User-provided titles, note labels, participant IDs and
+synthetic metadata are currently written in plaintext at the user-selected
+store path. Use only disposable test labels. Host pipe access is restricted to
+the same local OS user but cannot distinguish an authorized human from a
+malicious process owned by that user; actor roles are self-asserted.
+No remote exposure, cryptographic identity, credential storage, real provider
+turn, model inference, terminal invocation or live collaboration approval
+is established. The full production GUI must replace its local in-memory
+workbench source of truth only after explicit migration semantics and testing.
+
+### Additional red-team and acceptance gates
+
+- Same-session UI and agent consumer identities, revisions and history must be
+  observed in one causal local session rep, including accessible controls.
+- Native Windows UIA smoke validates semantic control peers, but real
+  keyboard-only and NVDA/VoiceOver usability remain independent HIL gates.
+- Add participant capability admission, robust durable transaction recovery,
+  server push/event cursor subscriptions, and per-conversation provider
+  arbitration before any live ChatGPT session access or remote sharing.
