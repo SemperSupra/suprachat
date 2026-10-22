@@ -26,7 +26,7 @@ jobs:
       - name: Build read-only workbench descriptor and contract tests
         run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
       - name: Run core collision and preview non-execution tests
-        run: dotnet run --no-build -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
       - name: Compare CLI and JSON-RPC non-executing W0 semantics
         shell: pwsh
         run: |
