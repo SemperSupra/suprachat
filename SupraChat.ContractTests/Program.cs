@@ -49,7 +49,7 @@ foreach (var invalid in new[]
 // must remain impossible through this model.
 var workbench = new SessionWorkbench();
 var wbConversation = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000";
-var firstSession = workbench.Open("Research", wbConversation, "C:\dev\shared");
+var firstSession = workbench.Open("Research", wbConversation, @"C:\dev\shared");
 var secondSession = workbench.Open("Build", wbConversation, "C:/dev/shared");
 var wbSnapshot = workbench.Snapshot();
 Require(wbSnapshot.Schema == SessionWorkbench.Schema &&
