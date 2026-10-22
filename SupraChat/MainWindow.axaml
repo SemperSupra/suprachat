@@ -654,6 +654,70 @@
                        AutomationProperties.LiveSetting="Polite" />
             <TextBlock TextWrapping="Wrap"
                        Text="Session metadata and reviewed drafts are local. No terminal emulator, live browser binding, terminal execution, chat submission, or remote transfer is enabled. Local file export is optional and requires explicit review and a save picker. No command or chat submission controls are enabled." />
+            <Separator Margin="0,12,0,8" />
+            <TextBlock Text="Shared multi-session collaboration (synthetic local RDTE)"
+                       FontSize="18" FontWeight="SemiBold"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Sessions.SharedHeading" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Experimental shared-session host, separately started by a qualified local user. This panel uses the same durable session IDs, event history and revision checks as machine clients. It does not migrate the local workbench, authenticate participant identities, bind a browser or send a ChatGPT request." />
+            <TextBlock Text="Explicit local host pipe name" FontWeight="SemiBold" />
+            <TextBox x:Name="SharedSessionPipeInput" Text="suprachat_rdte_local"
+                     MaxLength="96"
+                     AutomationProperties.AutomationId="Sessions.SharedPipe"
+                     AutomationProperties.Name="Local shared-session host pipe name" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Connect / refresh shared sessions"
+                      Click="SharedSessionRefresh_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.SharedRefresh"
+                      AutomationProperties.Name="Refresh shared session list from host" />
+            </WrapPanel>
+            <TextBlock Text="Synthetic shared session title" FontWeight="SemiBold" />
+            <WrapPanel Orientation="Horizontal">
+              <TextBox x:Name="SharedSessionTitleInput" Width="300" MaxLength="100"
+                       Watermark="Synthetic session title"
+                       AutomationProperties.AutomationId="Sessions.SharedTitle"
+                       AutomationProperties.Name="Title for new shared synthetic session" />
+              <Button Content="Create shared synthetic session"
+                      Click="SharedSessionCreate_Click" Margin="8,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.SharedCreate"
+                      AutomationProperties.Name="Create one shared synthetic session" />
+            </WrapPanel>
+            <ListBox x:Name="SharedSessionList" MinHeight="80" MaxHeight="180"
+                     AutomationProperties.AutomationId="Sessions.SharedList"
+                     AutomationProperties.Name="Sessions discovered from shared host">
+              <ListBox.ItemTemplate>
+                <DataTemplate><TextBlock Text="{Binding Display}" /></DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Join selected as demo human"
+                      Click="SharedSessionJoin_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.SharedJoin" />
+              <Button Content="Refresh selected event history"
+                      Click="SharedSessionDetails_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Sessions.SharedEventsRefresh" />
+            </WrapPanel>
+            <TextBox x:Name="SharedSessionNoteInput" MaxLength="120"
+                     Watermark="Short synthetic metadata note (not a prompt)"
+                     AutomationProperties.AutomationId="Sessions.SharedNote"
+                     AutomationProperties.Name="Synthetic shared session note text" />
+            <Button Content="Append local metadata note (never submit)"
+                    Click="SharedSessionAppend_Click" HorizontalAlignment="Left"
+                    Margin="0,0,8,8"
+                    AutomationProperties.AutomationId="Sessions.SharedAppend"
+                    AutomationProperties.HelpText="Revision-fenced metadata-only event in the shared host. No external action." />
+            <TextBox x:Name="SharedSessionEventsView" IsReadOnly="True"
+                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="130"
+                     AutomationProperties.AutomationId="Sessions.SharedEvents"
+                     AutomationProperties.Name="Current shared session event history" />
+            <TextBlock x:Name="SharedSessionStatus" TextWrapping="Wrap"
+                       Text="Not connected to any shared session host. No provider action is available."
+                       AutomationProperties.AutomationId="Sessions.SharedStatus"
+                       AutomationProperties.Name="Shared session connection and activity status"
+                       AutomationProperties.LiveSetting="Polite" />
+
           </StackPanel>
         </ScrollViewer>
       </TabItem>
