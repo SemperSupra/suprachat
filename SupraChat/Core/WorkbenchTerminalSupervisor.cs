@@ -47,6 +47,17 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
     public WorkbenchTerminalSupervisor(SessionWorkbench workbench) =>
         _workbench = workbench ?? throw new ArgumentNullException(nameof(workbench));
 
+    // A window may close immediately only if every owned child has
+    // independently verified exit. This includes stop attempts with an
+    // uncertain outcome and never depends on a browser or terminal label.
+    public bool HasOutstandingChildren
+    {
+        get
+        {
+            lock (_gate) return _entries.Values.Any(entry => !entry.Ended);
+        }
+    }
+
     /// <summary>
     /// This must only be called following an explicit human UI start action.
     /// Requires a selected session, no collision, and an absolute pwsh path.
@@ -165,7 +176,10 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
         Entry[] entries;
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposed && _entries.Count == 0) return;
+            // A prior cleanup attempt may have failed to verify termination.
+            // Such a supervisor stays closed to Start() but DisposeAsync()
+            // remains retryable, including after independent OS intervention.
             _disposed = true;
             entries = _entries.Values.ToArray();
         }
