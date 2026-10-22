@@ -150,12 +150,14 @@ public sealed class WorkbenchTerminalSupervisor : IAsyncDisposable
 
     private static void Terminate(Entry e, string reason)
     {
+        if (e.Ended) return;
         Interlocked.CompareExchange(ref e.Reason, reason, null);
         try
         {
             if (!e.Process.HasExited) e.Process.Kill(entireProcessTree: true);
         }
         catch (InvalidOperationException) { }
+        catch (ObjectDisposedException) { }
         catch (System.ComponentModel.Win32Exception)
         {
             Interlocked.CompareExchange(ref e.Reason, "TERMINATION_FAILED", reason);
