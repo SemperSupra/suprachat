@@ -1,0 +1,50 @@
+name: Qualify W4 read-only selected conversation observer
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/ChatGptRelayObservation.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'tools/qualify-chatgpt-loopback.mjs'
+      - '.github/workflows/qualify-w4-readonly-session-observer.yml'
+permissions:
+  contents: read
+jobs:
+  relay-parity:
+    if: github.head_ref == 'feat/19-w4-readonly-session-observer-20261022'
+    name: Selected-session W4 localhost no-submit ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Compile accessible W4 desktop and shared automation core
+        run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Execute fail-closed locale and bridge contract tests
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Execute actual local socket with synthetic relay (CLI and JSON-RPC)
+        run: node tools/qualify-chatgpt-loopback.mjs --mode mock --public-root .
+      - name: Enforce no provider submission or machine source leak
+        shell: pwsh
+        run: |
+          $observer = Get-Content -Raw 'SupraChat/Core/ChatGptRelayObservation.cs'
+          if ($observer -notmatch 'http://127\.0\.0\.1:' -or
+              $observer -match 'AllowAutoRedirect = true|UseProxy = true|HttpMethod.Post|ChatGptSend|Process.Start') {
+            throw 'W4_OBSERVER_AUTHORITY_DRIFT'
+          }
+          $ui = Get-Content -Raw 'SupraChat/MainWindow.axaml'
+          foreach ($id in 'Sessions.BridgeObserve', 'Sessions.BridgeStatus', 'Sessions.BridgePort') {
+            if ($ui -notmatch [regex]::Escape($id)) { throw "W4 accessible relay control missing: $id" }
+          }
+          Write-Host 'W4 no-send, no-source-projection boundary PASS'
