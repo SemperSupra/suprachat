@@ -314,9 +314,18 @@ await using (var supervisor = new WorkbenchTerminalSupervisor(terminalWb))
         // Test scope disposal with one intentionally live owned child.
         var lastSession = terminalWb.Open("Dispose cleanup test");
         var lastChild = supervisor.Start(lastSession.Id, shellPath);
-        Require(lastChild.Running, "W3 disposal test requires a live child");
+        Require(lastChild.Running && supervisor.HasOutstandingChildren,
+                "W3 disposal test requires a live child and outstanding-child gate");
     }
 }
+// Ensure GUI close is cancelable before losing custody of a child.
+var windowSource = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml.cs"));
+Require(windowSource.Contains("protected override void OnClosing(WindowClosingEventArgs e)", StringComparison.Ordinal) &&
+        windowSource.Contains("_workbenchTerminalSupervisor.HasOutstandingChildren", StringComparison.Ordinal) &&
+        windowSource.Contains("e.Cancel = true", StringComparison.Ordinal) &&
+        windowSource.Contains("VerifyTerminalShutdownThenCloseAsync", StringComparison.Ordinal) &&
+        windowSource.Contains("Application close refused: the OS exit", StringComparison.Ordinal),
+        "W3 window must cancel close until owned child exit is verified");
 var terminalXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
 foreach (var automationId in new[] {
     "Sessions.TerminalLifecycleHeading", "Sessions.TerminalShellPath",
