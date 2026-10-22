@@ -1,0 +1,32 @@
+name: Qualify shared multi-session local RDTE
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.SessionCore/**'
+      - 'SupraChat.SessionHost/**'
+      - 'tools/qualify-shared-session-host.py'
+      - '.github/workflows/qualify-shared-session-rdte.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-multi-process:
+    name: Shared session multi-process ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build transport-independent shared session kernel and headless host
+        run: dotnet build SupraChat.SessionHost/SupraChat.SessionHost.csproj -c Release
+      - name: Run independent-process, multi-participant, multi-session causal RDTE
+        run: python tools/qualify-shared-session-host.py SupraChat.SessionHost/bin/Release/net10.0/SupraChat.SessionHost.dll
