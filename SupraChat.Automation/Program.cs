@@ -47,6 +47,10 @@ internal static class Program
                 "capabilities" => WriteSuccess(Capabilities()),
                 "chatgpt-control" => WriteSuccess(ChatGptControlContract.Describe()),
                 "chatgpt-session-inspect" => WriteSuccess(ChatGptControlContract.Inspect(Option(args[1..], "--url"))),
+                "chatgpt-bridge-observe" => WriteSuccess(await ChatGptRelayObservation.ObserveAsync(
+                    Option(args[1..], "--url"),
+                    LocalBridgePort(Option(args[1..], "--port")),
+                    Environment.GetEnvironmentVariable("SUPRACHAT_CHATGPT_RELAY_TOKEN"))),
                 "workbench-contract" => WriteSuccess(SessionWorkbench.DescribeContract()),
                 "terminal-lifecycle-contract" => WriteSuccess(WorkbenchTerminalSupervisor.DescribeCapabilities()),
                 "accessibility" => WriteSuccess(Accessibility()),
@@ -109,6 +113,7 @@ internal static class Program
             new { name = "capabilities", description = "Read machine/product capability metadata." },
             new { name = "chatgpt-control", description = "Read the ChatGPT product-conversation semantic-control contract; no browser connection." },
             new { name = "chatgpt-session-inspect", description = "Inspect an existing ChatGPT conversation URL without connecting to the browser.", syntax = "chatgpt-session-inspect --url <https://chatgpt.com/c/UUID>" },
+            new { name = "chatgpt-bridge-observe", description = "Read local relay readiness metadata for an existing conversation; no submit capability. Uses SUPRACHAT_CHATGPT_RELAY_TOKEN.", syntax = "chatgpt-bridge-observe --url <https://chatgpt.com/c/UUID> --port <loopback-port>" },
             new { name = "workbench-contract", description = "Describe multi-session/paired-terminal and explicit transfer-preview W0 semantics without executing any operation.", syntax = "workbench-contract" },
             new { name = "terminal-lifecycle-contract", description = "Read W3 process-lifecycle caps and limitations without launching a child; machine read-only.", syntax = "terminal-lifecycle-contract" },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
@@ -175,6 +180,7 @@ internal static class Program
             "capabilities/read",
             "chatgpt/control/read",
             "chatgpt/conversation/inspect",
+            "chatgpt/bridge/observe",
             "workbench/read",
             "terminal/lifecycle/read",
             "accessibility/read",
@@ -697,6 +703,10 @@ internal static class Program
             "capabilities/read" => Capabilities(),
             "chatgpt/control/read" => ChatGptControlContract.Describe(),
             "chatgpt/conversation/inspect" => ChatGptControlContract.Inspect(OptionalString(RequireObject(parameters), "url")),
+            "chatgpt/bridge/observe" => await ChatGptRelayObservation.ObserveAsync(
+                OptionalString(RequireObject(parameters), "url"),
+                LocalBridgeRpcPort(RequireObject(parameters)),
+                Environment.GetEnvironmentVariable("SUPRACHAT_CHATGPT_RELAY_TOKEN")),
             "workbench/read" => SessionWorkbench.DescribeContract(),
             "terminal/lifecycle/read" => WorkbenchTerminalSupervisor.DescribeCapabilities(),
             "accessibility/read" => Accessibility(),
@@ -1454,6 +1464,21 @@ internal static class Program
     private static string RequiredOption(string[] args, string name) =>
         Option(args, name)
         ?? throw new MachineException(2, "USAGE", $"Missing required option {name}.");
+
+    private static int LocalBridgePort(string? text) =>
+        int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port is >= 1 and <= 65535
+            ? port
+            : throw new MachineException(2, "INVALID_PARAMS", "Provide an explicit loopback port from 1 through 65535.");
+
+    private static int LocalBridgeRpcPort(JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("port", out var number) ||
+            number.ValueKind != JsonValueKind.Number ||
+            !number.TryGetInt32(out var port) ||
+            port is < 1 or > 65535)
+            throw new MachineException(2, "INVALID_PARAMS", "params.port must be an integer from 1 through 65535.");
+        return port;
+    }
 
     private static string? Option(string[] args, string name)
     {

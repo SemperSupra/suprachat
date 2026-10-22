@@ -153,6 +153,7 @@ public partial class MainWindow : Window
             WorkbenchChatDraft.Text = string.Empty;
         }
         RefreshWorkbenchTerminalStatus();
+        WorkbenchRelayStatus.Text = "Selected session changed. No current relay observation; send authority remains disabled.";
         WorkbenchStatus.Text = $"{notice ?? "Session metadata updated."} " +
             $"{snapshot.Sessions.Count}/{snapshot.MaxSessions} sessions; " +
             $"duplicate-conversation warnings={conversationCollisions}; " +
@@ -364,6 +365,49 @@ public partial class MainWindow : Window
 
     private void WorkbenchTerminalRefresh_Click(object? sender, RoutedEventArgs e) =>
         RefreshWorkbenchTerminalStatus();
+
+    private async void WorkbenchObserveRelay_Click(object? sender, RoutedEventArgs e)
+    {
+        if (WorkbenchList.SelectedItem is not WorkbenchSession selected ||
+            string.IsNullOrWhiteSpace(selected.ConversationUrl))
+        {
+            WorkbenchRelayStatus.Text =
+                "Select a session with a recognized ChatGPT conversation reference. No provider request was sent.";
+            return;
+        }
+        if (!int.TryParse(WorkbenchRelayPort.Text, out var port) || port is < 1 or > 65535)
+        {
+            WorkbenchRelayStatus.Text = "Enter an explicit loopback port from 1 to 65535. No request was sent.";
+            return;
+        }
+        var selectedSessionId = selected.Id;
+        WorkbenchRelayStatus.Text = "Reading bounded local relay metadata only; no ChatGPT submission.";
+        try
+        {
+            var state = await ChatGptRelayObservation.ObserveAsync(
+                selected.ConversationUrl, port,
+                Environment.GetEnvironmentVariable("SUPRACHAT_CHATGPT_RELAY_TOKEN"));
+
+            // Never publish an asynchronous reply to the UI for a newly
+            // selected session. Server self-report is not browser attestation.
+            if (_workbenchSessions.Snapshot().ActiveSessionId != selectedSessionId)
+                return;
+            WorkbenchRelayStatus.Text = state.Connected
+                ? $"Local relay says: {state.State}. Nonbusy ready client count=" +
+                  $"{state.MatchingReadyClients}; queue depth={state.QueueDepth}; " +
+                  $"quarantined clients={state.QuarantinedClients}; " +
+                  $"quarantined conversations={state.QuarantinedConversations}. " +
+                  "Unverified self-report only; no authority to submit."
+                : $"Local relay not connected: {state.ErrorCode}. " +
+                  "No independent browser identity or ChatGPT send authority.";
+        }
+        catch (Exception)
+        {
+            // UI should not expose token, request body, stack, or socket details.
+            if (_workbenchSessions.Snapshot().ActiveSessionId == selectedSessionId)
+                WorkbenchRelayStatus.Text = "Local relay read failed. No ChatGPT send was attempted.";
+        }
+    }
 
     private void PrepareWorkbenchMetadataExport(string format)
     {
