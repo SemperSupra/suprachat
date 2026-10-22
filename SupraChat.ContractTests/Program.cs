@@ -169,7 +169,7 @@ foreach (var controlId in new[]
         "W2 export accessibility ID missing: " + controlId);
 }
 Require(w2Xaml.Contains("Saving requires a separate file-picker action.", StringComparison.Ordinal) &&
-        w2Xaml.Contains("Transcripts, credentials, terminal logs and draft transfer text are excluded.", StringComparison.Ordinal),
+        w2Xaml.Contains("User-entered titles, URLs and workspace references may themselves contain sensitive information.", StringComparison.Ordinal),
         "W2 export UI must disclose its privacy boundary and review requirement");
 
 // W2 one-use local transfer approval; never a real terminal/chat side effect.
