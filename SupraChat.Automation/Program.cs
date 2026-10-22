@@ -50,6 +50,13 @@ internal static class Program
                 "workbench-contract" => WriteSuccess(SessionWorkbench.DescribeContract()),
                 "terminal-lifecycle-contract" => WriteSuccess(WorkbenchTerminalSupervisor.DescribeCapabilities()),
                 "session-ledger-contract" => WriteSuccess(SharedSessionLedger.DescribeContract()),
+                "session-ledger-host" => await RunSessionLedgerHostAsync(args[1..]),
+                "session-ledger-list" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "list")),
+                "session-ledger-open" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
+                "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "change", await ReadLedgerStdinAsync())),
                 "accessibility" => WriteSuccess(Accessibility()),
                 "accessibility-preferences" => WriteSuccess(await AccessibilityPreferencesAsync()),
                 "accessibility-set" => WriteSuccess(await SetAccessibilityPreferencesAsync(args[1..])),
@@ -112,7 +119,11 @@ internal static class Program
             new { name = "chatgpt-session-inspect", description = "Inspect an existing ChatGPT conversation URL without connecting to the browser.", syntax = "chatgpt-session-inspect --url <https://chatgpt.com/c/UUID>" },
             new { name = "workbench-contract", description = "Describe multi-session/paired-terminal and explicit transfer-preview W0 semantics without executing any operation.", syntax = "workbench-contract" },
             new { name = "terminal-lifecycle-contract", description = "Read W3 process-lifecycle caps and limitations without launching a child; machine read-only.", syntax = "terminal-lifecycle-contract" },
-            new { name = "session-ledger-contract", description = "Read W5 atomic in-process session ledger limits. Does not mutate remote state or start a cross-process server.", syntax = "session-ledger-contract" },
+            new { name = "session-ledger-contract", description = "Read W5 atomic session ledger core limits; no durable recovery.", syntax = "session-ledger-contract" },
+            new { name = "session-ledger-host", description = "Explicitly start a token-protected loopback-only ephemeral W6 session coordinator. Uses SUPRACHAT_LEDGER_TOKEN process environment.", syntax = "session-ledger-host --port <1024-65535>" },
+            new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
+            new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
+            new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
             new { name = "accessibility-preferences", description = "Read effective local accessibility preferences." },
             new { name = "accessibility-set", description = "Set local accessibility preferences.", syntax = "accessibility-set [--scale <0.8-2.0>] [--reduced-motion <true|false>]" },
@@ -180,6 +191,9 @@ internal static class Program
             "workbench/read",
             "terminal/lifecycle/read",
             "session/ledger/read",
+            "session/ledger/list",
+            "session/ledger/open",
+            "session/ledger/change",
             "accessibility/read",
             "accessibility/preferences/read",
             "accessibility/preferences/write",
@@ -703,6 +717,9 @@ internal static class Program
             "workbench/read" => SessionWorkbench.DescribeContract(),
             "terminal/lifecycle/read" => WorkbenchTerminalSupervisor.DescribeCapabilities(),
             "session/ledger/read" => SharedSessionLedger.DescribeContract(),
+            "session/ledger/list" => await RpcLedgerAsync(parameters, "list"),
+            "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
+            "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
             "accessibility/preferences/write" => await RpcAccessibilityPreferencesWriteAsync(parameters),
@@ -1458,6 +1475,49 @@ internal static class Program
     private static string RequiredOption(string[] args, string name) =>
         Option(args, name)
         ?? throw new MachineException(2, "USAGE", $"Missing required option {name}.");
+
+    private static int ParseLedgerPort(string? input)
+    {
+        if (!int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out var port) ||
+            port is < 1024 or > 65535)
+            throw new MachineException(2, "INVALID_PARAMS", "Explicit W6 loopback port must be 1024..65535.");
+        return port;
+    }
+
+    private static async Task<int> RunSessionLedgerHostAsync(string[] args)
+    {
+        await SessionLedgerHost.RunAsync(ParseLedgerPort(Option(args, "--port")));
+        return 0;
+    }
+
+    private static async Task<JsonElement> ReadLedgerStdinAsync()
+    {
+        var source = await Console.In.ReadToEndAsync();
+        if (source.Length is 0 or > 8192)
+            throw new MachineException(2, "INVALID_PARAMS", "Metadata JSON stdin must be nonempty and at most 8192 characters.");
+        using var document = JsonDocument.Parse(source);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new MachineException(2, "INVALID_PARAMS", "Metadata JSON request must be an object.");
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<object> RpcLedgerAsync(JsonElement? parameters, string operation)
+    {
+        var p = RequireObject(parameters);
+        if (!p.TryGetProperty("port", out var portElement) ||
+            portElement.ValueKind != JsonValueKind.Number ||
+            !portElement.TryGetInt32(out var port))
+            throw new MachineException(2, "INVALID_PARAMS", "Ledger params.port integer required.");
+        JsonElement? request = null;
+        if (operation != "list")
+        {
+            if (!p.TryGetProperty("request", out var body) || body.ValueKind != JsonValueKind.Object)
+                throw new MachineException(2, "INVALID_PARAMS", "Ledger params.request JSON object required.");
+            request = body;
+        }
+        return await SessionLedgerClient.RequestAsync(ParseLedgerPort(
+            port.ToString(CultureInfo.InvariantCulture)), operation, request);
+    }
 
     private static string? Option(string[] args, string name)
     {
