@@ -18,6 +18,9 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../SupraChat.SessionCore/SupraChat.SessionCore.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="../oracles/codex-capability-catalog-20261001.json"
              Link="oracles/codex-capability-catalog-20261001.json"
              CopyToOutputDirectory="PreserveNewest"
