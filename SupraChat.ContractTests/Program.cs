@@ -44,6 +44,56 @@ foreach (var invalid in new[]
         "Unqualified/malformed conversation URL was accepted: " + invalid);
 }
 
+
+// #19 W0: inspect real workbench session semantics; terminal/chat mutation
+// must remain impossible through this model.
+var workbench = new SessionWorkbench();
+var wbConversation = "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000";
+var firstSession = workbench.Open("Research", wbConversation, @"C:\dev\shared");
+var secondSession = workbench.Open("Build", wbConversation, "C:/dev/shared");
+var wbSnapshot = workbench.Snapshot();
+Require(wbSnapshot.Schema == SessionWorkbench.Schema &&
+        wbSnapshot.Sessions.Count == 2 &&
+        wbSnapshot.ActiveSessionId == secondSession.Id &&
+        wbSnapshot.Collisions.Any(c => c.Type == "DUPLICATE_CONVERSATION") &&
+        wbSnapshot.Collisions.Any(c => c.Type == "SHARED_WORKSPACE") &&
+        !wbSnapshot.ChatSubmissionPermitted &&
+        !wbSnapshot.TerminalExecutionPermitted,
+        "Multi-session collision/read-only contract violated");
+Require(firstSession.TerminalState == "NOT_CONNECTED" &&
+        !firstSession.TerminalExecutionPermitted && !firstSession.ChatSubmissionPermitted,
+        "Session must not expose implicit terminal or chat send authority");
+Require(workbench.Select(firstSession.Id) &&
+        workbench.Move(firstSession.Id, 1) &&
+        workbench.Snapshot().ActiveSessionId == firstSession.Id &&
+        workbench.Snapshot().Sessions[1].Id == firstSession.Id,
+        "Session selection/order invariant failed");
+var transferPreview = workbench.PreviewTransfer(firstSession.Id, "chat-to-terminal", "echo safe preview");
+Require(transferPreview.RequiresExplicitCommit && !transferPreview.WasApplied &&
+        !transferPreview.CommandExecutionPermitted &&
+        transferPreview.DestinationMode == "INSERT_ONLY_NOT_EXECUTE",
+        "Workbench must never execute previewed text");
+Require(!JsonSerializer.Serialize(workbench.Snapshot()).Contains("echo safe preview", StringComparison.Ordinal),
+    "Preview text must not persist in session metadata");
+var inversePreview = workbench.PreviewTransfer(firstSession.Id, "terminal-to-chat", "draft only");
+Require(inversePreview.DestinationMode == "DRAFT_ONLY_NOT_SUBMIT" &&
+        !inversePreview.WasApplied, "Terminal-to-chat preview must not submit");
+Require(workbench.Close(secondSession.Id) && !workbench.Close(secondSession.Id) &&
+        workbench.Snapshot().Collisions.Count == 0,
+        "Closing sessions must remove stale duplicate/writable state");
+var malformedWorkbenchUrlRejected = false;
+try { workbench.Open("Bad", "https://evil.invalid/c/123e4567-e89b-42d3-a456-426614174000"); }
+catch (ArgumentException) { malformedWorkbenchUrlRejected = true; }
+Require(malformedWorkbenchUrlRejected, "Workbench accepted an arbitrary provider URL");
+for (var i = workbench.Snapshot().Sessions.Count; i < SessionWorkbench.MaximumSessions; i++)
+    workbench.Open($"Scratch {i}");
+var tooManySessionsRejected = false;
+try { workbench.Open("One too many"); } catch (InvalidOperationException) { tooManySessionsRejected = true; }
+Require(tooManySessionsRejected && workbench.Snapshot().Sessions.Count == SessionWorkbench.MaximumSessions,
+    "Workbench session bound is not enforced");
+Require(JsonSerializer.Serialize(SessionWorkbench.DescribeContract()).Contains("transfer_commit_supported", StringComparison.Ordinal),
+    "W0 workbench contract marker missing");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");

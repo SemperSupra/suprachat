@@ -1,0 +1,51 @@
+name: Qualify non-executing workbench W0
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SessionWorkbench.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - '.github/workflows/qualify-workbench-w0.yml'
+permissions:
+  contents: read
+jobs:
+  workbench-w0-parity:
+    if: github.head_ref == 'feat/19-workbench-w0-session-contract-20261022'
+    name: W0 preview-only CLI-agent parity ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build read-only workbench descriptor and contract tests
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Run core collision and preview non-execution tests
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Compare CLI and JSON-RPC non-executing W0 semantics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'SupraChat.Automation/SupraChat.Automation.csproj'
+          $cli = dotnet run --no-build -c Release --project $project -- workbench-contract | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $cli.ok) { throw 'WORKBENCH_CLI_FAILURE' }
+          if ($cli.value.phase -ne 'W0_IN_MEMORY_SEMANTICS_ONLY' -or
+              $cli.value.max_sessions -ne 16 -or
+              $cli.value.transfer_commit_supported -ne $false -or
+              $cli.value.terminal_command_execution_supported -ne $false) {
+            throw 'WORKBENCH_CLI_AUTHORITY_DRIFT'
+          }
+          $request = '{"jsonrpc":"2.0","id":21,"method":"workbench/read","params":{}}'
+          $rpc = $request | dotnet run --no-build -c Release --project $project -- stdio | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $rpc.id -ne 21 -or
+              $rpc.result.schema -ne $cli.value.schema -or
+              $rpc.result.max_sessions -ne $cli.value.max_sessions -or
+              $rpc.result.terminal_command_execution_supported -ne $false) {
+            throw 'WORKBENCH_CLI_JSONRPC_PARITY_FAILED'
+          }
+          Write-Host 'W0 session semantic parity and no-execution contract PASS'
