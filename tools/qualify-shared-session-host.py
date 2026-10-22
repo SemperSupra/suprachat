@@ -10,6 +10,7 @@ import time
 import uuid
 
 DLL = str(pathlib.Path(sys.argv[1]).resolve())
+AUTOMATION_DLL = str(pathlib.Path(sys.argv[2]).resolve()) if len(sys.argv) > 2 else None
 PIPE = "suprachat_rdte_" + uuid.uuid4().hex[:18]
 
 
@@ -31,6 +32,29 @@ def call(action, **kwargs):
                              capture_output=True, text=True, encoding="utf-8", timeout=15)
     assert outcome.returncode == 0, (action, outcome.stderr)
     return json.loads(outcome.stdout.strip())
+
+
+def machine_rpc(action, **kwargs):
+    """Existing agent JSON-RPC process reads from exact same host as GUI/client."""
+    assert AUTOMATION_DLL is not None
+    rpc = {
+        "jsonrpc": "2.0", "id": "shared-session-oracle",
+        "method": "session/shared/call",
+        "params": {
+            "pipe": PIPE,
+            "request": {"action": action, **kwargs}
+        }
+    }
+    outcome = subprocess.run(["dotnet", AUTOMATION_DLL, "stdio"],
+                             input=json.dumps(rpc) + "\n",
+                             capture_output=True, text=True, encoding="utf-8", timeout=20)
+    assert outcome.returncode == 0, outcome.stderr
+    lines = [x for x in outcome.stdout.splitlines() if x.strip()]
+    assert lines, "no JSON-RPC response"
+    answer = json.loads(lines[-1])
+    assert answer["id"] == "shared-session-oracle", answer
+    assert "result" in answer and answer["result"]["ok"], answer
+    return answer["result"]["result"]
 
 
 def passed(response):
@@ -70,6 +94,10 @@ def main():
             a_id, b_id = a["id"], b["id"]
             assert a_id != b_id
             assert len(passed(call("session/list"))) == 2
+            if AUTOMATION_DLL is not None:
+                agent_view = machine_rpc("session/read", session_id=a_id)
+                assert agent_view["id"] == a_id
+                assert machine_rpc("session/read", session_id=b_id)["id"] == b_id
 
             same_create = call("session/create", title="Synthetic A", actor_id="operator",
                                audience="human", operation_id="create-A")
@@ -169,6 +197,12 @@ def main():
             assert len(passed(call("session/list"))) == 2
             b_events = passed(call("session/events", session_id=b_id, after_revision=1))
             assert [e["revision"] for e in b_events["events"]] == [2, 3]
+            if AUTOMATION_DLL is not None:
+                joined = machine_rpc("session/join", session_id=b_id,
+                                     actor_id="agent-machine-recovery", audience="agent")
+                assert joined["id"] == b_id and joined["revision"] == 4
+                assert machine_rpc("session/read", session_id=b_id)["revision"] == 4
+                assert passed(call("session/read", session_id=a_id))["quarantined"]
 
             # Source-level red-team finding: persistence failures must NEVER
             # be classified as ordinary lost client ACKs. Intentionally make
@@ -197,6 +231,7 @@ def main():
                 "independent_sessions": 2,
                 "concurrent_audiences_in_A": 3,
                 "native_client_processes": True,
+                "existing_agent_json_rpc_parity": AUTOMATION_DLL is not None,
                 "per_session_revision_fence": "PASS",
                 "cross_client_idempotent_replay": "PASS",
                 "restart_and_uncertainty_quarantine": "PASS",
