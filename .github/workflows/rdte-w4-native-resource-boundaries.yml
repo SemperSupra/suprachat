@@ -1,0 +1,49 @@
+name: RDTE W4 native OS resource boundaries
+on:
+  pull_request:
+    paths:
+      - 'tools/rdte_terminal_resource_boundaries.py'
+      - '.github/workflows/rdte-w4-native-resource-boundaries.yml'
+permissions:
+  contents: read
+jobs:
+  fixed-disposable-host-fixture:
+    if: github.head_ref == 'rdte/19-w4-native-resource-boundaries-20261022'
+    name: Native fixed benign process caps ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Static compilation of standard-library-only resource experiment
+        run: python -m py_compile tools/rdte_terminal_resource_boundaries.py
+      - name: Execute bounded benign child and capture exact capability evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SUPRACHAT_W4_ALLOW_FIXED_FIXTURE = 'yes'
+          python tools/rdte_terminal_resource_boundaries.py | Set-Content -Encoding utf8 w4-terminal-capabilities.json
+          if ($LASTEXITCODE -ne 0) { throw 'W4_DISPOSABLE_FIXED_FIXTURE_FAILED' }
+          $report = Get-Content -Raw w4-terminal-capabilities.json | ConvertFrom-Json
+          if ($report.schema -ne 'suprachat-w4-resource-boundary-rdte/v1' -or
+              $report.disposable_public_runner_only -ne $true -or
+              $report.resource_quota_release_admitted -ne $false -or
+              $report.operator_machine_touched -ne $false -or
+              $report.container_engine_used -ne $false -or
+              $report.real_chatgpt_access -ne $false) {
+            throw 'W4_CAPABILITY_RECEIPT_AUTHORITY_DRIFT'
+          }
+          Write-Host 'W4 empirical native resource capability report follows'
+          Get-Content -Raw w4-terminal-capabilities.json | Write-Host
+      - name: Publish metadata-only experimental receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: w4-resource-${{ matrix.os }}
+          path: w4-terminal-capabilities.json
+          retention-days: 7
