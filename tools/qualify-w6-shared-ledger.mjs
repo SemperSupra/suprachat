@@ -63,7 +63,7 @@ async function startHost(port) {
       outputSeen+=b;
       if(outputSeen.includes(token))return fail(new Error('HOST_LEAKED_BEARER'));
       if(outputSeen.length>16000)return fail(new Error('HOST_STDOUT_TOO_LARGE'));
-      const line=outputSeen.split(/\r?\n/).find(l=>l.trim().startsWith('{"schema":'));
+      const line=outputSeen.split(/\r?\n/).slice(0,-1).find(l=>l.trim().startsWith('{"schema":'));
       if(line){
         let receipt;
         try {receipt=JSON.parse(line)}catch{return fail(new Error('HOST_READY_INVALID_JSON'))}
