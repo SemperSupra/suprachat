@@ -67,7 +67,6 @@ public static class SharedSessionInventoryReader
                 inventory.Events.Count > SharedSessionLedger.MaxEvents ||
                 inventory.Sequence < 0 ||
                 inventory.AuthenticatedAudiences ||
-                inventory.DurableAcrossProcessRestart ||
                 inventory.ChatSubmissionAllowed || inventory.TerminalExecutionAllowed)
                 return Failure("LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED");
 
@@ -108,7 +107,10 @@ public static class SharedSessionInventoryReader
             return new(Schema,true,"UNVERIFIED_LOOPBACK_HOST_SELF_REPORT",
                 inventory.Sequence,display,
                 ReadOnly:true, BoundToDesktopSessions:false,
-                ActorIdentityAuthenticated:false,DurableAcrossRestart:false,
+                ActorIdentityAuthenticated:false,
+                // Report the host's unverified self-description, not proof of
+                // independent storage qualification or deployment admission.
+                DurableAcrossRestart:inventory.DurableAcrossProcessRestart,
                 ChatSubmissionAllowed:false,TerminalExecutionAllowed:false);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
