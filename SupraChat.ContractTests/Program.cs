@@ -417,6 +417,27 @@ Require(w5Descriptor.Contains("W5_IN_PROCESS_CONCURRENT_CAS_CORE", StringCompari
         w5Descriptor.Contains("\"cross_process_transport_available\":false", StringComparison.Ordinal),
     "W5 static capability contract hides absent multi-process transport");
 
+
+// W6 desktop uses the same no-write bounded inventory observer as CLI/agent.
+// These static checks supplement real localhost three-OS integration, not
+// merely assert that XAML controls exist.
+var sharedViewXaml = File.ReadAllText(Path.Combine("SupraChat", "MainWindow.axaml"));
+foreach (var control in new [] {
+    "Sessions.SharedHostHeading", "Sessions.SharedHostPort",
+    "Sessions.SharedHostRead", "Sessions.SharedHostInventory",
+    "Sessions.SharedHostStatus"
+})
+    Require(sharedViewXaml.Contains($"AutomationProperties.AutomationId=\"{control}\"",StringComparison.Ordinal),
+        "W6 shared host UI accessibility control absent: "+control);
+Require(sharedViewXaml.Contains("Existing desktop tabs are NOT YET bound to host session IDs.",StringComparison.Ordinal) &&
+        sharedViewXaml.Contains("No remote write, browser control or chat submission is available.",StringComparison.Ordinal),
+        "W6 unbound desktop inventory must warn about absent mutation authority");
+var sharedViewCode = File.ReadAllText(Path.Combine("SupraChat","MainWindow.axaml.cs"));
+Require(sharedViewCode.Contains("SharedSessionInventoryReader.ObserveAsync(",StringComparison.Ordinal) &&
+        sharedViewCode.Contains("Interlocked.Increment(ref _sharedLedgerObservationEpoch)",StringComparison.Ordinal) &&
+        sharedViewCode.Contains("epoch != Interlocked.Read(ref _sharedLedgerObservationEpoch)",StringComparison.Ordinal),
+        "W6 desktop must use shared reader and discard stale async observations");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
