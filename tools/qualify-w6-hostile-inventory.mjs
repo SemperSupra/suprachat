@@ -99,9 +99,12 @@ try {
   await caseCheck('session-privilege-claim-refused','json',
     {...good,sessions:[{...good.sessions[0],chatSubmissionAllowed:true}]},false,
     'LEDGER_INVALID_SESSION_METADATA');
-  await caseCheck('host-durability-claim-refused','json',
-    {...good,durableAcrossProcessRestart:true},false,
-    'LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED');
+  const reportedDurability = await caseCheck('durable-host-self-report-unverified','json',
+    {...good,durableAcrossProcessRestart:true},true,
+    'UNVERIFIED_LOOPBACK_HOST_SELF_REPORT');
+  assert.equal(reportedDurability.receipt.durable_across_restart,true);
+  assert.equal(reportedDurability.receipt.bound_to_desktop_sessions,false);
+  assert.equal(reportedDurability.receipt.actor_identity_authenticated,false);
   await caseCheck('impossible-event-sequence-refused','json',
     {...good,events:[{...good.events[0],sequence:2}]},false,
     'LEDGER_INVALID_EVENT_SEQUENCE');
