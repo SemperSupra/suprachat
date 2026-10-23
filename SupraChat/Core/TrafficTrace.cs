@@ -27,7 +27,8 @@ public sealed record TraceObservation(
     long? SourceSequence = null,
     long ByteCount = 0,
     int? Status = null,
-    double? LatencyMilliseconds = null);
+    double? LatencyMilliseconds = null,
+    TraceOutcome Outcome = TraceOutcome.Observed);
 
 /// <summary>No raw provider strings, payloads, authenticated principal claims or conversation-ID inference.</summary>
 public sealed record TrafficTraceEvent(
@@ -167,6 +168,11 @@ public sealed class TraceNormalizer : ITraceSink, IDisposable
         }
     }
 
+    public bool IsCapturing(LocalTraceSession session)
+    {
+        lock (_gate) return Authorize(session).Mode == TraceCaptureMode.Metadata;
+    }
+
     public bool TryObserve(LocalTraceSession session, TraceObservation observation)
     {
         lock (_gate)
@@ -189,7 +195,7 @@ public sealed class TraceNormalizer : ITraceSink, IDisposable
                 Alias(session.SessionId, "request", observation.RequestId),
                 Alias(session.SessionId, "stream", observation.StreamId), observation.SourceSequence,
                 observation.ByteCount, observation.Status, observation.LatencyMilliseconds,
-                TraceOutcome.Observed, captureGap);
+                observation.Outcome, captureGap);
             if (state.Events.Count == _capacity)
             {
                 state.EvictedThrough = state.Events.Dequeue().GlobalSequence;
@@ -265,7 +271,7 @@ public sealed class TraceNormalizer : ITraceSink, IDisposable
         Convert.ToHexString(HMACSHA256.HashData(_aliasKey, Encoding.UTF8.GetBytes($"{sessionId:N}:{domain}:{value}"))).ToLowerInvariant();
 
     private static bool Valid(TraceObservation o) =>
-        Enum.IsDefined(o.ProviderSurface) && Enum.IsDefined(o.Adapter) && Enum.IsDefined(o.Direction) && Enum.IsDefined(o.EventKind) &&
+        Enum.IsDefined(o.ProviderSurface) && Enum.IsDefined(o.Adapter) && Enum.IsDefined(o.Direction) && Enum.IsDefined(o.EventKind) && Enum.IsDefined(o.Outcome) &&
         o.ByteCount >= 0 && o.SourceSequence is not < 0 && o.Status is not (< 100 or > 599) &&
         (o.LatencyMilliseconds is null || (double.IsFinite(o.LatencyMilliseconds.Value) && o.LatencyMilliseconds >= 0)) &&
         (o.Origin?.Length ?? 0) <= 4096 && (o.RequestId?.Length ?? 0) <= 512 && (o.StreamId?.Length ?? 0) <= 512;

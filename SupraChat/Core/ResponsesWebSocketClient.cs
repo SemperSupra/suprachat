@@ -9,19 +9,42 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
 {
     public static readonly Uri Endpoint = new("wss://api.openai.com/v1/responses");
 
-    private readonly ClientWebSocket _socket = new();
+    private readonly WebSocket _socket;
+    private readonly OwnedTransportTrace? _trace;
+    private readonly string _traceId = Guid.NewGuid().ToString("N");
     private readonly SemaphoreSlim _sendGate = new(1, 1);
 
     public bool IsConnected => _socket.State == WebSocketState.Open;
 
+    internal ResponsesWebSocketClient(WebSocket socket, OwnedTransportTrace? trace = null)
+    {
+        _socket = socket;
+        _trace = trace;
+    }
+
     public static async Task<ResponsesWebSocketClient> ConnectAsync(
         string accessToken,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        OwnedTransportTrace? trace = null)
     {
-        var client = new ResponsesWebSocketClient();
-        client._socket.Options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
-        await client._socket.ConnectAsync(Endpoint, cancellationToken).ConfigureAwait(false);
-        return client;
+        var socket = new ClientWebSocket();
+        var client = new ResponsesWebSocketClient(socket, trace);
+        try
+        {
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+            await socket.ConnectAsync(Endpoint, cancellationToken).ConfigureAwait(false);
+            trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                TraceEventKind.Response, client._traceId);
+            return client;
+        }
+        catch
+        {
+            socket.Dispose();
+            client._sendGate.Dispose();
+            trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, client._traceId);
+            throw;
+        }
     }
 
     public async Task SendRawAsync(
@@ -43,6 +66,13 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
                 WebSocketMessageType.Text,
                 endOfMessage: true,
                 cancellationToken).ConfigureAwait(false);
+            _trace?.RecordJson(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Egress, _traceId, json);
+        }
+        catch
+        {
+            _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+            throw;
         }
         finally
         {
@@ -62,7 +92,13 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
 
             do
             {
-                result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+                try { result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false); }
+                catch
+                {
+                    _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                        cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+                    throw;
+                }
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
@@ -73,18 +109,26 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
                             "SupraChat acknowledged server close.",
                             CancellationToken.None).ConfigureAwait(false);
                     }
+                    _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                        TraceEventKind.Completed, _traceId);
                     yield break;
                 }
 
                 if (result.MessageType != WebSocketMessageType.Text)
+                {
+                    _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                        TraceEventKind.Error, _traceId);
                     throw new InvalidOperationException(
                         $"Unexpected Responses WebSocket message type: {result.MessageType}.");
+                }
 
                 message.Write(buffer, 0, result.Count);
             }
             while (!result.EndOfMessage);
 
-            yield return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+            var json = Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+            _trace?.RecordJson(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Ingress, _traceId, json);
+            yield return json;
         }
     }
 

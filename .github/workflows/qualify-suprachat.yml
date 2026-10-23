@@ -62,6 +62,10 @@ jobs:
       - name: Build automation and agent shell
         run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
 
+      - name: Qualify metadata trace automation and agent controls
+        shell: pwsh
+        run: ./tools/local/Test-OwnedTraceMachineControls.ps1
+
       - name: Smoke automation JSON surface
         shell: pwsh
         run: |
@@ -1137,13 +1141,33 @@ jobs:
                 }
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
+                  }
+                  if ($area.tab -eq 'Tab.AutomationAgents') {
+                    foreach ($traceControl in @(
+                      @{ id = 'Trace.Start'; mode = 'METADATA' },
+                      @{ id = 'Trace.Stop'; mode = 'OFF' }
+                    )) {
+                      $traceButton = Require-SemanticControl $traceControl.id
+                      $traceInvoke = $traceButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                      $traceInvoke.Invoke()
+                      $traceModeObserved = $false
+                      $traceDeadline = (Get-Date).AddSeconds(5)
+                      while ((Get-Date) -lt $traceDeadline) {
+                        $traceOutput = Require-SemanticControl 'Trace.Output'
+                        $traceValue = $traceOutput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                        $traceDocument = $traceValue.Current.Value | ConvertFrom-Json
+                        if ($traceDocument.mode -eq $traceControl.mode) { $traceModeObserved = $true; break }
+                        Start-Sleep -Milliseconds 100
+                      }
+                      if (-not $traceModeObserved) { throw 'Accessible trace control did not change semantic capture state.' }
+                    }
                   }
                 }
 
