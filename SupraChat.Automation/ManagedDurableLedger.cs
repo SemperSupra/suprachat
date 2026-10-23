@@ -277,6 +277,12 @@ public sealed class ManagedDurableLedger : IDisposable
         foreach (var (name,value) in args)cmd.Parameters.AddWithValue(name,value);
         return cmd;
     }
+    private void Write(string sql, SqliteTransaction tx,
+        params (string Name, object Value)[] args)
+    {
+        using var command=Command(sql,tx,args);
+        command.ExecuteNonQuery();
+    }
     private void Execute(string sql)
     {
         using var cmd=Command(sql);cmd.ExecuteNonQuery();
