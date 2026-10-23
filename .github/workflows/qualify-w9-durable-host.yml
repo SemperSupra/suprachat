@@ -1,0 +1,42 @@
+name: Qualify W9 durable W6 host real multi-process
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionLedger.cs'
+      - 'SupraChat.Automation/**'
+      - 'tools/qualify-w9-durable-w6-host.mjs'
+      - '.github/workflows/qualify-w9-durable-host.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  durable-w6-host:
+    name: W9 durable shared W6 host ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build real W6 automation host with W9 optional durable store
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Exercise real HTTP host and agent JSON-RPC across process crashes
+        run: node tools/qualify-w9-durable-w6-host.mjs
+      - name: Recheck existing W6 ephemeral boundary and dual-audience regression
+        run: node tools/qualify-w6-shared-ledger.mjs
+      - name: Enforce bounded no-provider authority in W9 integration
+        shell: pwsh
+        run: |
+          $s = Get-Content -Raw SupraChat.Automation/W9DurableSessionStore.cs
+          foreach ($term in @('HttpClient', 'WebSocket', 'Process.Start', 'AccessToken')) {
+            if ($s.Contains($term)) { throw "Unexpected W9 provider/credential authority: $term" }
+          }
+          Write-Host 'W9 source guard PASS'
