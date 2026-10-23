@@ -19,7 +19,7 @@ public static class SessionLedgerClient
     {
         if (port is < 1024 or > 65535)
             throw new ArgumentException("INVALID_EXPLICIT_LEDGER_PORT");
-        if (operation is not ("list" or "open" or "change"))
+        if (operation is not ("list" or "open" or "change" or "revoke-own"))
             throw new ArgumentException("INVALID_LEDGER_CLIENT_OPERATION");
         var token = Environment.GetEnvironmentVariable(SessionLedgerHost.TokenEnvironment);
         if (token is null || token.Length is < 32 or > 128 ||
@@ -31,6 +31,7 @@ public static class SessionLedgerClient
             "list" => "/v1/sessions",
             "open" => "/v1/sessions/open",
             "change" => "/v1/sessions/change",
+            "revoke-own" => "/v1/grants/revoke-self",
             _ => throw new ArgumentException("INVALID_LEDGER_CLIENT_OPERATION")
         };
         var body = input?.GetRawText();
@@ -50,7 +51,7 @@ public static class SessionLedgerClient
             operation == "list" ? HttpMethod.Get : HttpMethod.Post,
             new Uri($"http://127.0.0.1:{port}{path}"));
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (operation is "open" or "change")
+        if (operation is "open" or "change" or "revoke-own")
         {
             // Scoped grant comes from a separate short-lived client channel,
             // never the issuer signing key and never the JSON request body.
