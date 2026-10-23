@@ -36,7 +36,8 @@ public static class SessionLedgerHost
         using var durableStore = string.IsNullOrWhiteSpace(storePath) ? null :
             new W9DurableSessionStore(storePath);
         var ledger = new SharedSessionLedger(
-            durableStore?.Load(), durableStore?.Save);
+            durableStore?.Load(),
+            durableStore is null ? null : (Action<SessionLedgerCheckpoint>)durableStore.Save);
 
         var builder = WebApplication.CreateSlimBuilder(Array.Empty<string>());
         builder.Logging.ClearProviders();
