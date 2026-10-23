@@ -38,7 +38,7 @@ public sealed class W9DurableSessionStore : IDisposable
         // accessible parents rather than depending only on a path prefix.
         if (!OperatingSystem.IsWindows())
         {
-            var permission = Directory.GetUnixFileMode(parent.FullName);
+            var permission = File.GetUnixFileMode(parent.FullName);
             if ((permission & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
                                UnixFileMode.GroupExecute | UnixFileMode.OtherRead |
                                UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
