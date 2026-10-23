@@ -60,6 +60,8 @@ internal static class Program
                     ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
                 "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "change", await ReadLedgerStdinAsync())),
+                "session-ledger-revoke-own" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "revoke-own", await ReadLedgerStdinAsync())),
                 "accessibility" => WriteSuccess(Accessibility()),
                 "accessibility-preferences" => WriteSuccess(await AccessibilityPreferencesAsync()),
                 "accessibility-set" => WriteSuccess(await SetAccessibilityPreferencesAsync(args[1..])),
@@ -128,6 +130,7 @@ internal static class Program
             new { name = "session-ledger-view", description = "Read the same bounded unbound host inventory core used by the desktop Sessions interface; no writes.", syntax = "session-ledger-view --port <host-port>" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
             new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
+            new { name = "session-ledger-revoke-own", description = "W13 synthetic: explicitly revoke the currently signed actor grant, durably; cannot revoke another actor.", syntax = "session-ledger-revoke-own --port <host-port> < request.json" },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
             new { name = "accessibility-preferences", description = "Read effective local accessibility preferences." },
             new { name = "accessibility-set", description = "Set local accessibility preferences.", syntax = "accessibility-set [--scale <0.8-2.0>] [--reduced-motion <true|false>]" },
@@ -199,6 +202,7 @@ internal static class Program
             "session/ledger/view",
             "session/ledger/open",
             "session/ledger/change",
+            "session/ledger/revoke-own",
             "accessibility/read",
             "accessibility/preferences/read",
             "accessibility/preferences/write",
@@ -726,6 +730,7 @@ internal static class Program
             "session/ledger/view" => await RpcLedgerViewAsync(parameters),
             "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
             "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
+            "session/ledger/revoke-own" => await RpcLedgerAsync(parameters, "revoke-own"),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
             "accessibility/preferences/write" => await RpcAccessibilityPreferencesWriteAsync(parameters),
