@@ -8,6 +8,7 @@ on:
       - 'SupraChat.Automation/Program.cs'
       - 'SupraChat.ContractTests/Program.cs'
       - 'tools/qualify-w6-shared-ledger.mjs'
+      - 'tools/qualify-w6-hostile-inventory.mjs'
       - '.github/workflows/qualify-w6-desktop-inventory.yml'
 permissions:
   contents: read
@@ -35,6 +36,8 @@ jobs:
         run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
       - name: Qualify actual host and all desktop CLI agent read-only views
         run: node tools/qualify-w6-shared-ledger.mjs
+      - name: Hostile localhost reader deadline, schema and authority refusals
+        run: node tools/qualify-w6-hostile-inventory.mjs
       - name: Refuse desktop writes and arbitrary network destinations
         shell: pwsh
         run: |
