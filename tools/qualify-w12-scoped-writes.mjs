@@ -213,6 +213,52 @@ try{
   assert.equal(view.actor_identity_authenticated,false);
   record('same-accessible-reader-sees-two-shared-sessions-after-restart');
 
+  const crossActorRevoke = await machine('session/ledger/revoke-own',
+    {sessionId:sidA,audience:'human'},agentA);
+  assert.equal(crossActorRevoke.http_status,403);
+  const revoke = await machine('session/ledger/revoke-own',
+    {sessionId:sidA,audience:'agent'},agentA);
+  assert.equal(revoke.http_status,200);
+  assert.equal(revoke.payload.status,'REVOKED');
+  assert.equal(revoke.payload.durable_in_existing_w11_checkpoint,true);
+  assert.equal(revoke.payload.owner_cross_actor_revocation_available,false);
+  assert.equal((await request('/v1/sessions/change',agentMut,agentA)).status,403);
+  const sameRevoke = await machine('session/ledger/revoke-own',
+    {sessionId:sidA,audience:'agent'},agentA);
+  assert.equal(sameRevoke.http_status,200);
+  assert.equal(sameRevoke.payload.status,'ALREADY_REVOKED');
+  const renewed = grant('agent-one','agent',sidA,['session.mutate']);
+  const acceptedOrRejected = await request('/v1/sessions/change',agentMut,renewed);
+  assert([200,409].includes(acceptedOrRejected.status));
+  assert.equal(acceptedOrRejected.payload.isReplay,true);
+  record('signed-self-revocation-and-independent-new-grant-replay');
+
+  const raceGrant=grant('agent-racer','agent',sidB,['session.mutate']);
+  const raceMutation=change('w13-race-action-00001','agent',sidB,1,'B-raced');
+  const [raceResult,revocationResult]=await Promise.all([
+    request('/v1/sessions/change',raceMutation,raceGrant),
+    request('/v1/grants/revoke-self',{sessionId:sidB,audience:'agent'},raceGrant)
+  ]);
+  assert.equal(revocationResult.status,200);
+  assert.equal(revocationResult.payload.status,'REVOKED');
+  assert([200,403].includes(raceResult.status));
+  assert.equal((await request('/v1/sessions/change',raceMutation,raceGrant)).status,403);
+  record('parallel-revocation-versus-mutation-serialized-by-one-ledger-gate');
+
+  await stop();await launch(false);
+  assert.equal((await request('/v1/sessions/change',agentMut,agentA)).status,403);
+  assert.equal((await request('/v1/sessions/change',raceMutation,raceGrant)).status,403);
+  const replayAfterRestart=await request('/v1/sessions/change',agentMut,
+    grant('agent-one','agent',sidA,['session.mutate']));
+  assert([200,409].includes(replayAfterRestart.status));
+  assert.equal(replayAfterRestart.payload.isReplay,true);
+  const recoveredView=await machine('session/ledger/view',undefined,undefined);
+  assert.equal(recoveredView.connected,true);
+  assert.deepEqual(new Set(recoveredView.sessions.map(s=>s.id)),new Set([sidA,sidB]));
+  assert(recoveredView.events.some(e=>e.kind==='revoke-own-grant' &&
+    e.sessionId===sidA));
+  record('durable-revocations-survive-restart-and-same-actor-can-retry-with-new-grant');
+
   console.log(JSON.stringify({
     schema:'suprachat-w12-host-scoped-write-rdte/v1',
     result:'PASS',stages,independent_sessions:2,
@@ -222,7 +268,8 @@ try{
     restart_receipts_bound_to_signed_actor:true,
     os_peer_authenticated:false,
     trusted_issuer_enrolled:false,
-    durable_revocation_available:false,
+    durable_self_revocation_available:true,
+    durable_cross_actor_revocation_available:false,
     real_provider_calls:0,terminal_commands:0
   }));
 }finally{
