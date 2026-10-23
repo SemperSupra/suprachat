@@ -1,0 +1,38 @@
+name: Qualify W13 durable self-revocation on shared W6 host
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionLedger.cs'
+      - 'SupraChat.Automation/SessionLedgerHost.cs'
+      - 'SupraChat.Automation/SessionLedgerClient.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'tools/qualify-w12-scoped-writes.mjs'
+      - '.github/workflows/qualify-w13-revocation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  durable-revocation:
+    name: W13 same-ledger revoke/recovery ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build exact integrated host, desktop core and JSON-RPC agent
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Signed grants, concurrent self-revocation versus mutation, restart
+        run: node tools/qualify-w12-scoped-writes.mjs
+      - name: Preserve W11 durable operation outcome and fault-safety evidence
+        run: node tools/qualify-w9-durable-w6-host.mjs
+      - name: Preserve default in-memory W6 compatibility
+        run: node tools/qualify-w6-shared-ledger.mjs
