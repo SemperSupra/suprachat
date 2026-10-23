@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private bool _refreshingWorkbenchList;
     private readonly WorkbenchLocalDrafts _workbenchLocalDrafts;
     private readonly WorkbenchTerminalSupervisor _workbenchTerminalSupervisor;
+    private long _sharedLedgerObservationEpoch;
     private bool _terminalShutdownInProgress;
     private bool _verifiedTerminalShutdown;
     private string? _currentDraftReviewId;
@@ -125,6 +126,9 @@ public partial class MainWindow : Window
     private void RefreshWorkbenchList(string? notice = null)
     {
         var snapshot = _workbenchSessions.Snapshot();
+        Interlocked.Increment(ref _sharedLedgerObservationEpoch);
+        WorkbenchLedgerInventory.Text = string.Empty;
+        WorkbenchLedgerStatus.Text = "Desktop session view changed; previous host inventory observation invalidated.";
         _pendingMetadataExport = null;
         WorkbenchMetadataExportPreview.Text = string.Empty;
         WorkbenchMetadataExportStatus.Text = "Session metadata changed or selection refreshed; prior export approval cleared.";
@@ -364,6 +368,46 @@ public partial class MainWindow : Window
 
     private void WorkbenchTerminalRefresh_Click(object? sender, RoutedEventArgs e) =>
         RefreshWorkbenchTerminalStatus();
+
+    private async void WorkbenchReadSharedLedger_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(WorkbenchLedgerPort.Text, out var port) ||
+            port is < 1024 or > 65535)
+        {
+            WorkbenchLedgerInventory.Text = string.Empty;
+            WorkbenchLedgerStatus.Text = "Explicit nonprivileged 127.0.0.1 port required; no request sent.";
+            return;
+        }
+        var epoch = Interlocked.Increment(ref _sharedLedgerObservationEpoch);
+        WorkbenchLedgerInventory.Text = string.Empty;
+        WorkbenchLedgerStatus.Text = "Reading existing shared host inventory only; no session change or ChatGPT submission.";
+        try
+        {
+            var snapshot = await SharedSessionInventoryReader.ObserveAsync(
+                port, Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
+            if (epoch != Interlocked.Read(ref _sharedLedgerObservationEpoch))
+                return;
+            if (!snapshot.Connected)
+            {
+                WorkbenchLedgerStatus.Text = $"Read refused: {snapshot.Status}. No remote write attempted.";
+                return;
+            }
+            WorkbenchLedgerInventory.Text = snapshot.Sessions.Count == 0
+                ? "No sessions currently reported by the host."
+                : string.Join(Environment.NewLine,
+                    snapshot.Sessions.Select(s =>
+                        $"{s.Id}: {s.Title} (version {s.Version}, bound-to-browser: unverified)"));
+            WorkbenchLedgerStatus.Text =
+                $"W6 host reports {snapshot.Sessions.Count} sessions; sequence {snapshot.Sequence}. " +
+                "This is an unverified, ephemeral metadata read. Desktop tabs are NOT bound " +
+                "to these host sessions. No actor identity authentication or chat submission authority.";
+        }
+        catch (Exception)
+        {
+            if (epoch == Interlocked.Read(ref _sharedLedgerObservationEpoch))
+                WorkbenchLedgerStatus.Text = "Shared host observation failed; no write or ChatGPT submission attempted.";
+        }
+    }
 
     private void PrepareWorkbenchMetadataExport(string format)
     {
