@@ -3,7 +3,7 @@
 // owned disposable paths. No live W6 host, actor auth or provider actions.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,open as openFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -92,6 +92,17 @@ try{
   assert.notEqual(next.session.id,id);
   assert.equal(success(await execute('inspect')).sessions.length,2);
   record('two-sessions-survive-independent-process-restart');
+  // The database is entirely disposable and every writer has exited. An
+  // invalid SQLite header must refuse restoration, not create an empty
+  // authority with lost idempotency history.
+  const corruptHandle=await openFile(db,'r+');
+  try{
+    await corruptHandle.write(Buffer.from('NOTSQLITE'),0,9,0);
+    await corruptHandle.sync();
+  }finally{await corruptHandle.close();}
+  const corruptResult=await execute('inspect');
+  assert.notEqual(corruptResult.code,0,'Corrupt database was silently reinitialized');
+  record('corrupted-owned-database-fails-closed');
   const report={schema:'suprachat-w7-managed-sqlite-qualification/v1',
     passed:stages.length,stages,actual_process_restart:true,
     admission:'RESEARCH_ONLY_NOT_W6_INTEGRATED',
