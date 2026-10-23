@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, unlink, mkdir, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,9 +13,10 @@ import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const dll=path.join(root,'SupraChat.Automation','bin','Release','net10.0','SupraChat.Automation.dll');
 const token=randomBytes(32).toString('base64url');
-const temp=await mkdtemp(path.join(os.tmpdir(),'suprachat-w9-'));
+const temp=await mkdtemp(path.join(os.tmpdir(),'suprachat-w9-owned-'));
 const store=path.join(temp,'w9.sqlite');
-const envBase={...process.env,SUPRACHAT_LEDGER_TOKEN:token,SUPRACHAT_LEDGER_STORE:store};
+const envBase={...process.env,SUPRACHAT_LEDGER_TOKEN:token,SUPRACHAT_LEDGER_STORE:store,
+  SUPRACHAT_W9_DISPOSABLE_ONLY:'yes',SUPRACHAT_W9_CREATE_ONCE:'no'};
 const stages=[];
 let host=null,port;
 const record=(name)=>stages.push({name,status:'PASS'});
@@ -48,6 +49,8 @@ async function launch(env=envBase){
       let receipt;try{receipt=JSON.parse(line)}catch{return fail(new Error('BAD_READY_RECEIPT'))}
       if(receipt.port!==port || receipt.bound_address!=='127.0.0.1' ||
          receipt.persistent_recovery_available!==true ||
+         receipt.synthetic_storage_only!==true ||
+         receipt.production_durable_admission!==false ||
          receipt.authenticated_audience_identity!==false)
         return fail(new Error('UNSAFE_OR_MISSING_DURABILITY_DESCRIPTOR'));
       if(!complete){complete=true;clearTimeout(t);resolve();}
@@ -141,10 +144,13 @@ const change=(key,audience,id,ver,title)=>({
   idempotencyKey:key,audience,sessionId:id,expectedVersion:ver,
   operation:'set-title',value:title});
 try{
-  await launch();
+  // Explicit one-time genesis, then all restarts must open existing store.
+  await launch({...envBase,SUPRACHAT_W9_CREATE_ONCE:'yes'});
   const health=await request('/v1/health');
   assert.equal(health.status,200);
   assert.equal(health.body.durable_recovery_available,true);
+  assert.equal(health.body.synthetic_storage_only,true);
+  assert.equal(health.body.production_durable_admission,false);
   assert.equal(health.body.audience_identity_authenticated,false);
   assert.equal((await request('/v1/sessions','GET',undefined,null)).status,401);
   assert.equal((await request('/v1/sessions','GET',undefined,'wrong')).status,401);
@@ -257,6 +263,40 @@ try{
   });
   assert.notEqual(badCode,0);
   record('corrupted-store-fails-closed-before-listener-ready');
+
+  async function refuseStore(label, overrides){
+    const rejected=spawnHost(await unusedPort(),{...envBase,...overrides});
+    let out='';rejected.stdout.on('data',b=>{out+=b});
+    const code=await new Promise((resolve,reject)=>{
+      const t=setTimeout(()=>{rejected.kill();reject(new Error('UNSAFE_STORE_ADMITTED_'+label))},7000);
+      rejected.once('error',e=>{clearTimeout(t);reject(e)});
+      rejected.once('exit',c=>{clearTimeout(t);resolve(c)});
+    });
+    assert.notEqual(code,0,label);
+    assert(!out.includes('"bound_address"'),label);
+  }
+  await refuseStore('repeat-create-denied',{SUPRACHAT_W9_CREATE_ONCE:'yes'});
+  await refuseStore('opt-in-required',{SUPRACHAT_W9_DISPOSABLE_ONLY:'no'});
+  const nested=path.join(temp,'unowned-directory');
+  await mkdir(nested);
+  await refuseStore('unowned-parent-denied',{
+    SUPRACHAT_LEDGER_STORE:path.join(nested,'synthetic.sqlite'),
+    SUPRACHAT_W9_CREATE_ONCE:'yes'});
+  await refuseStore('missing-original-without-create-denied',{
+    SUPRACHAT_LEDGER_STORE:path.join(temp,'nonexistent.sqlite')});
+  if(process.platform!=='win32'){
+    const broad=path.join(temp,'suprachat-w9-owned-overpermissive');
+    await mkdir(broad);
+    await chmod(broad,0o755);
+    await refuseStore('nonprivate-posix-directory-denied',{
+      SUPRACHAT_LEDGER_STORE:path.join(broad,'synthetic.sqlite'),
+      SUPRACHAT_W9_CREATE_ONCE:'yes'});
+    record('posix-world-readable-directory-refused');
+  }
+  // Losing the original database is not equivalent to a new empty genesis.
+  await unlink(store);
+  await refuseStore('missing-previous-store-no-silent-reset',{});
+  record('owner-path-opt-in-create-once-and-missing-store-denials');
 
   console.log(JSON.stringify({
     schema:'suprachat-w9-integrated-w6-durability-rdte/v1',result:'PASS',
