@@ -14,7 +14,7 @@ permissions:
   contents: read
 jobs:
   desktop-cli-agent-same-observer:
-    if: github.head_ref == 'feat/19-w6-desktop-ledger-inventory-20261022'
+    if: github.head_ref == 'feat/19-w6-desktop-ledger-inventory-20261022' || github.head_ref == 'exp/19-w10-accessible-durable-host-inventory-20261023'
     name: Desktop shared-host reader cross-process ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
