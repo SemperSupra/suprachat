@@ -31,6 +31,8 @@ jobs:
         run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
       - name: Execute real isolated loopback host crash-restart idempotency fixtures
         run: node tools/qualify-w7-host-restart-lab.mjs
+      - name: Independently requalify unchanged default ephemeral W6 path
+        run: node tools/qualify-w6-shared-ledger.mjs
       - name: Keep W7 host admission opt-in and no default persistence claim
         shell: pwsh
         run: |
