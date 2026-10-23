@@ -602,4 +602,5 @@ var appXamlPath = Path.Combine("SupraChat", "App.axaml");
 Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\"", StringComparison.Ordinal),
     "application must follow the platform theme/high-contrast preference");
 
+await TrafficTraceChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");
