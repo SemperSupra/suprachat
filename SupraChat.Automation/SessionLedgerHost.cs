@@ -21,7 +21,7 @@ public static class SessionLedgerHost
     public const string Schema = "suprachat-w6-loopback-session-host/v1";
     public const string TokenEnvironment = "SUPRACHAT_LEDGER_TOKEN";
 
-    public static async Task RunAsync(int port)
+    public static async Task RunAsync(int port, string? w7LabDatabase = null)
     {
         if (port is < 1024 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(port), "Explicit nonprivileged port required");
@@ -30,6 +30,12 @@ public static class SessionLedgerHost
             token.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
             throw new InvalidOperationException("LEDGER_HOST_TOKEN_REQUIRED");
         var tokenBytes = Encoding.ASCII.GetBytes(token);
+        // W6 remains ephemeral by default. The W7 branch admits only
+        // an explicitly named, already-created, disposable SQLite file.
+        // Lab mode cannot silently create or replace a lost authority.
+        using var labStore = w7LabDatabase is null ? null :
+            new ManagedDurableLedger(w7LabDatabase, create:false);
+        var storeGate = new object();
 
         var builder = WebApplication.CreateSlimBuilder(Array.Empty<string>());
         builder.Logging.ClearProviders();
@@ -78,13 +84,28 @@ public static class SessionLedgerHost
             address = "127.0.0.1",
             port, audience_identity_authenticated = false,
             durable_recovery_available = false,
+            experimental_w7_store_enabled = labStore is not null,
+            w7_production_admission = false,
             chat_submission_allowed = false,
             terminal_execution_allowed = false
         }));
-        app.MapGet("/v1/sessions", () => Results.Json(ledger.InspectAll()));
+        app.MapGet("/v1/sessions", () =>
+        {
+            lock (storeGate)
+            {
+                return Results.Json(labStore is null ?
+                    ledger.InspectAll() : labStore.InspectAll());
+            }
+        });
         app.MapGet("/v1/sessions/{sessionId}", (string sessionId) =>
         {
-            var snapshot = ledger.Inspect(sessionId);
+            SessionLedgerState? snapshot;
+            lock (storeGate)
+            {
+                snapshot = labStore is null ?
+                    ledger.Inspect(sessionId) :
+                    labStore.InspectAll().Sessions.FirstOrDefault(s => s.Id == sessionId);
+            }
             return snapshot is null ? Results.NotFound() : Results.Json(snapshot);
         });
         app.MapPost("/v1/sessions/open", async (HttpContext context) =>
@@ -93,9 +114,16 @@ public static class SessionLedgerHost
             {
                 var body = await context.Request.ReadFromJsonAsync<OpenPayload>();
                 if (body is null) return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
-                return ToHttpResult(ledger.Open(
-                    body.IdempotencyKey!, body.Audience!, body.Title!,
-                    body.ConversationUrl, body.WorkspaceKey));
+                SessionLedgerResult result;
+                lock (storeGate)
+                {
+                    result = labStore is null ?
+                        ledger.Open(body.IdempotencyKey!, body.Audience!, body.Title!,
+                            body.ConversationUrl, body.WorkspaceKey) :
+                        labStore.Open(body.IdempotencyKey!, body.Audience!, body.Title!,
+                            body.ConversationUrl, body.WorkspaceKey);
+                }
+                return ToHttpResult(result);
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
             catch (JsonException) { return Results.BadRequest(new {error = "INVALID_JSON"}); }
@@ -106,9 +134,16 @@ public static class SessionLedgerHost
             {
                 var body = await context.Request.ReadFromJsonAsync<ChangePayload>();
                 if (body is null) return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
-                return ToHttpResult(ledger.Change(
-                    body.IdempotencyKey!, body.Audience!, body.SessionId!,
-                    body.ExpectedVersion, body.Operation!, body.Value));
+                SessionLedgerResult result;
+                lock (storeGate)
+                {
+                    result = labStore is null ?
+                        ledger.Change(body.IdempotencyKey!, body.Audience!, body.SessionId!,
+                            body.ExpectedVersion, body.Operation!, body.Value) :
+                        labStore.Change(body.IdempotencyKey!, body.Audience!, body.SessionId!,
+                            body.ExpectedVersion, body.Operation!, body.Value);
+                }
+                return ToHttpResult(result);
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
             catch (JsonException) { return Results.BadRequest(new {error = "INVALID_JSON"}); }
@@ -123,6 +158,7 @@ public static class SessionLedgerHost
             authenticated_audience_identity = false,
             cross_process_transport_available = true,
             persistent_recovery_available = false,
+            w7_lab_recovery_enabled = labStore is not null,
             provider_prompt_submission_available = false
         }));
         Console.Out.Flush();
