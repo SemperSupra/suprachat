@@ -1,0 +1,47 @@
+name: Qualify W7 experimental host restart
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.Automation/SessionLedgerHost.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.Automation/ManagedDurableLedger.cs'
+      - 'tools/qualify-w7-host-restart-lab.mjs'
+      - '.github/workflows/qualify-w7-host-restart-lab.yml'
+permissions:
+  contents: read
+jobs:
+  owned-localhost-durable-lab:
+    if: github.head_ref == 'feat/38-w7-host-restart-lab-20261023'
+    name: W7 opted-in localhost host restart ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build W7-managed optional backend and W6 localhost host
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Execute real isolated loopback host crash-restart idempotency fixtures
+        run: node tools/qualify-w7-host-restart-lab.mjs
+      - name: Independently requalify unchanged default ephemeral W6 path
+        run: node tools/qualify-w6-shared-ledger.mjs
+      - name: Keep W7 host admission opt-in and no default persistence claim
+        shell: pwsh
+        run: |
+          $s = Get-Content -Raw 'SupraChat.Automation/SessionLedgerHost.cs'
+          $p = Get-Content -Raw 'SupraChat.Automation/Program.cs'
+          if ($s -notmatch 'w7LabDatabase is null' -or
+              $s -notmatch 'durable_recovery_available = false' -or
+              $s -notmatch 'w7_production_admission = false' -or
+              $p -notmatch 'Option\(args, "--w7-lab-db"\)') {
+            throw 'W7_RESEARCH_HOST_PROMOTED_WITHOUT_APPROVAL'
+          }
+          Write-Host 'W6 safe ephemeral default and experimental W7 research gate PASS'
