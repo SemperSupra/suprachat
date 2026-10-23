@@ -21,56 +21,112 @@ public sealed class W9DurableSessionStore : IDisposable
 
     public W9DurableSessionStore(string absolutePath)
     {
+        if (Environment.GetEnvironmentVariable("SUPRACHAT_W9_DISPOSABLE_ONLY") != "yes")
+            throw new InvalidOperationException("W9_SYNTHETIC_OWNED_STORE_ADMISSION_REQUIRED");
         if (!Path.IsPathFullyQualified(absolutePath) ||
-            !Directory.Exists(Path.GetDirectoryName(absolutePath)))
-            throw new ArgumentException("EXPLICIT_EXISTING_ABSOLUTE_STORE_DIRECTORY_REQUIRED");
-        if (File.Exists(absolutePath) &&
-            (File.GetAttributes(absolutePath) & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidDataException("STORE_REPARSE_POINT_REFUSED");
-        // Kept open throughout the host lifetime. A second W6 process must
-        // fail closed rather than create a competing session authority.
-        _ownerLock = new FileStream(absolutePath + ".w9owner", FileMode.OpenOrCreate,
-            FileAccess.ReadWrite, FileShare.None);
-        _db = new SqliteConnection(new SqliteConnectionStringBuilder
+            !string.Equals(Path.GetExtension(absolutePath), ".sqlite",
+                StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("W9_EXPLICIT_OWNED_ABSOLUTE_SQLITE_PATH_REQUIRED");
+        var full = Path.GetFullPath(absolutePath);
+        var parent = Directory.GetParent(full)
+            ?? throw new InvalidDataException("W9_PARENT_DIRECTORY_REQUIRED");
+        if (!parent.Exists || !parent.Name.StartsWith("suprachat-w9-owned-",
+                StringComparison.Ordinal) ||
+            parent.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("W9_UNOWNED_DIRECTORY_REFUSED");
+        // macOS/Linux create 0700 mkdtemp directories; reject group/other
+        // accessible parents rather than depending only on a path prefix.
+        if (!OperatingSystem.IsWindows())
         {
-            DataSource = absolutePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Private,
-            Pooling = false,
-            DefaultTimeout = 5
-        }.ToString());
+            var permission = Directory.GetUnixFileMode(parent.FullName);
+            if ((permission & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
+                               UnixFileMode.GroupExecute | UnixFileMode.OtherRead |
+                               UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
+                throw new InvalidDataException("W9_DIRECTORY_NOT_OWNER_PRIVATE");
+        }
+        var create = Environment.GetEnvironmentVariable("SUPRACHAT_W9_CREATE_ONCE") == "yes";
+        var exists = File.Exists(full);
+        if (exists && File.GetAttributes(full).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("W9_SYMLINK_STORE_REFUSED");
+        if (!create && !exists)
+            throw new InvalidDataException("W9_MISSING_STORE_REFUSED_NO_IMPLICIT_RESET");
+        if (create && exists)
+            throw new InvalidDataException("W9_CREATE_MUST_NOT_OVERWRITE_EXISTING");
+        var lockPath = full + ".w9owner";
+        if (File.Exists(lockPath) &&
+            File.GetAttributes(lockPath).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidDataException("W9_OWNER_LOCK_REPARSE_POINT_REFUSED");
+        _ownerLock = new FileStream(lockPath, FileMode.OpenOrCreate,
+            FileAccess.ReadWrite, FileShare.None);
         try
         {
-            _db.Open();
-            if (Scalar("PRAGMA journal_mode=WAL") != "wal")
-                throw new InvalidDataException("STORE_WAL_REQUIRED");
-            Exec("PRAGMA synchronous=FULL");
-            Exec("PRAGMA foreign_keys=ON");
-            if (Scalar("PRAGMA integrity_check") != "ok")
-                throw new InvalidDataException("STORE_INTEGRITY_FAILED");
-
-            using (var tx = _db.BeginTransaction(deferred: false))
+            if (create)
             {
-                Exec(@"CREATE TABLE IF NOT EXISTS checkpoint (
-                    slot INTEGER PRIMARY KEY CHECK(slot=1),
-                    schema_id TEXT NOT NULL, revision INTEGER NOT NULL,
-                    sha256 TEXT NOT NULL, json TEXT NOT NULL)", tx);
-                tx.Commit();
+                // CreateNew is an atomic file-exists guard; a host restart
+                // cannot manufacture an empty replacement for a missing DB.
+                using var initialFile = new FileStream(full, FileMode.CreateNew,
+                    FileAccess.ReadWrite, FileShare.None);
             }
-            using var cmd = Command("SELECT schema_id FROM checkpoint WHERE slot=1");
-            var schema = cmd.ExecuteScalar();
-            if (schema is not null && schema is not DBNull &&
-                (string)schema != StoreSchema)
-                throw new InvalidDataException("UNSUPPORTED_DURABLE_SCHEMA");
-
-            // Only disposable public RDTE hosts may inject intentional
-            // crash points, and never when a real provider is admitted.
-            if (Environment.GetEnvironmentVariable("SUPRACHAT_W9_RDTE_FAULTS") == "1")
-                _testFault = Environment.GetEnvironmentVariable("SUPRACHAT_W9_FAULT");
+            _db = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = full,
+                Mode = SqliteOpenMode.ReadWrite,
+                Cache = SqliteCacheMode.Private,
+                Pooling = false,
+                DefaultTimeout = 5
+            }.ToString());
+            try
+            {
+                _db.Open();
+                if (Scalar("PRAGMA journal_mode=WAL") != "wal")
+                    throw new InvalidDataException("W9_STORE_WAL_REQUIRED");
+                Exec("PRAGMA synchronous=FULL");
+                Exec("PRAGMA foreign_keys=ON");
+                if (Scalar("PRAGMA integrity_check") != "ok")
+                    throw new InvalidDataException("W9_STORE_INTEGRITY_FAILED");
+                if (create)
+                {
+                    using var tx = _db.BeginTransaction(deferred: false);
+                    Exec(@"CREATE TABLE checkpoint (
+                        slot INTEGER PRIMARY KEY CHECK(slot=1),
+                        schema_id TEXT NOT NULL, revision INTEGER NOT NULL,
+                        sha256 TEXT NOT NULL, json TEXT NOT NULL)", tx);
+                    var genesis = new SessionLedgerCheckpoint(
+                        SharedSessionLedger.Schema, 0,
+                        Array.Empty<SessionLedgerState>(),
+                        Array.Empty<SessionLedgerCheckpointOperation>(),
+                        Array.Empty<SessionLedgerEvent>());
+                    var content = JsonSerializer.Serialize(genesis);
+                    using var init = Command(@"INSERT INTO checkpoint
+                        (slot,schema_id,revision,sha256,json)
+                        VALUES(1,$schema,1,$sha,$json)", tx);
+                    init.Parameters.AddWithValue("$schema", StoreSchema);
+                    init.Parameters.AddWithValue("$sha", Convert.ToHexString(
+                        SHA256.HashData(Encoding.UTF8.GetBytes(content))));
+                    init.Parameters.AddWithValue("$json", content);
+                    if (init.ExecuteNonQuery() != 1)
+                        throw new InvalidDataException("W9_GENESIS_NOT_COMMITTED");
+                    tx.Commit();
+                }
+                // Existing SQLite files without a prior committed genesis or
+                // session checkpoint are invalid, NEVER treated as new empty.
+                using var cmd = Command("SELECT schema_id FROM checkpoint WHERE slot=1");
+                var schema = cmd.ExecuteScalar();
+                if (schema is not string id || id != StoreSchema)
+                    throw new InvalidDataException("W9_MISSING_OR_UNSUPPORTED_CHECKPOINT");
+                // Only disposable, local synthetic RDTE hosts may deliberately
+                // inject crashes; external actions cannot be admitted here.
+                if (Environment.GetEnvironmentVariable("SUPRACHAT_W9_RDTE_FAULTS") == "1")
+                    _testFault = Environment.GetEnvironmentVariable("SUPRACHAT_W9_FAULT");
+            }
+            catch
+            {
+                _db.Dispose();
+                throw;
+            }
         }
         catch
         {
-            _db.Dispose();
             _ownerLock.Dispose();
             throw;
         }
