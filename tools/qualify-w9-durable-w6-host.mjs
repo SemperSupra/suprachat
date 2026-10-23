@@ -54,6 +54,13 @@ async function launch(env=envBase){
     });
   });
 }
+async function waitExit(p){
+  if(p.exitCode!==null)return p.exitCode;
+  return await new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error('HOST_FAULT_EXIT_TIMEOUT')),7000);
+    p.once('exit',code=>{clearTimeout(timer);resolve(code)});
+  });
+}
 async function stop(){
   const p=host;host=null;if(!p || p.exitCode!==null)return;
   await new Promise(resolve=>{
@@ -177,7 +184,7 @@ try{
   const uncommitted=open('w9-crash-before-commit-0001','human','temporary');
   await launch({...envBase,SUPRACHAT_W9_RDTE_FAULTS:'1',SUPRACHAT_W9_FAULT:'BEFORE_COMMIT'});
   await Promise.allSettled([request('/v1/sessions/open','POST',uncommitted)]);
-  const codeBefore=await new Promise(r=>host.once('exit',r));
+  const codeBefore=await waitExit(host);
   assert.equal(codeBefore,88);
   host=null;
   await launch();
@@ -192,7 +199,7 @@ try{
   const committed=change('w9-crash-after-commit-0001','agent',sidB,1,'B-committed');
   await launch({...envBase,SUPRACHAT_W9_RDTE_FAULTS:'1',SUPRACHAT_W9_FAULT:'AFTER_COMMIT_BEFORE_ACK'});
   await Promise.allSettled([request('/v1/sessions/change','POST',committed)]);
-  const codeAfter=await new Promise(r=>host.once('exit',r));
+  const codeAfter=await waitExit(host);
   assert.equal(codeAfter,89);
   host=null;
   await launch();
