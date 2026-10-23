@@ -71,8 +71,10 @@ async function invoke(){
       try{
         const obj=JSON.parse(out);
         assert.equal(obj.ok,true);
-        assert.equal(obj.value.chatSubmissionAllowed,false);
-        assert.equal(obj.value.terminalExecutionAllowed,false);
+        // CLI deliberately uses snake_case; the underlying host HTTP
+        // fixture uses camelCase. Assert the *published CLI contract*.
+        assert.equal(obj.value.chat_submission_allowed,false);
+        assert.equal(obj.value.terminal_execution_allowed,false);
         resolve({receipt:obj.value,elapsedMs:Date.now()-started});
       }catch(e){reject(e)}
     });
