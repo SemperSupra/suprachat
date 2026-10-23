@@ -38,6 +38,29 @@ public static class SessionLedgerHost
         var ledger = new SharedSessionLedger(
             durableStore?.Load(),
             durableStore is null ? null : (Action<SessionLedgerCheckpoint>)durableStore.Save);
+        // W12 is an explicit synthetic security experiment. All metadata
+        // writes must carry a signed actor/session grant in this mode; the
+        // common loopback bearer remains transport access ONLY.
+        var scopedWrites = Environment.GetEnvironmentVariable("SUPRACHAT_W12_SCOPED_WRITES")
+            == "synthetic";
+        if (scopedWrites && durableStore is null)
+            throw new InvalidOperationException("W12_REQUIRES_ADMITTED_DISPOSABLE_DURABLE_HOST");
+        var secretText = Environment.GetEnvironmentVariable("SUPRACHAT_W12_SIGNING_KEY");
+        if (scopedWrites && string.IsNullOrEmpty(secretText))
+            throw new InvalidOperationException("W12_SIGNING_KEY_REQUIRED");
+        var secret = scopedWrites ? Convert.FromBase64String(secretText!) : Array.Empty<byte>();
+        try
+        {
+            if (scopedWrites && secret.Length != 32)
+                throw new InvalidOperationException("W12_SIGNING_KEY_256_BIT_REQUIRED");
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(secret);
+            throw;
+        }
+        using var grantAuthority = scopedWrites ? new W12ScopedGrantAuthority(secret) : null;
+        if (secret.Length != 0) CryptographicOperations.ZeroMemory(secret);
 
         var builder = WebApplication.CreateSlimBuilder(Array.Empty<string>());
         builder.Logging.ClearProviders();
@@ -88,7 +111,10 @@ public static class SessionLedgerHost
             synthetic_storage_only = durableStore is not null,
             production_durable_admission = false,
             chat_submission_allowed = false,
-            terminal_execution_allowed = false
+            terminal_execution_allowed = false,
+            synthetic_scoped_write_enforcement = scopedWrites,
+            authenticated_os_peer_identity = false,
+            common_bearer_grants_mutation = !scopedWrites
         }));
         app.MapGet("/v1/sessions", () => Results.Json(
             ledger.InspectAll() with
@@ -107,8 +133,18 @@ public static class SessionLedgerHost
             {
                 var body = await context.Request.ReadFromJsonAsync<OpenPayload>();
                 if (body is null) return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
+                W12Admission? grant = null;
+                if (grantAuthority is not null)
+                {
+                    grant = grantAuthority.Validate(
+                        context.Request.Headers["X-SupraChat-Actor-Capability"].ToString(),
+                        "create-only", "session.create", claimedAudience: body.Audience);
+                    if (!grant.Allowed) return ScopedDenied(grant.Status);
+                }
                 return ToHttpResult(ledger.Open(
-                    body.IdempotencyKey!, body.Audience!, body.Title!,
+                    grant is null ? body.IdempotencyKey! :
+                        ScopeOperationKey(grant.ActorId!, body.IdempotencyKey!),
+                    grant?.Audience ?? body.Audience!, body.Title!,
                     body.ConversationUrl, body.WorkspaceKey));
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
@@ -120,8 +156,18 @@ public static class SessionLedgerHost
             {
                 var body = await context.Request.ReadFromJsonAsync<ChangePayload>();
                 if (body is null) return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
+                W12Admission? grant = null;
+                if (grantAuthority is not null)
+                {
+                    grant = grantAuthority.Validate(
+                        context.Request.Headers["X-SupraChat-Actor-Capability"].ToString(),
+                        body.SessionId, "session.mutate", claimedAudience: body.Audience);
+                    if (!grant.Allowed) return ScopedDenied(grant.Status);
+                }
                 return ToHttpResult(ledger.Change(
-                    body.IdempotencyKey!, body.Audience!, body.SessionId!,
+                    grant is null ? body.IdempotencyKey! :
+                        ScopeOperationKey(grant.ActorId!, body.IdempotencyKey!),
+                    grant?.Audience ?? body.Audience!, body.SessionId!,
                     body.ExpectedVersion, body.Operation!, body.Value));
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
@@ -139,10 +185,31 @@ public static class SessionLedgerHost
             persistent_recovery_available = durableStore is not null,
             synthetic_storage_only = durableStore is not null,
             production_durable_admission = false,
-            provider_prompt_submission_available = false
+            provider_prompt_submission_available = false,
+            synthetic_scoped_write_enforcement = scopedWrites,
+            authenticated_os_peer_identity = false,
+            common_bearer_grants_mutation = !scopedWrites
         }));
         Console.Out.Flush();
         await app.WaitForShutdownAsync().ConfigureAwait(false);
+    }
+
+    private static IResult ScopedDenied(string reason) =>
+        Results.Json(new {error = "W12_SCOPED_WRITE_DENIED", reason},
+            statusCode: StatusCodes.Status403Forbidden);
+
+    private static string ScopeOperationKey(string actorId, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key) || key.Length is < 12 or > 128 ||
+            key.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or ':' or '.')))
+            throw new ArgumentException("INVALID_IDEMPOTENCY_KEY");
+        // Namespace durable first receipts by the SIGNED actor identity:
+        // separate agents with the same caller key cannot replay or absorb
+        // each other's successes/rejections. A new grant for the SAME actor
+        // intentionally retains historical replay semantics across restart.
+        var material = Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(new[] {"W12_OP_V1", actorId, key}));
+        return "w12-" + Convert.ToHexString(SHA256.HashData(material));
     }
 
     private static IResult ToHttpResult(SessionLedgerResult result)

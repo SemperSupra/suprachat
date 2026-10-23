@@ -50,6 +50,21 @@ public static class SessionLedgerClient
             operation == "list" ? HttpMethod.Get : HttpMethod.Post,
             new Uri($"http://127.0.0.1:{port}{path}"));
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (operation is "open" or "change")
+        {
+            // Scoped grant comes from a separate short-lived client channel,
+            // never the issuer signing key and never the JSON request body.
+            var actorGrant = Environment.GetEnvironmentVariable("SUPRACHAT_W12_ACTOR_GRANT");
+            if (!string.IsNullOrEmpty(actorGrant))
+            {
+                if (actorGrant.Length > 2048 ||
+                    actorGrant.Any(c => !(char.IsAsciiLetterOrDigit(c) ||
+                                          c is '-' or '_' or '.')))
+                    throw new ArgumentException("INVALID_ACTOR_GRANT_FORMAT");
+                message.Headers.TryAddWithoutValidation(
+                    "X-SupraChat-Actor-Capability", actorGrant);
+            }
+        }
         if (body is not null)
             message.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
