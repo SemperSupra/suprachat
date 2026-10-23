@@ -49,6 +49,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private readonly Task _readerTask;
     private readonly Task _stderrTask;
     private bool _initialized;
+    private readonly OwnedTransportTrace? _trace;
+    private readonly string _traceId = Guid.NewGuid().ToString("N");
 
     private sealed record PendingRequest(string Method, TaskCompletionSource<JsonElement> Completion);
 
@@ -78,8 +80,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private CodexAppServerClient(Process process)
+    internal CodexAppServerClient(Process process, OwnedTransportTrace? trace = null)
     {
+        _trace = trace;
         _process = process;
         _stdin = process.StandardInput;
         _stdout = process.StandardOutput;
@@ -152,10 +155,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     public static async Task<CodexAppServerClient> StartAsync(
         string accessToken,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        OwnedTransportTrace? trace = null)
     {
         var process = CodexAppServer.Start(accessToken);
-        var client = new CodexAppServerClient(process);
+        var client = new CodexAppServerClient(process, trace);
         try
         {
             await client.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -362,6 +366,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             while (!_lifetime.IsCancellationRequested)
             {
                 var line = await _stdout.ReadLineAsync(_lifetime.Token).ConfigureAwait(false);
+                if (line is not null)
+                    _trace?.RecordJson(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Ingress, _traceId, line);
                 if (line is null)
                     break;
                 if (string.IsNullOrWhiteSpace(line))
@@ -424,6 +430,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
         finally
         {
+            _trace?.Record(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Local,
+                _lifetime.IsCancellationRequested ? TraceEventKind.Cancelled :
+                    terminal is null ? TraceEventKind.CaptureGap : TraceEventKind.Error, _traceId);
             var exception = terminal ?? new EndOfStreamException(
                 $"Codex app-server closed stdout. stderr={StderrTail()}");
             foreach (var item in _pending.Values)
@@ -473,6 +482,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             ThrowIfExited();
             await _stdin.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
             await _stdin.FlushAsync(cancellationToken).ConfigureAwait(false);
+            _trace?.RecordJson(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Egress, _traceId, json);
+        }
+        catch
+        {
+            _trace?.Record(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Local,
+                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+            throw;
         }
         finally
         {

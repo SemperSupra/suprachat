@@ -5,6 +5,12 @@ using Avalonia.Automation.Provider;
 using SupraChat;
 using SupraChat.Core;
 
+if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-fixture")
+{
+    await OwnedTransportTraceChecks.RunRpcFixtureAsync();
+    return;
+}
+
 static void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
@@ -603,4 +609,5 @@ Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\
     "application must follow the platform theme/high-contrast preference");
 
 await TrafficTraceChecks.RunAsync();
+await OwnedTransportTraceChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");

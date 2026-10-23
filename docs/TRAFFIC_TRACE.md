@@ -45,7 +45,7 @@ snake_case string enums). Each event carries:
 | request_id, stream_id | Optional HMAC-SHA256 aliases scoped to run, session and identifier domain |
 | source_sequence | Optional adapter-reported sequence; duplicates/out-of-order events preserved |
 | byte_count, status, latency_milliseconds | Nonnegative sizes/latency and optional HTTP status |
-| outcome | OBSERVED only; does not establish provider operation or actuation |
+| outcome | Adapter-reported state; default OBSERVED; owned HTTP attempts use REQUESTED; does not establish provider actuation |
 | capture_gap | Source gap, rejected metadata, or resumed capture interval |
 | payload_classification, redaction_state | METADATA_ONLY, ALLOWLISTED_PSEUDONYMIZED |
 | completeness, confidence | UNKNOWN, ADAPTER_REPORTED |

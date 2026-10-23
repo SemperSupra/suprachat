@@ -19,7 +19,9 @@ internal static class Program
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
     private static readonly SemaphoreSlim StdoutGate = new(1, 1);
-    private static readonly SupraChatCore Core = new();
+    private static readonly LocalTraceController Trace = new();
+    private static readonly ResponsesClient TracedResponses = new(Trace.Binding);
+    private static readonly SupraChatCore Core = new(responses: TracedResponses);
 
     private static CodexAppServerClient? _agentCodex;
     private static CodexAppServerClient.CodexEventSubscription? _agentCodexEvents;
@@ -54,6 +56,8 @@ internal static class Program
                 "siwc-catalog" => WriteSuccess(ReadCatalog("siwc-capability-surface-20261001.json")),
                 "doctor" => WriteSuccess(await DoctorAsync()),
                 "diagnostics" => WriteSuccess(DogfoodObservability.Describe()),
+                "trace-status" => WriteSuccess(Trace.Execute("status")),
+                "trace-session" => await RunTraceSessionAsync(),
                 "diagnostics-export" => WriteSuccess(await DiagnosticsExportAsync(args[1..])),
                 "auth-status" => WriteSuccess(await AuthStatusAsync()),
                 "auth-bundle-inspect" => WriteSuccess(await AuthBundleInspectAsync(args[1..])),
@@ -139,6 +143,8 @@ internal static class Program
             new { name = "respond", description = "Run a typed streamed Responses request.", syntax = "respond --model <id> --input <text> [--file <path>]... [--web-search]" },
             new { name = "responses-raw", description = "Run an arbitrary SIWC Responses body.", syntax = "responses-raw --model <id> [--body <json>]; stdin is used when --body is omitted" },
             new { name = "codex-rpc", description = "Invoke one Codex app-server RPC.", syntax = "codex-rpc --method <name> [--params <json>]" },
+            new { name = "trace-status", description = "Read this process's metadata trace status; capture starts OFF." },
+            new { name = "trace-session", description = "Run persistent JSON-line automation commands: trace status/start/stop/read/export and owned respond/responses-raw/codex-rpc actions." },
             new { name = "stdio", description = "Serve line-delimited JSON-RPC 2.0 for agent clients with sessionful Codex events." }
         },
         auth_boundary = "Interactive authorization is completed by a human through the GUI. Machine shells reuse the same protected local credential store."
@@ -175,6 +181,7 @@ internal static class Program
             "doctor/read",
             "diagnostics/read",
             "diagnostics/export",
+            "trace/status", "trace/start", "trace/stop", "trace/read", "trace/export",
             "auth/status",
             "auth/bundle/inspect",
             "auth/export",
@@ -546,7 +553,7 @@ internal static class Program
 
         var credential = await RequireCredentialAsync();
 
-        var result = await new ResponsesClient().StreamAsync(
+        var result = await TracedResponses.StreamAsync(
             credential.AccessToken,
             model,
             input,
@@ -578,7 +585,7 @@ internal static class Program
             throw new MachineException(2, "USAGE", "Provide --body <json> or JSON on stdin.");
 
         var credential = await RequireCredentialAsync();
-        var result = await new ResponsesClient().StreamRawAsync(
+        var result = await TracedResponses.StreamRawAsync(
             credential.AccessToken,
             model,
             raw);
@@ -607,7 +614,7 @@ internal static class Program
             parameters = document.RootElement.Clone();
         }
 
-        await using var client = await CodexAppServerClient.StartAsync(credential.AccessToken);
+        await using var client = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding);
         var result = await client.RequestAsync(method, parameters);
         return new
         {
@@ -616,6 +623,36 @@ internal static class Program
             method,
             result
         };
+    }
+
+    private static async Task<int> RunTraceSessionAsync()
+    {
+        while (await Console.In.ReadLineAsync() is { } line)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                var operation = root.GetProperty("operation").GetString();
+                var parameters = root.TryGetProperty("params", out var p) ? p : (JsonElement?)null;
+                var arguments = root.TryGetProperty("arguments", out var a)
+                    ? a.EnumerateArray().Select(value => value.GetString() ?? "").ToArray() : Array.Empty<string>();
+                object result = operation switch
+                {
+                    "status" or "start" or "stop" or "read" or "export" => Trace.Execute(operation, parameters),
+                    "respond" => await RespondAsync(arguments),
+                    "responses-raw" when Option(arguments, "--body") is not null => await RawResponsesAsync(arguments),
+                    "codex-rpc" => await CodexRpcAsync(arguments),
+                    _ => throw new UnauthorizedAccessException("Trace-session operation refused.")
+                };
+                await WriteRpcLineAsync(new { ok = true, value = result });
+            }
+            catch
+            {
+                await WriteRpcLineAsync(new { ok = false, error = new { code = "TRACE_COMMAND_REFUSED", message = "Local trace command failed or was refused." } });
+            }
+        }
+        return 0;
     }
 
     private static async Task<int> RunStdioAsync()
@@ -692,6 +729,11 @@ internal static class Program
             "siwc/catalog" => ReadCatalog("siwc-capability-surface-20261001.json"),
             "doctor/read" => await DoctorAsync(),
             "diagnostics/read" => DogfoodObservability.Describe(),
+            "trace/status" => Trace.Execute("status", parameters),
+            "trace/start" => Trace.Execute("start", parameters),
+            "trace/stop" => Trace.Execute("stop", parameters),
+            "trace/read" => Trace.Execute("read", parameters),
+            "trace/export" => Trace.Execute("export", parameters),
             "diagnostics/export" => await RpcDiagnosticsExportAsync(parameters),
             "auth/status" => await AuthStatusAsync(),
             "auth/bundle/inspect" => await RpcAuthBundleInspectAsync(parameters),
@@ -1073,7 +1115,7 @@ internal static class Program
 
         await StopAgentResponsesAsync();
         var credential = await RequireCredentialAsync();
-        _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(credential.AccessToken);
+        _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(credential.AccessToken, trace: Trace.Binding);
         _agentResponsesCts = new CancellationTokenSource();
         var socket = _agentResponsesSocket;
         var token = _agentResponsesCts.Token;
@@ -1242,7 +1284,7 @@ internal static class Program
 
         await StopAgentCodexAsync();
         var credential = await RequireCredentialAsync();
-        _agentCodex = await CodexAppServerClient.StartAsync(credential.AccessToken);
+        _agentCodex = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding);
         _agentCodexCts = new CancellationTokenSource();
         _agentCodexEvents = _agentCodex.SubscribeEvents();
         var subscription = _agentCodexEvents;

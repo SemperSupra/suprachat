@@ -12,8 +12,9 @@ namespace SupraChat;
 public partial class MainWindow : Window
 {
     private readonly SiwcClient _siwc = new();
-    private readonly ResponsesClient _responses = new();
-    private readonly SupraChatCore _core = new();
+    private readonly LocalTraceController _trace = new();
+    private readonly ResponsesClient _responses;
+    private readonly SupraChatCore _core;
     private readonly List<ResponseAttachment> _attachments = new();
     private readonly Queue<CodexProtocolEvent> _pendingServerRequests = new();
 
@@ -32,7 +33,10 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _responses = new ResponsesClient(_trace.Binding);
+        _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
+        ShowTrace("status");
         LoadCapabilityCatalog();
         Opened += async (_, _) =>
         {
@@ -943,7 +947,7 @@ public partial class MainWindow : Window
             await EnsureCredentialAsync();
             await StopResponsesWebSocketAsync();
 
-            _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken);
+            _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken, trace: _trace.Binding);
             _responsesWebSocketCts = new CancellationTokenSource();
             var socket = _responsesWebSocket;
             var cancellationToken = _responsesWebSocketCts.Token;
@@ -975,7 +979,7 @@ public partial class MainWindow : Window
 
             if (_responsesWebSocket is not { IsConnected: true })
             {
-                _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken);
+                _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken, trace: _trace.Binding);
                 _responsesWebSocketCts = new CancellationTokenSource();
                 var socket = _responsesWebSocket;
                 var cancellationToken = _responsesWebSocketCts.Token;
@@ -1509,7 +1513,7 @@ public partial class MainWindow : Window
             return _codex;
 
         await StopCodexAsync();
-        _codex = await CodexAppServerClient.StartAsync(_credential!.AccessToken);
+        _codex = await CodexAppServerClient.StartAsync(_credential!.AccessToken, trace: _trace.Binding);
 
         _codexEventsCts = new CancellationTokenSource();
         _codexEvents = _codex.SubscribeEvents();
@@ -1689,6 +1693,20 @@ public partial class MainWindow : Window
         return text.Length <= 2000 ? text : text[..2000] + "…";
     }
 
+    private void TraceStart_Click(object? sender, RoutedEventArgs e) => ShowTrace("start");
+    private void TraceStop_Click(object? sender, RoutedEventArgs e) => ShowTrace("stop");
+    private void TraceRead_Click(object? sender, RoutedEventArgs e) => ShowTrace("read");
+    private void TraceExport_Click(object? sender, RoutedEventArgs e) => ShowTrace("export");
+
+    private void ShowTrace(string operation)
+    {
+        var result = _trace.Execute(operation);
+        TraceStatus.Text = $"Capture {result.GetProperty("mode").GetString()} · " +
+            $"gaps {result.GetProperty("capture_gap").GetBoolean()} · " +
+            $"recorder failures {result.GetProperty("recorder_failures").GetInt64()} · process-local metadata";
+        TraceOutput.Text = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+    }
+
     private static string MimeTypeFor(string name) => Path.GetExtension(name).ToLowerInvariant() switch
     {
         ".png" => "image/png",
@@ -1731,6 +1749,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _trace.Dispose();
         try
         {
             _windowsCompanionHotkey?.Dispose();

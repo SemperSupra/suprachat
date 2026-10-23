@@ -82,6 +82,7 @@ internal static class TrafficTraceChecks
             observation with { ByteCount = -1 }, observation with { SourceSequence = -1 },
             observation with { LatencyMilliseconds = double.NaN }, observation with { LatencyMilliseconds = double.PositiveInfinity },
             observation with { Status = 600 }, observation with { EventKind = (TraceEventKind)999 },
+            observation with { Outcome = (TraceOutcome)999 },
             observation with { RequestId = new string('x', 513) }
         }) Check(!trace.TryObserve(first, invalid), "Invalid metadata accepted.");
         Check(trace.Read(first).CaptureGap, "Rejected observations silently disappeared.");
