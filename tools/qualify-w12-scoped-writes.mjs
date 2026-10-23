@@ -256,7 +256,7 @@ try{
   assert.equal(recoveredView.connected,true);
   assert.deepEqual(new Set(recoveredView.sessions.map(s=>s.id)),new Set([sidA,sidB]));
   const recoveredLedger=(await request('/v1/sessions')).payload;
-  assert(recoveredLedger.events.some(e=>e.kind==='revoke-own-grant' &&
+  assert(recoveredLedger.events.some(e=>e.operation==='revoke-own-grant' &&
     e.sessionId===sidA));
   record('durable-revocations-survive-restart-and-same-actor-can-retry-with-new-grant');
 
