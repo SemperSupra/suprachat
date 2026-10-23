@@ -85,6 +85,8 @@ public static class SessionLedgerHost
             address = "127.0.0.1",
             port, audience_identity_authenticated = false,
             durable_recovery_available = durableStore is not null,
+            synthetic_storage_only = durableStore is not null,
+            production_durable_admission = false,
             chat_submission_allowed = false,
             terminal_execution_allowed = false
         }));
@@ -135,6 +137,8 @@ public static class SessionLedgerHost
             authenticated_audience_identity = false,
             cross_process_transport_available = true,
             persistent_recovery_available = durableStore is not null,
+            synthetic_storage_only = durableStore is not null,
+            production_durable_admission = false,
             provider_prompt_submission_available = false
         }));
         Console.Out.Flush();
