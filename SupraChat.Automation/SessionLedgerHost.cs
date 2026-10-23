@@ -145,7 +145,7 @@ public static class SessionLedgerHost
                     grant is null ? body.IdempotencyKey! :
                         ScopeOperationKey(grant.ActorId!, body.IdempotencyKey!),
                     grant?.Audience ?? body.Audience!, body.Title!,
-                    body.ConversationUrl, body.WorkspaceKey));
+                    body.ConversationUrl, body.WorkspaceKey, grant?.GrantId));
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
             catch (JsonException) { return Results.BadRequest(new {error = "INVALID_JSON"}); }
@@ -168,10 +168,52 @@ public static class SessionLedgerHost
                     grant is null ? body.IdempotencyKey! :
                         ScopeOperationKey(grant.ActorId!, body.IdempotencyKey!),
                     grant?.Audience ?? body.Audience!, body.SessionId!,
-                    body.ExpectedVersion, body.Operation!, body.Value));
+                    body.ExpectedVersion, body.Operation!, body.Value, grant?.GrantId));
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
             catch (JsonException) { return Results.BadRequest(new {error = "INVALID_JSON"}); }
+        });
+
+        // The only W13 revocation API is SELF-revocation of the signed
+        // bearer presented on this request. A different actor's grant ID
+        // cannot be supplied in a body and no common-bearer owner power is
+        // manufactured. Cross-actor owner revocation remains a separate gate.
+        app.MapPost("/v1/grants/revoke-self", async (HttpContext context) =>
+        {
+            if (grantAuthority is null) return Results.NotFound();
+            try
+            {
+                var body = await context.Request.ReadFromJsonAsync<RevokeOwnPayload>();
+                if (body is null || string.IsNullOrWhiteSpace(body.SessionId))
+                    return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
+                var token = context.Request.Headers["X-SupraChat-Actor-Capability"].ToString();
+                var grant = grantAuthority.Validate(token, body.SessionId,
+                    body.SessionId == "create-only" ? "session.create" : "session.mutate",
+                    claimedAudience: body.Audience);
+                if (!grant.Allowed) return ScopedDenied(grant.Status);
+                var changed = ledger.RevokeOwnGrant(
+                    grant.GrantId!, grant.SessionId!, grant.Audience!);
+                return Results.Json(new
+                {
+                    status = changed ? "REVOKED" : "ALREADY_REVOKED",
+                    durable_in_existing_w11_checkpoint = durableStore is not null,
+                    actor_os_identity_verified = false,
+                    owner_cross_actor_revocation_available = false
+                });
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new {error = "INVALID_REVOCATION_METADATA"});
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.Json(new {error = "REVOCATION_CAPACITY_REACHED"},
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest(new {error = "INVALID_JSON"});
+            }
         });
 
         await app.StartAsync().ConfigureAwait(false);
@@ -219,6 +261,7 @@ public static class SessionLedgerHost
             "SESSION_NOT_FOUND" => StatusCodes.Status404NotFound,
             "IDEMPOTENCY_CAPACITY_REACHED" => StatusCodes.Status429TooManyRequests,
             "SESSION_CAPACITY_REACHED" => StatusCodes.Status429TooManyRequests,
+            "GRANT_REVOKED" => StatusCodes.Status403Forbidden,
             _ => StatusCodes.Status409Conflict
         };
         return Results.Json(result, statusCode: status);
@@ -231,4 +274,6 @@ public static class SessionLedgerHost
     public sealed record ChangePayload(
         string? IdempotencyKey, string? Audience, string? SessionId,
         long ExpectedVersion, string? Operation, string? Value);
+
+    public sealed record RevokeOwnPayload(string? SessionId, string? Audience);
 }
