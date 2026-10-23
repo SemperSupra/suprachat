@@ -43,7 +43,7 @@ async function launch(env=envBase){
     host.stdout.on('data',b=>{
       output+=b;
       if(output.includes(token))return fail(new Error('BEARER_IN_OUTPUT'));
-      const line=output.split(/\r?\n/).find(s=>s.startsWith('{"schema":'));
+      const line=output.split(/\r?\n/).slice(0,-1).find(s=>s.startsWith('{"schema":'));
       if(!line)return;
       let receipt;try{receipt=JSON.parse(line)}catch{return fail(new Error('BAD_READY_RECEIPT'))}
       if(receipt.port!==port || receipt.bound_address!=='127.0.0.1' ||
