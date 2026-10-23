@@ -23,6 +23,51 @@ public sealed class SharedSessionLedger
     private readonly Dictionary<string, PriorAction> _operations = new(StringComparer.Ordinal);
     private readonly List<SessionLedgerEvent> _events = new();
     private long _sequence;
+    private readonly Action<SessionLedgerCheckpoint>? _persist;
+
+    /// <summary>
+    /// The W6 default remains ephemeral. Durable authority is opt-in with an
+    /// externally qualified synchronous commit hook; it must never return
+    /// normally after an uncertain durable write. All calls run under _gate.
+    /// </summary>
+    public SharedSessionLedger(SessionLedgerCheckpoint? checkpoint = null,
+        Action<SessionLedgerCheckpoint>? persist = null)
+    {
+        _persist = persist;
+        if (checkpoint is null) return;
+        if (checkpoint.Schema != Schema || checkpoint.Sequence < 0 ||
+            checkpoint.Sessions is null || checkpoint.Operations is null ||
+            checkpoint.Events is null || checkpoint.Sessions.Length > MaxSessions ||
+            checkpoint.Operations.Length > MaxIdempotencyRecords ||
+            checkpoint.Events.Length > MaxEvents)
+            throw new InvalidDataException("INVALID_LEDGER_CHECKPOINT");
+        foreach (var state in checkpoint.Sessions)
+        {
+            if (!Guid.TryParseExact(state.Id, "N", out _) ||
+                state.Version < 0 || state.ChatSubmissionAllowed ||
+                state.TerminalExecutionAllowed || !_sessions.TryAdd(state.Id, state))
+                throw new InvalidDataException("INVALID_LEDGER_SESSION");
+        }
+        foreach (var prior in checkpoint.Operations)
+        {
+            if (string.IsNullOrWhiteSpace(prior.Key) ||
+                prior.Fingerprint.Length != 64 || prior.Outcome.Sequence < 0 ||
+                prior.Outcome.Sequence > checkpoint.Sequence ||
+                prior.Outcome.Schema != Schema ||
+                !_operations.TryAdd(prior.Key, new(prior.Fingerprint, prior.Outcome)))
+                throw new InvalidDataException("INVALID_LEDGER_OPERATION");
+        }
+        long last = 0;
+        foreach (var evt in checkpoint.Events)
+        {
+            if (evt.Sequence <= last || evt.Sequence > checkpoint.Sequence ||
+                !_sessions.ContainsKey(evt.SessionId))
+                throw new InvalidDataException("INVALID_LEDGER_EVENT");
+            _events.Add(evt);
+            last = evt.Sequence;
+        }
+        _sequence = checkpoint.Sequence;
+    }
 
     /// <summary>
     /// Returns first outcome for the same idempotency key + same operation
@@ -150,8 +195,20 @@ public sealed class SharedSessionLedger
     private SessionLedgerResult Cache(string key, string fingerprint, SessionLedgerResult value)
     {
         _operations.Add(key, new(fingerprint, value));
+        // Commit entire session + immutable first outcome before success OR
+        // rejection becomes visible to a caller. Read operations use _gate.
+        // On storage failure the host's persistence hook MUST fail-stop.
+        _persist?.Invoke(CaptureCheckpoint());
         return value;
     }
+
+    private SessionLedgerCheckpoint CaptureCheckpoint() =>
+        new(Schema, _sequence,
+            _sessions.Values.OrderBy(s => s.Id, StringComparer.Ordinal).ToArray(),
+            _operations.OrderBy(x => x.Key, StringComparer.Ordinal)
+                .Select(x => new SessionLedgerCheckpointOperation(x.Key,
+                    x.Value.Fingerprint, x.Value.Outcome)).ToArray(),
+            _events.ToArray());
 
     private static SessionLedgerResult Replay(PriorAction prior, string fingerprint) =>
         prior.Fingerprint == fingerprint
@@ -213,6 +270,14 @@ public sealed class SharedSessionLedger
 
     private sealed record PriorAction(string Fingerprint, SessionLedgerResult Outcome);
 }
+
+public sealed record SessionLedgerCheckpoint(
+    string Schema, long Sequence,
+    SessionLedgerState[] Sessions,
+    SessionLedgerCheckpointOperation[] Operations,
+    SessionLedgerEvent[] Events);
+public sealed record SessionLedgerCheckpointOperation(
+    string Key, string Fingerprint, SessionLedgerResult Outcome);
 
 public sealed record SessionLedgerState(
     string Id, string Title, string? ConversationUrl, string? WorkspaceKey,
