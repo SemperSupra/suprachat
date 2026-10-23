@@ -22,6 +22,7 @@ public sealed class SharedSessionLedger
     private readonly Dictionary<string, SessionLedgerState> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PriorAction> _operations = new(StringComparer.Ordinal);
     private readonly List<SessionLedgerEvent> _events = new();
+    private readonly HashSet<string> _revokedGrants = new(StringComparer.Ordinal);
     private long _sequence;
     private readonly Action<SessionLedgerCheckpoint>? _persist;
 
@@ -39,7 +40,8 @@ public sealed class SharedSessionLedger
             checkpoint.Sessions is null || checkpoint.Operations is null ||
             checkpoint.Events is null || checkpoint.Sessions.Length > MaxSessions ||
             checkpoint.Operations.Length > MaxIdempotencyRecords ||
-            checkpoint.Events.Length > MaxEvents)
+            checkpoint.Events.Length > MaxEvents ||
+            (checkpoint.RevokedGrantIds?.Length ?? 0) > MaxIdempotencyRecords)
             throw new InvalidDataException("INVALID_LEDGER_CHECKPOINT");
         foreach (var state in checkpoint.Sessions)
         {
@@ -66,6 +68,12 @@ public sealed class SharedSessionLedger
             _events.Add(evt);
             last = evt.Sequence;
         }
+        foreach (var grantId in checkpoint.RevokedGrantIds ?? Array.Empty<string>())
+        {
+            if (!Guid.TryParseExact(grantId, "N", out _) ||
+                !_revokedGrants.Add(grantId))
+                throw new InvalidDataException("INVALID_REVOKED_GRANT_CHECKPOINT");
+        }
         _sequence = checkpoint.Sequence;
     }
 
@@ -75,7 +83,8 @@ public sealed class SharedSessionLedger
     /// Keys are global across all audience labels to prevent cross-actor reuse.
     /// </summary>
     public SessionLedgerResult Open(string idempotencyKey, string audience,
-        string title, string? conversationUrl = null, string? workspaceKey = null)
+        string title, string? conversationUrl = null, string? workspaceKey = null,
+        string? signedGrantId = null)
     {
         ValidateIdempotencyKey(idempotencyKey);
         ValidateAudience(audience);
@@ -85,6 +94,11 @@ public sealed class SharedSessionLedger
         var fingerprint = Fingerprint("open", audience, null, 0, title, normalizedUrl, workspace);
         lock (_gate)
         {
+            // This denial and the eventual mutation share ONE synchronization
+            // gate with revocation: no revoked grant can slip between a
+            // middleware check and a successful metadata operation.
+            if (signedGrantId is not null && _revokedGrants.Contains(signedGrantId))
+                return new(Schema, false, false, "GRANT_REVOKED", null, _sequence);
             if (_operations.TryGetValue(idempotencyKey, out var prior))
                 return Replay(prior, fingerprint);
             if (_operations.Count >= MaxIdempotencyRecords)
@@ -109,7 +123,8 @@ public sealed class SharedSessionLedger
     /// The first failure for a key is also immutable across retries.
     /// </summary>
     public SessionLedgerResult Change(string idempotencyKey, string audience,
-        string sessionId, long expectedVersion, string operation, string? value)
+        string sessionId, long expectedVersion, string operation, string? value,
+        string? signedGrantId = null)
     {
         ValidateIdempotencyKey(idempotencyKey);
         ValidateAudience(audience);
@@ -129,6 +144,8 @@ public sealed class SharedSessionLedger
         var fingerprint = Fingerprint(operation, audience, sessionId, expectedVersion, normalized);
         lock (_gate)
         {
+            if (signedGrantId is not null && _revokedGrants.Contains(signedGrantId))
+                return new(Schema, false, false, "GRANT_REVOKED", null, _sequence);
             if (_operations.TryGetValue(idempotencyKey, out var previous))
                 return Replay(previous, fingerprint);
             if (_operations.Count >= MaxIdempotencyRecords)
@@ -152,6 +169,37 @@ public sealed class SharedSessionLedger
             return Cache(idempotencyKey, fingerprint,
                 new(Schema, true, false, "APPLIED", next, _sequence));
         }
+    }
+
+    /// <summary>
+    /// Research-only self-revocation, called after host verifies the signed
+    /// token for THIS actor and session. Shares the mutation lock and the
+    /// SAME W11 durability checkpoint; no separate revocation store.
+    /// </summary>
+    public bool RevokeOwnGrant(string grantId, string sessionId, string audience)
+    {
+        if (!Guid.TryParseExact(grantId, "N", out _))
+            throw new ArgumentException("INVALID_SIGNED_GRANT_ID");
+        ValidateAudience(audience);
+        lock (_gate)
+        {
+            if (_revokedGrants.Contains(grantId)) return false;
+            if (_revokedGrants.Count >= MaxIdempotencyRecords)
+                throw new InvalidOperationException("REVOCATION_CAPACITY_REACHED");
+            if (sessionId != "create-only" && !_sessions.ContainsKey(sessionId))
+                throw new ArgumentException("UNKNOWN_REVOCATION_SESSION");
+            _revokedGrants.Add(grantId);
+            if (sessionId != "create-only")
+                AppendEvent(sessionId, audience, "revoke-own-grant",
+                    _sessions[sessionId].Version);
+            _persist?.Invoke(CaptureCheckpoint());
+            return true;
+        }
+    }
+
+    public bool IsGrantRevoked(string grantId)
+    {
+        lock (_gate) return _revokedGrants.Contains(grantId);
     }
 
     public SessionLedgerState? Inspect(string sessionId)
@@ -208,7 +256,8 @@ public sealed class SharedSessionLedger
             _operations.OrderBy(x => x.Key, StringComparer.Ordinal)
                 .Select(x => new SessionLedgerCheckpointOperation(x.Key,
                     x.Value.Fingerprint, x.Value.Outcome)).ToArray(),
-            _events.ToArray());
+            _events.ToArray(),
+            _revokedGrants.OrderBy(id => id, StringComparer.Ordinal).ToArray());
 
     private static SessionLedgerResult Replay(PriorAction prior, string fingerprint) =>
         prior.Fingerprint == fingerprint
@@ -275,7 +324,8 @@ public sealed record SessionLedgerCheckpoint(
     string Schema, long Sequence,
     SessionLedgerState[] Sessions,
     SessionLedgerCheckpointOperation[] Operations,
-    SessionLedgerEvent[] Events);
+    SessionLedgerEvent[] Events,
+    string[]? RevokedGrantIds = null);
 public sealed record SessionLedgerCheckpointOperation(
     string Key, string Fingerprint, SessionLedgerResult Outcome);
 
