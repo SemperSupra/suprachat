@@ -1,0 +1,45 @@
+name: Qualify W7 managed SQLite store
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.Automation/ManagedDurableLedger.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.Automation/SupraChat.Automation.csproj'
+      - 'tools/qualify-w7-managed-store.mjs'
+      - '.github/workflows/qualify-w7-managed-store.yml'
+permissions:
+  contents: read
+jobs:
+  managed-store-crash-recovery:
+    if: github.head_ref == 'feat/38-w7-managed-sqlite-store-20261023'
+    name: Managed WAL first-outcome receipts ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build managed .NET SQLite store
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Execute owned synthetic C# WAL subprocess fault injection
+        run: node tools/qualify-w7-managed-store.mjs
+      - name: Enforce absent W6 host, provider and user persistence authority
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw 'SupraChat.Automation/ManagedDurableLedger.cs'
+          if ($source -notmatch 'SUPRACHAT_W7_DISPOSABLE_ONLY' -or
+              $source -notmatch 'synchronous=FULL' -or
+              $source -notmatch 'BeginTransaction' -or
+              $source -notmatch 'suprachat-w7-owned-' -or
+              $source -match 'HttpClient|ChatGptSend|Process.Start') {
+            throw 'W7_RESEARCH_STORE_AUTHORITY_OR_DURABILITY_DRIFT'
+          }
+          Write-Host 'W7 owned research-only durable transaction guard PASS'

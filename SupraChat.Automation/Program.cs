@@ -50,6 +50,10 @@ internal static class Program
                 "workbench-contract" => WriteSuccess(SessionWorkbench.DescribeContract()),
                 "terminal-lifecycle-contract" => WriteSuccess(WorkbenchTerminalSupervisor.DescribeCapabilities()),
                 "session-ledger-contract" => WriteSuccess(SharedSessionLedger.DescribeContract()),
+                "w7-lab-create" => WriteSuccess(CreateW7Lab(Option(args[1..], "--db"))),
+                "w7-lab-open" => WriteSuccess(await RunW7LabAsync(Option(args[1..], "--db"), "open")),
+                "w7-lab-change" => WriteSuccess(await RunW7LabAsync(Option(args[1..], "--db"), "change")),
+                "w7-lab-inspect" => WriteSuccess(ReadW7Lab(Option(args[1..], "--db"))),
                 "session-ledger-host" => await RunSessionLedgerHostAsync(args[1..]),
                 "session-ledger-list" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "list")),
@@ -120,6 +124,10 @@ internal static class Program
             new { name = "workbench-contract", description = "Describe multi-session/paired-terminal and explicit transfer-preview W0 semantics without executing any operation.", syntax = "workbench-contract" },
             new { name = "terminal-lifecycle-contract", description = "Read W3 process-lifecycle caps and limitations without launching a child; machine read-only.", syntax = "terminal-lifecycle-contract" },
             new { name = "session-ledger-contract", description = "Read W5 atomic session ledger core limits; no durable recovery.", syntax = "session-ledger-contract" },
+            new { name = "w7-lab-create", description = "Research-only create disposable SQLite ledger; requires explicit environment admission.", syntax = "w7-lab-create --db <owned-absolute-file.sqlite3>" },
+            new { name = "w7-lab-open", description = "Research-only durable metadata create from JSON stdin; no live host integration.", syntax = "w7-lab-open --db <owned-file> < synthetic-request.json" },
+            new { name = "w7-lab-change", description = "Research-only durable CAS metadata change from JSON stdin.", syntax = "w7-lab-change --db <owned-file> < synthetic-request.json" },
+            new { name = "w7-lab-inspect", description = "Inspect research-only durable synthetic ledger without creating any store.", syntax = "w7-lab-inspect --db <owned-file>" },
             new { name = "session-ledger-host", description = "Explicitly start a token-protected loopback-only ephemeral W6 session coordinator. Uses SUPRACHAT_LEDGER_TOKEN process environment.", syntax = "session-ledger-host --port <1024-65535>" },
             new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
@@ -1517,6 +1525,40 @@ internal static class Program
         }
         return await SessionLedgerClient.RequestAsync(ParseLedgerPort(
             port.ToString(CultureInfo.InvariantCulture)), operation, request);
+    }
+
+    private static object CreateW7Lab(string? db)
+    {
+        using var store = new ManagedDurableLedger(db ?? string.Empty, create: true);
+        return new {schema=ManagedDurableLedger.StoreSchema, created=true,
+            provider_submission_allowed=false, integrated_w6_host=false,
+            actor_identity_authenticated=false};
+    }
+
+    private static object ReadW7Lab(string? db)
+    {
+        using var store = new ManagedDurableLedger(db ?? string.Empty, create: false);
+        return store.InspectAll();
+    }
+
+    private static async Task<object> RunW7LabAsync(string? db, string operation)
+    {
+        if (string.IsNullOrWhiteSpace(db))throw new ArgumentException("W7_DB_PATH_REQUIRED");
+        var input = await Console.In.ReadToEndAsync();
+        if (input.Length is < 1 or > 4096)
+            throw new ArgumentException("W7_SYNTHETIC_PAYLOAD_SIZE_REFUSED");
+        using var document = JsonDocument.Parse(input);
+        var root = document.RootElement;
+        string Require(string property) => root.GetProperty(property).GetString()
+            ?? throw new ArgumentException("W7_REQUEST_FIELD_REQUIRED");
+        using var store = new ManagedDurableLedger(db,create:false);
+        return operation == "open"
+            ? store.Open(Require("key"),Require("actor"),Require("title"),
+                root.TryGetProperty("conversationUrl",out var url) ? url.GetString():null,
+                root.TryGetProperty("workspaceKey",out var ws) ? ws.GetString():null)
+            : store.Change(Require("key"),Require("actor"),Require("sessionId"),
+                root.GetProperty("expectedVersion").GetInt64(),Require("operation"),
+                root.TryGetProperty("value",out var value)?value.GetString():null);
     }
 
     private static string? Option(string[] args, string name)
