@@ -128,7 +128,7 @@ internal static class Program
             new { name = "w7-lab-open", description = "Research-only durable metadata create from JSON stdin; no live host integration.", syntax = "w7-lab-open --db <owned-file> < synthetic-request.json" },
             new { name = "w7-lab-change", description = "Research-only durable CAS metadata change from JSON stdin.", syntax = "w7-lab-change --db <owned-file> < synthetic-request.json" },
             new { name = "w7-lab-inspect", description = "Inspect research-only durable synthetic ledger without creating any store.", syntax = "w7-lab-inspect --db <owned-file>" },
-            new { name = "session-ledger-host", description = "Explicitly start a token-protected loopback-only ephemeral W6 session coordinator. Uses SUPRACHAT_LEDGER_TOKEN process environment.", syntax = "session-ledger-host --port <1024-65535>" },
+            new { name = "session-ledger-host", description = "Explicitly start loopback W6 ephemeral host; optional --w7-lab-db requires research-only owned existing SQLite store and environment admission. Uses SUPRACHAT_LEDGER_TOKEN.", syntax = "session-ledger-host --port <1024-65535> [--w7-lab-db <owned-absolute-file.sqlite3>]" },
             new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
             new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
@@ -1494,7 +1494,8 @@ internal static class Program
 
     private static async Task<int> RunSessionLedgerHostAsync(string[] args)
     {
-        await SessionLedgerHost.RunAsync(ParseLedgerPort(Option(args, "--port")));
+        await SessionLedgerHost.RunAsync(ParseLedgerPort(Option(args, "--port")),
+            Option(args, "--w7-lab-db"));
         return 0;
     }
 
