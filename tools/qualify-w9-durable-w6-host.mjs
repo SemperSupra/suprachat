@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtemp, rm, writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, unlink, mkdir, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,8 @@ async function launch(env=envBase){
       let receipt;try{receipt=JSON.parse(line)}catch{return fail(new Error('BAD_READY_RECEIPT'))}
       if(receipt.port!==port || receipt.bound_address!=='127.0.0.1' ||
          receipt.persistent_recovery_available!==true ||
+         receipt.synthetic_storage_only!==true ||
+         receipt.production_durable_admission!==false ||
          receipt.authenticated_audience_identity!==false)
         return fail(new Error('UNSAFE_OR_MISSING_DURABILITY_DESCRIPTOR'));
       if(!complete){complete=true;clearTimeout(t);resolve();}
@@ -147,6 +149,8 @@ try{
   const health=await request('/v1/health');
   assert.equal(health.status,200);
   assert.equal(health.body.durable_recovery_available,true);
+  assert.equal(health.body.synthetic_storage_only,true);
+  assert.equal(health.body.production_durable_admission,false);
   assert.equal(health.body.audience_identity_authenticated,false);
   assert.equal((await request('/v1/sessions','GET',undefined,null)).status,401);
   assert.equal((await request('/v1/sessions','GET',undefined,'wrong')).status,401);
@@ -274,12 +278,21 @@ try{
   await refuseStore('repeat-create-denied',{SUPRACHAT_W9_CREATE_ONCE:'yes'});
   await refuseStore('opt-in-required',{SUPRACHAT_W9_DISPOSABLE_ONLY:'no'});
   const nested=path.join(temp,'unowned-directory');
-  await (await import('node:fs/promises')).mkdir(nested);
+  await mkdir(nested);
   await refuseStore('unowned-parent-denied',{
     SUPRACHAT_LEDGER_STORE:path.join(nested,'synthetic.sqlite'),
     SUPRACHAT_W9_CREATE_ONCE:'yes'});
   await refuseStore('missing-original-without-create-denied',{
     SUPRACHAT_LEDGER_STORE:path.join(temp,'nonexistent.sqlite')});
+  if(process.platform!=='win32'){
+    const broad=path.join(temp,'suprachat-w9-owned-overpermissive');
+    await mkdir(broad);
+    await chmod(broad,0o755);
+    await refuseStore('nonprivate-posix-directory-denied',{
+      SUPRACHAT_LEDGER_STORE:path.join(broad,'synthetic.sqlite'),
+      SUPRACHAT_W9_CREATE_ONCE:'yes'});
+    record('posix-world-readable-directory-refused');
+  }
   // Losing the original database is not equivalent to a new empty genesis.
   await unlink(store);
   await refuseStore('missing-previous-store-no-silent-reset',{});
