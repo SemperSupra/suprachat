@@ -53,6 +53,9 @@ internal static class Program
                 "session-ledger-host" => await RunSessionLedgerHostAsync(args[1..]),
                 "session-ledger-list" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "list")),
+                "session-ledger-view" => WriteSuccess(await SharedSessionInventoryReader.ObserveAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")),
+                    Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"))),
                 "session-ledger-open" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
                 "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
@@ -122,6 +125,7 @@ internal static class Program
             new { name = "session-ledger-contract", description = "Read W5 atomic session ledger core limits; no durable recovery.", syntax = "session-ledger-contract" },
             new { name = "session-ledger-host", description = "Explicitly start a token-protected loopback-only ephemeral W6 session coordinator. Uses SUPRACHAT_LEDGER_TOKEN process environment.", syntax = "session-ledger-host --port <1024-65535>" },
             new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
+            new { name = "session-ledger-view", description = "Read the same bounded unbound host inventory core used by the desktop Sessions interface; no writes.", syntax = "session-ledger-view --port <host-port>" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
             new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
@@ -192,6 +196,7 @@ internal static class Program
             "terminal/lifecycle/read",
             "session/ledger/read",
             "session/ledger/list",
+            "session/ledger/view",
             "session/ledger/open",
             "session/ledger/change",
             "accessibility/read",
@@ -718,6 +723,7 @@ internal static class Program
             "terminal/lifecycle/read" => WorkbenchTerminalSupervisor.DescribeCapabilities(),
             "session/ledger/read" => SharedSessionLedger.DescribeContract(),
             "session/ledger/list" => await RpcLedgerAsync(parameters, "list"),
+            "session/ledger/view" => await RpcLedgerViewAsync(parameters),
             "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
             "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
             "accessibility/read" => Accessibility(),
@@ -1499,6 +1505,18 @@ internal static class Program
         if (document.RootElement.ValueKind != JsonValueKind.Object)
             throw new MachineException(2, "INVALID_PARAMS", "Metadata JSON request must be an object.");
         return document.RootElement.Clone();
+    }
+
+    private static async Task<object> RpcLedgerViewAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        if (!p.TryGetProperty("port", out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var port))
+            throw new MachineException(2, "INVALID_PARAMS", "Shared host port required.");
+        return await SharedSessionInventoryReader.ObserveAsync(
+            ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)),
+            Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
     }
 
     private static async Task<object> RpcLedgerAsync(JsonElement? parameters, string operation)

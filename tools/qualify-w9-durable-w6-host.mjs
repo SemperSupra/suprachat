@@ -43,7 +43,7 @@ async function launch(env=envBase){
     host.stdout.on('data',b=>{
       output+=b;
       if(output.includes(token))return fail(new Error('BEARER_IN_OUTPUT'));
-      const line=output.split(/\r?\n/).find(s=>s.startsWith('{"schema":'));
+      const line=output.split(/\r?\n/).slice(0,-1).find(s=>s.startsWith('{"schema":'));
       if(!line)return;
       let receipt;try{receipt=JSON.parse(line)}catch{return fail(new Error('BAD_READY_RECEIPT'))}
       if(receipt.port!==port || receipt.bound_address!=='127.0.0.1' ||
@@ -84,6 +84,34 @@ async function request(route,method='GET',payload,provided=token,origin=null){
     assert(!body.includes(token),'BEARER_LEAK');
     return {status:res.status,body:body?JSON.parse(body):null};
   }finally{clearTimeout(t)}
+}
+async function desktopCoreView(){
+  // Calls the exact read-only shared core reader used by Avalonia Sessions,
+  // through its existing machine CLI projection. Never invokes a POST.
+  return await new Promise((resolve,reject)=>{
+    const child=spawn('dotnet',[dll,'session-ledger-view','--port',String(port)],{
+      cwd:root,env:envBase,stdio:['ignore','pipe','pipe'],windowsHide:true});
+    let stdout='',stderr='';
+    const timer=setTimeout(()=>{child.kill();reject(new Error('DESKTOP_READER_TIMEOUT'))},12000);
+    child.stdout.on('data',b=>{stdout+=b;if(stdout.length>150000)child.kill()});
+    child.stderr.on('data',b=>{stderr+=b;if(stderr.length>8000)child.kill()});
+    child.once('error',e=>{clearTimeout(timer);reject(e)});
+    child.once('close',code=>{
+      clearTimeout(timer);
+      if(code!==0)return reject(new Error('DESKTOP_READER_NONZERO_'+code));
+      try{
+        const data=JSON.parse(stdout);
+        assert.equal(data.ok,true);
+        assert.equal(data.value.connected,true);
+        assert.equal(data.value.durable_across_restart,true);
+        assert.equal(data.value.read_only,true);
+        assert.equal(data.value.bound_to_desktop_sessions,false);
+        assert.equal(data.value.actor_identity_authenticated,false);
+        assert.equal(data.value.chat_submission_allowed,false);
+        resolve(data.value);
+      }catch(e){reject(e)}
+    });
+  });
 }
 async function agentRpc(method,payload){
   const req={jsonrpc:'2.0',id:7,method,
@@ -133,7 +161,10 @@ try{
   assert.equal(b.http_status,200);
   const sidB=b.payload.session.id;
   assert.notEqual(sidA,sidB);
+  const uiBefore=await desktopCoreView();
+  assert.deepEqual(new Set(uiBefore.sessions.map(s=>s.id)),new Set([sidA,sidB]));
   record('two-sessions-human-and-agent-open');
+  record('accessible-shared-core-observes-same-live-host-session-ids');
 
   const autoAction=change('w9-auto-change-000000001','automation',sidA,0,'A-auto');
   const agentAction=change('w9-agent-change-00000001','agent',sidA,0,'A-agent');
@@ -172,6 +203,11 @@ try{
   assert.equal(inventory.sessions.length,2);
   assert.equal(inventory.sessions.find(s=>s.id===sidA).version,1);
   assert.equal(inventory.sessions.find(s=>s.id===sidB).version,1);
+  const uiRecovered=await desktopCoreView();
+  assert.deepEqual(new Set(uiRecovered.sessions.map(s=>s.id)),new Set([sidA,sidB]));
+  assert.equal(uiRecovered.sessions.find(s=>s.id===sidA).version,1);
+  assert.equal(uiRecovered.sessions.find(s=>s.id===sidB).version,1);
+  record('accessible-reader-observes-recovered-host-ids-and-revisions');
   const acceptedAgain=await request('/v1/sessions/change','POST',winning);
   assert.equal(acceptedAgain.body.isReplay,true);
   const rejectedAgain=await request('/v1/sessions/change','POST',losing);

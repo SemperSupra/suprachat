@@ -1,0 +1,53 @@
+name: Qualify W6 desktop shared-host inventory
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionInventoryReader.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'tools/qualify-w6-shared-ledger.mjs'
+      - 'tools/qualify-w6-hostile-inventory.mjs'
+      - '.github/workflows/qualify-w6-desktop-inventory.yml'
+permissions:
+  contents: read
+jobs:
+  desktop-cli-agent-same-observer:
+    if: github.head_ref == 'feat/19-w6-desktop-ledger-inventory-20261022' || github.head_ref == 'exp/19-w10-accessible-durable-host-inventory-20261023'
+    name: Desktop shared-host reader cross-process ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build accessible desktop and actual shared-host client
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Qualify session reader fail-closed and accessibility semantics
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Qualify actual host and all desktop CLI agent read-only views
+        run: node tools/qualify-w6-shared-ledger.mjs
+      - name: Hostile localhost reader deadline, schema and authority refusals
+        run: node tools/qualify-w6-hostile-inventory.mjs
+      - name: Refuse desktop writes and arbitrary network destinations
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw 'SupraChat/Core/SharedSessionInventoryReader.cs'
+          if ($source -notmatch 'http://127\.0\.0\.1:' -or
+              $source -match 'HttpMethod\.Post|HttpMethod\.Put|AllowAutoRedirect = true|UseProxy = true|Process\.Start') {
+            throw 'W6_DESKTOP_READER_GAINED_WRITE_OR_REMOTE_NETWORK_AUTHORITY'
+          }
+          $ui = Get-Content -Raw 'SupraChat/MainWindow.axaml'
+          foreach ($id in 'Sessions.SharedHostRead','Sessions.SharedHostStatus','Sessions.SharedHostInventory') {
+            if ($ui -notmatch [regex]::Escape($id)) { throw "Accessible shared-host control missing: $id" }
+          }
+          Write-Host 'W6 observer host-UI/CLI/agent shared-read authority PASS'

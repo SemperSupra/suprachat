@@ -63,7 +63,7 @@ async function startHost(port) {
       outputSeen+=b;
       if(outputSeen.includes(token))return fail(new Error('HOST_LEAKED_BEARER'));
       if(outputSeen.length>16000)return fail(new Error('HOST_STDOUT_TOO_LARGE'));
-      const line=outputSeen.split(/\r?\n/).find(l=>l.trim().startsWith('{"schema":'));
+      const line=outputSeen.split(/\r?\n/).slice(0,-1).find(l=>l.trim().startsWith('{"schema":'));
       if(line){
         let receipt;
         try {receipt=JSON.parse(line)}catch{return fail(new Error('HOST_READY_INVALID_JSON'))}
@@ -185,6 +185,39 @@ try {
   assert.equal(all.authenticatedAudiences,false);
   assert.equal(all.durableAcrossProcessRestart,false);
   record('simultaneous-independent-session-inventory');
+
+  // Exactly the same SharedSessionInventoryReader is used by the desktop,
+  // CLI and agent JSON-RPC. It observes the running W6 host but cannot write.
+  const desktopCore=await runCli(['session-ledger-view','--port',String(port)]);
+  assert.equal(desktopCore.ok,true);
+  assert.equal(desktopCore.value.schema,'suprachat-w6-desktop-ledger-observer/v1');
+  assert.equal(desktopCore.value.connected,true);
+  assert.equal(desktopCore.value.sessions.length,2);
+  assert.equal(desktopCore.value.bound_to_desktop_sessions,false);
+  assert.equal(desktopCore.value.actor_identity_authenticated,false);
+  assert.equal(desktopCore.value.durable_across_restart,false);
+  assert.equal(desktopCore.value.chat_submission_allowed,false);
+  const actorView=await runCli(['stdio'],JSON.stringify({
+    jsonrpc:'2.0',id:72,method:'session/ledger/view',params:{port}
+  })+'\n');
+  assert.equal(actorView.id,72);
+  assert.equal(actorView.result.schema,desktopCore.value.schema);
+  assert.equal(actorView.result.sequence,desktopCore.value.sequence);
+  assert.equal(actorView.result.sessions.length,2);
+  assert.equal(actorView.result.read_only,true);
+  record('desktop-cli-agent-identical-read-only-shared-host-observer');
+
+  const noTokenEnv=env.SUPRACHAT_LEDGER_TOKEN;
+  try {
+    // Presence/absence of a token is checked before opening a socket.
+    delete env.SUPRACHAT_LEDGER_TOKEN;
+    const denied=await runCli(['session-ledger-view','--port',String(port)]);
+    assert.equal(denied.value.connected,false);
+    assert.equal(denied.value.status,'LEDGER_BEARER_NOT_CONFIGURED');
+  } finally {
+    env.SUPRACHAT_LEDGER_TOKEN=noTokenEnv;
+  }
+  record('desktop-shared-host-no-token-fails-closed');
 
   const invalidReuse=await http(port,'/v1/sessions/open','POST',
     {...openReq,title:'Different payload same key'});
