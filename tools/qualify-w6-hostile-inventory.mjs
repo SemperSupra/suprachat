@@ -34,8 +34,8 @@ const server=createServer((req,res)=>{
   if(fixture.kind==='stall'){
     res.writeHead(200);
     res.write('{"schema":');
-    // Close on client disconnect; leave body incomplete on purpose.
-    req.on('close',()=>res.destroy());
+    // Deliberately leave the response unfinished. The client must
+    // enforce the deadline even AFTER it has received the headers.
   } else if(fixture.kind==='raw'){
     res.writeHead(200);
     res.end(fixture.payload);
