@@ -1,0 +1,43 @@
+name: Qualify W12 signed audience scopes on one W6 host
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.Automation/SessionLedgerHost.cs'
+      - 'SupraChat.Automation/SessionLedgerClient.cs'
+      - 'SupraChat.Automation/W12ScopedGrantAuthority.cs'
+      - 'tools/qualify-w12-scoped-writes.mjs'
+      - '.github/workflows/qualify-w12-scoped-writes.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-signed-writes:
+    name: W12 signed separate-actor host ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build actual shared W6 host and machine clients
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Two-session three-audience scoped write/identity denial/restart
+        run: node tools/qualify-w12-scoped-writes.mjs
+      - name: Existing W11 durable and original W6 ephemeral regression tests
+        run: node tools/qualify-w9-durable-w6-host.mjs
+      - name: Enforce no real provider authority or secret output
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw SupraChat.Automation/W12ScopedGrantAuthority.cs
+          foreach ($term in @('HttpClient', 'WebSocket', 'Process.Start', 'AccessToken')) {
+            if ($source.Contains($term)) { throw "W12 authority creep: $term" }
+          }
+          Write-Host 'W12 no-provider boundary PASS'
