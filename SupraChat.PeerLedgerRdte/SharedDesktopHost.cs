@@ -24,6 +24,12 @@ internal sealed class SharedDesktopHost : IDisposable
     private readonly TraceNormalizer _trace = new();
     private readonly string[] _sessions;
     private readonly LocalTraceSession[] _traceCaps;
+    private readonly MetadataCaptureConsent? _consent;
+    private readonly MetadataConsentBinding[]? _consentBindings;
+    private readonly object[] _consentViews = [new(), new()];
+    private readonly ConsentClock _consentTime = new();
+    private int _consentAllowed, _consentCancelled, _consentFirstPartyRefused, _consentViewsChanged, _consentExpired;
+    public bool ConsentEnabled => _consent is not null;
     private readonly string[] _ownerGrants;
     private readonly string[] _peerGrants;
     private readonly CancellationTokenSource _closing = new(TimeSpan.FromSeconds(90));
@@ -35,7 +41,7 @@ internal sealed class SharedDesktopHost : IDisposable
     public bool ClientsComplete { get; private set; }
     public bool AgentRevoked { get; private set; }
 
-    public SharedDesktopHost()
+    public SharedDesktopHost(bool requireConsent = false)
     {
         using var material = _custody.InitializeIssuer();
         _issuer = material.CreateAuthority();
@@ -44,15 +50,66 @@ internal sealed class SharedDesktopHost : IDisposable
         _sessions = new[] { "Session A", "Session B" }.Select((title, i) =>
             _ledger.Open("shared-lab-open-session-" + i, "automation", title).Session!.Id).ToArray();
         _traceCaps = _sessions.Select(id => _trace.CreateSession(Guid.ParseExact(id, "N"))).ToArray();
+        if (requireConsent)
+        {
+            _consent = new(_trace, _consentTime);
+            _consentBindings = _traceCaps.Select((cap, i) => _consent.Register(cap, _consentViews[i])).ToArray();
+        }
         _ownerGrants = _sessions.Select(id => _issuer.Issue("local-owner-fixture", "automation", id,
             ["session.read", "session.mutate"], TimeSpan.FromMinutes(2))).ToArray();
         _peerGrants = _sessions.Select((id, i) => _issuer.Issue(i == 0 ? "automation-fixture" : "agent-fixture",
             i == 0 ? "automation" : "agent", id, ["session.read", "session.mutate"], TimeSpan.FromMinutes(2))).ToArray();
         foreach (var cap in _traceCaps)
         {
+            if (requireConsent) continue;
             _trace.SetCapture(cap, TraceCaptureMode.Metadata);
             _trace.TryObserve(cap, new(TraceSurface.Synthetic, TraceAdapter.Fixture, TraceDirection.Local, TraceEventKind.Request));
         }
+    }
+
+    private sealed class ConsentClock : TimeProvider
+    {
+        private readonly long _started = TimeProvider.System.GetTimestamp();
+        private long _offset;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => TimeProvider.System.GetElapsedTime(_started).Ticks + Interlocked.Read(ref _offset);
+        public override DateTimeOffset GetUtcNow() => TimeProvider.System.GetUtcNow().AddTicks(Interlocked.Read(ref _offset));
+        public void Expire() => Interlocked.Add(ref _offset, TimeSpan.FromMinutes(3).Ticks);
+    }
+
+    private T WithConsent<T>(int index, Func<MetadataCaptureConsent, MetadataConsentBinding, T> action, bool write = false)
+    {
+        var result = _ledger.InspectProjectionAdmitted(_sessions[index], () => OwnerAdmission(index, write ? "session.mutate" : "session.read"),
+            _ => action(_consent ?? throw new InvalidOperationException("CONSENT_MODE_REQUIRED"), _consentBindings![index]));
+        if (result.Admission.Status != "OBSERVED") throw new UnauthorizedAccessException("CONSENT_OWNER_REFUSED");
+        return result.Projection!;
+    }
+    public MetadataConsentStatus ConsentStatus(int index) => WithConsent(index, (c, b) => c.Status(b));
+    public bool ConsentReviewPending(int index, MetadataConsentPlan plan) => WithConsent(index, (c, b) => c.IsPending(b, plan));
+    public MetadataConsentPlan ConsentPreview(int index, bool firstParty = false) => WithConsent(index, (c, b) =>
+    {
+        var plan = c.Preview(b, firstParty ? MetadataConsentScope.FirstPartyMetadata : MetadataConsentScope.SyntheticMetadata);
+        if (firstParty && !plan.Review.Available) _consentFirstPartyRefused++;
+        return plan;
+    });
+    public void ConsentCancel(int index, MetadataConsentPlan plan) => WithConsent(index, (c, _) => { c.CancelPreview(plan); _consentCancelled++; return true; });
+    public MetadataConsentResult ConsentConfirm(int index, MetadataConsentPlan plan, bool reviewed) => WithConsent(index, (c, b) =>
+    {
+        var result = c.Confirm(b, plan, reviewed); if (result.Outcome == "ALLOWED") _consentAllowed++;
+        return result;
+    }, write: true);
+    public void ConsentStop(int index) => WithConsent(index, (c, b) => { c.Stop(b); return true; }, write: true);
+    public bool ConsentEmit(int index) => WithConsent(index, (c, b) => c.TryObserve(b, _consentViews[index],
+        new(TraceSurface.Synthetic, TraceAdapter.Fixture, TraceDirection.Local, TraceEventKind.Request)));
+    public void ConsentReplaceView(int index) => WithConsent(index, (c, b) =>
+    {
+        var next = new object(); c.ReplaceView(b, _consentViews[index], next); _consentViews[index] = next;
+        _consentViewsChanged++; return true;
+    }, write: true);
+    public void ConsentExpire()
+    {
+        _consentTime.Expire();
+        for (var i = 0; i < 2; i++) if (ConsentStatus(i).State == "EXPIRED") _consentExpired++;
     }
 
     private W9DurableSessionStore OpenStore(bool create)
@@ -133,8 +190,9 @@ internal sealed class SharedDesktopHost : IDisposable
             // A non-authority welcome supplies synthetic IDs/revision; no grant or principal is accepted from the child.
             var initial = Read(index);
             await Program.WriteFrameAsync(pipe, JsonSerializer.SerializeToUtf8Bytes(new
-            { session_id = _sessions[index], other_session_id = _sessions[1 - index], version = initial.Version }), timeout.Token);
+            { session_id = _sessions[index], other_session_id = _sessions[1 - index], version = initial.Version, consent_protocol = ConsentEnabled }), timeout.Token);
             var methods = revoke ? new[] { "session/revoke-self", "session/inspect" } :
+                ConsentEnabled ? new[] { "session/inspect", "session/change", "trace/read", "session/inspect", "consent/status" } :
                 new[] { "session/inspect", "session/change", "trace/read", "session/inspect" };
             for (var n = 0; n < methods.Length; n++)
             {
@@ -154,10 +212,12 @@ internal sealed class SharedDesktopHost : IDisposable
                     return new(grant.Allowed, grant.ActorId, grant.Audience, grant.SessionId, grant.GrantId);
                 }
                 Reply reply;
-                if (methods[n] == "trace/read")
+                if (methods[n] is "trace/read" or "consent/status")
                 {
                     var projection = _ledger.InspectProjectionAdmitted(request.SessionId, Admit,
-                        session => new Reply("OBSERVED", session.Version, _ledger.InspectAll().Sequence, TraceCount(index, session.Id)));
+                        session => new Reply(methods[n] == "consent/status" ?
+                            (_consent!.Status(_consentBindings![index]).CaptureActive ? "CONSENT_ACTIVE" : "CONSENT_OFF") : "OBSERVED",
+                            session.Version, _ledger.InspectAll().Sequence, TraceCount(index, session.Id)));
                     reply = projection.Projection ?? new(projection.Admission.Status, -1, -1, 0);
                 }
                 else
@@ -166,7 +226,7 @@ internal sealed class SharedDesktopHost : IDisposable
                     reply = new(result.Status, result.Session?.Version ?? -1, result.Sequence, 0);
                 }
                 var expected = revoke ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
-                    n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : "OBSERVED";
+                    n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : n == 4 ? "CONSENT_OFF" : "OBSERVED";
                 if (reply.Status != expected) throw new InvalidOperationException("LAB_PROTOCOL_OUTCOME_REFUSED");
                 var response = audience == "agent"
                     ? JsonSerializer.SerializeToUtf8Bytes(new { jsonrpc = "2.0", id = envelope.Id, result = reply }, WireOptions)
@@ -191,7 +251,9 @@ internal sealed class SharedDesktopHost : IDisposable
         var session = welcome.RootElement.GetProperty("session_id").GetString()!;
         var other = welcome.RootElement.GetProperty("other_session_id").GetString()!;
         var version = welcome.RootElement.GetProperty("version").GetInt64();
+        var consentProtocol = welcome.RootElement.GetProperty("consent_protocol").GetBoolean();
         var methods = mode == "revoke" ? new[] { "session/revoke-self", "session/inspect" } :
+            consentProtocol ? new[] { "session/inspect", "session/change", "trace/read", "session/inspect", "consent/status" } :
             new[] { "session/inspect", "session/change", "trace/read", "session/inspect" };
         for (var n = 0; n < methods.Length; n++)
         {
@@ -209,7 +271,7 @@ internal sealed class SharedDesktopHost : IDisposable
             }
             var reply = result.Deserialize<Reply>(WireOptions)!;
             var expected = mode == "revoke" ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
-                n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : "OBSERVED";
+                n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : n == 4 ? "CONSENT_OFF" : "OBSERVED";
             if (reply.Status != expected || mode == "mutate" && n is 1 or 2 && reply.Version != version + 1) return 72;
         }
         return 0;
@@ -230,12 +292,20 @@ internal sealed class SharedDesktopHost : IDisposable
             recoveredRead.Admission.Status != "GRANT_REVOKED" || copied ||
             after[0].Version < 2 || after[1].Version != 1 || after.Any(p => p.TraceEvents != 1))
             throw new InvalidOperationException("LAB_RECOVERY_REFUSED");
+        var consent = ConsentEnabled ? new[] { ConsentStatus(0), ConsentStatus(1) } : null;
+        if (consent is not null && (consent.Any(s => s.CaptureActive || s.RetainedEvents != 1) ||
+            consent.Sum(s => s.RefusedObservations) < 5 || _consentAllowed != 3 || _consentCancelled < 1 ||
+            _consentFirstPartyRefused < 1 || _consentViewsChanged < 1 || _consentExpired < 1))
+            throw new InvalidOperationException("CONSENT_LAB_INCOMPLETE");
         return new
         {
             shared_sessions = 2, gui_mutations = GuiMutations, enrolled_peer_runs = _peers,
             automation_and_agent_protocols = true, wrong_session_refused = true, revoked_read_refused = true,
             versions = after.Select(p => p.Version).ToArray(), common_cursor = after.Select(p => p.Cursor).Distinct().Count() == 1,
-            durable_revocation_recovered = true, metadata_recovered = true, trace_session_routing = true
+            durable_revocation_recovered = true, metadata_recovered = true, trace_session_routing = true,
+            consent = consent is null ? null : new { synthetic_only = true, stopped = true, preview_cancelled = true,
+                view_invalidated = true, lease_expired = true, first_party_refused = true, reviewed_starts = _consentAllowed,
+                refused_observations = consent.Sum(s => s.RefusedObservations), machine_status_agrees = true }
         };
     }
 
@@ -244,6 +314,6 @@ internal sealed class SharedDesktopHost : IDisposable
         _closing.Cancel();
         try { if (!Task.WaitAll(_workers.ToArray(), TimeSpan.FromSeconds(5))) Environment.Exit(78); }
         catch (AggregateException) { /* Failed workers are terminal; their finally blocks drained their owned children. */ }
-        _store.Dispose(); _issuer.Dispose(); _trace.Dispose(); _custody.Dispose(); _closing.Dispose();
+        _store.Dispose(); _issuer.Dispose(); _consent?.Dispose(); _trace.Dispose(); _custody.Dispose(); _closing.Dispose();
     }
 }

@@ -27,6 +27,7 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) return 64;
+        if (args.Length == 2 && args[0] == "--metadata-consent-receipt") return SharedDesktopLab.Run(args[1], requireConsent: true);
         if (args.Length == 2 && args[0] == "--shared-desktop-receipt") return SharedDesktopLab.Run(args[1]);
         if (args.Length == 4 && args[0] == "--shared-client")
         {
