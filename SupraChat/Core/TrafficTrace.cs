@@ -143,13 +143,18 @@ public sealed class TraceNormalizer : ITraceSink, IDisposable
         _maxSessions = maxSessions;
     }
 
-    public LocalTraceSession CreateSession()
+    public LocalTraceSession CreateSession() => CreateSession(Guid.NewGuid());
+
+    /// <summary>Owner-only composition with an existing authoritative session ID. The ID alone grants no access.</summary>
+    public LocalTraceSession CreateSession(Guid authoritativeSessionId)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_sessions.Count >= _maxSessions) throw new InvalidOperationException("Trace session limit reached.");
-            var capability = new LocalTraceSession(Guid.NewGuid());
+            if (authoritativeSessionId == Guid.Empty || _sessions.ContainsKey(authoritativeSessionId))
+                throw new ArgumentException("Invalid or duplicate trace session.");
+            var capability = new LocalTraceSession(authoritativeSessionId);
             _sessions.Add(capability.SessionId, new SessionState(capability));
             return capability;
         }
