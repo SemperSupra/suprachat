@@ -29,3 +29,39 @@ if ($traceAgentResults[0].result.mode -ne 'OFF' -or $traceAgentResults[1].result
     throw 'Trace agent state/scope/authority refusal failed.'
 }
 'Owned trace CLI/agent semantic controls PASS (synthetic; no credentials).'
+$controlCommands = @(
+    '{"operation":"streams"}',
+    '{"operation":"control/preview","params":{"action":"modify_first_party","stream_id":"00000000-0000-0000-0000-000000000000","action_key":"11111111-1111-1111-1111-111111111111","expected_revision":0}}',
+    '{"operation":"control/apply","params":{"plan_id":"00000000-0000-0000-0000-000000000000","action_key":"11111111-1111-1111-1111-111111111111","expected_revision":0,"confirmed":true}}'
+)
+$controlResults = @($controlCommands | & $DotNet $traceCli trace-session | ForEach-Object { $_ | ConvertFrom-Json })
+if ($LASTEXITCODE -ne 0 -or $controlResults.Count -ne 3 -or $controlResults[0].value.streams.Count -ne 0 -or
+    $controlResults[1].value.outcome -ne 'REFUSED' -or $controlResults[1].value.reason -ne 'OPERATION_UNAVAILABLE' -or
+    $controlResults[2].value.outcome -ne 'REFUSED' -or $controlResults[2].value.provider_stop_verified) {
+    throw 'Owned control automation denial contract failed.'
+}
+$controlRpcCommands = @(
+    '{"jsonrpc":"2.0","id":1,"method":"trace/streams"}',
+    '{"jsonrpc":"2.0","id":2,"method":"control/preview","params":{"action":"capture_payload"}}',
+    '{"jsonrpc":"2.0","id":3,"method":"control/preview","params":{"actor_principal":"forged"}}'
+)
+$controlRpcResults = @($controlRpcCommands | & $DotNet $traceCli stdio | ForEach-Object { $_ | ConvertFrom-Json })
+if ($LASTEXITCODE -ne 0 -or $controlRpcResults.Count -ne 3 -or $controlRpcResults[0].result.streams.Count -ne 0 -or
+    $controlRpcResults[1].result.outcome -ne 'REFUSED' -or !$controlRpcResults[2].error) {
+    throw 'Owned control agent denial contract failed.'
+}
+'Owned control CLI/agent denial contracts PASS (no provider actions).'
+$framingCommands = @(
+    '{"operation":"responses-raw","arguments":["--model","synthetic","--body"," "]}',
+    '{"operation":"streams"}',
+    '{"operation":"status"}'
+)
+$framingResults = @($framingCommands | & $DotNet $traceCli trace-session | ForEach-Object { $_ | ConvertFrom-Json })
+if ($LASTEXITCODE -ne 0 -or $framingResults.Count -ne 4 -or
+    @($framingResults | Where-Object { $_.accepted }).Count -ne 1 -or
+    @($framingResults | Where-Object { $_.error.code -eq 'TRACE_COMMAND_REFUSED' }).Count -ne 1 -or
+    @($framingResults | Where-Object { $_.value.authority -eq 'SINGLE_OPERATOR_PROCESS_LOCAL' }).Count -ne 1 -or
+    @($framingResults | Where-Object { $_.value.operation -eq 'status' }).Count -ne 1) {
+    throw 'Rejected raw body consumed or blocked persistent control input.'
+}
+'Persistent control input survives whitespace raw-body rejection PASS.'

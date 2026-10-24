@@ -20,14 +20,16 @@ public sealed class ResponsesClient
 {
     private readonly HttpClient _http;
     private readonly OwnedTransportTrace? _trace;
+    private readonly LocalOwnedStreamControls? _controls;
 
-    public ResponsesClient(OwnedTransportTrace? trace = null) : this(new HttpClient(), trace) { }
+    public ResponsesClient(OwnedTransportTrace? trace = null, LocalOwnedStreamControls? controls = null) : this(new HttpClient(), trace, controls) { }
 
-    internal ResponsesClient(HttpClient http, OwnedTransportTrace? trace)
+    internal ResponsesClient(HttpClient http, OwnedTransportTrace? trace, LocalOwnedStreamControls? controls = null)
     {
         _http = http;
         _http.BaseAddress = new Uri("https://api.openai.com/v1/");
         _trace = trace;
+        _controls = controls;
     }
 
     public async Task<IReadOnlyList<ModelChoice>> ListModelsAsync(string accessToken)
@@ -83,31 +85,34 @@ public sealed class ResponsesClient
         string input,
         IEnumerable<ResponseAttachment>? attachments = null,
         bool enableWebSearch = false,
-        Action<string>? onDelta = null) =>
+        Action<string>? onDelta = null,
+        CancellationToken cancellationToken = default) =>
         await SendStreamAsync(
             accessToken,
             SiwcProtocol.BuildResponsesBody(model, input, attachments, enableWebSearch),
             onDelta,
-            onEvent: null).ConfigureAwait(false);
+            onEvent: null, cancellationToken).ConfigureAwait(false);
 
     public Task<StreamedResponse> StreamTextAsync(
         string accessToken,
         string model,
         string input,
-        Action<string>? onDelta = null) =>
-        StreamAsync(accessToken, model, input, null, false, onDelta);
+        Action<string>? onDelta = null,
+        CancellationToken cancellationToken = default) =>
+        StreamAsync(accessToken, model, input, null, false, onDelta, cancellationToken);
 
     public Task<StreamedResponse> StreamRawAsync(
         string accessToken,
         string defaultModel,
         string rawJson,
         Action<string>? onDelta = null,
-        Action<string, string>? onEvent = null) =>
+        Action<string, string>? onEvent = null,
+        CancellationToken cancellationToken = default) =>
         SendStreamAsync(
             accessToken,
             NormalizeRawResponsesBody(rawJson, defaultModel),
             onDelta,
-            onEvent);
+            onEvent, cancellationToken);
 
     public static string NormalizeRawResponsesBody(string rawJson, string defaultModel)
     {
@@ -128,9 +133,13 @@ public sealed class ResponsesClient
         string accessToken,
         string body,
         Action<string>? onDelta,
-        Action<string, string>? onEvent)
+        Action<string, string>? onEvent,
+        CancellationToken cancellationToken)
     {
-        var traceId = Guid.NewGuid().ToString("N");
+        await using var controlled = _controls?.Register(TraceSurface.ResponsesSse);
+        using var linked = controlled is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, controlled.Token);
+        cancellationToken = linked?.Token ?? cancellationToken;
+        var traceId = controlled?.StreamId.ToString("N") ?? Guid.NewGuid().ToString("N");
         _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Egress, TraceEventKind.Request,
             traceId, Encoding.UTF8.GetByteCount(body), outcome: TraceOutcome.Requested);
         try
@@ -139,7 +148,7 @@ public sealed class ResponsesClient
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Ingress,
                 TraceEventKind.Response, traceId, status: (int)response.StatusCode);
             var requestId = response.Headers.TryGetValues("x-request-id", out var ids)
@@ -148,17 +157,17 @@ public sealed class ResponsesClient
 
             if (!response.IsSuccessStatusCode)
             {
-                var responseBody = await response.Content.ReadAsStringAsync();
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 throw BuildHttpFailure("Responses request", response, responseBody);
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync();
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(stream);
             var text = new StringBuilder();
             var completed = false;
             var eventTypes = new HashSet<string>(StringComparer.Ordinal);
 
-            while (await reader.ReadLineAsync() is { } line)
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
             {
                 if (!line.StartsWith("data:", StringComparison.Ordinal))
                     continue;

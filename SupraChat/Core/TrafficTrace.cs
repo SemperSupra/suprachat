@@ -173,6 +173,11 @@ public sealed class TraceNormalizer : ITraceSink, IDisposable
         lock (_gate) return Authorize(session).Mode == TraceCaptureMode.Metadata;
     }
 
+    internal string StreamAlias(LocalTraceSession session, string id)
+    {
+        lock (_gate) { Authorize(session); return Alias(session.SessionId, "stream", id)!; }
+    }
+
     public bool TryObserve(LocalTraceSession session, TraceObservation observation)
     {
         lock (_gate)

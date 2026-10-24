@@ -504,6 +504,23 @@
                      AutomationProperties.AutomationId="Trace.Output" AutomationProperties.Name="Sanitized transport metadata JSON" />
             <Separator Margin="0,12,0,8" />
 
+            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Owned stream cancellation"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="2"
+                       AutomationProperties.AutomationId="Control.Heading" />
+            <ComboBox x:Name="OwnedStreamsBox" SelectionChanged="OwnedStreamSelectionChanged"
+                      AutomationProperties.AutomationId="Control.Streams" AutomationProperties.Name="Active owned stream" />
+            <WrapPanel>
+              <Button Content="Refresh owned streams" Click="OwnedStreamsRefresh_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Control.Refresh" AutomationProperties.HelpText="List this window's active Responses and Codex streams." />
+              <Button Content="Preview cancellation" Click="OwnedControlPreview_Click" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Control.Preview" AutomationProperties.HelpText="Review the selected stream and its current revision before cancellation." />
+              <Button x:Name="OwnedControlConfirm" Content="Confirm local cancellation" Click="OwnedControlConfirm_Click" IsEnabled="False" Margin="0,0,8,8"
+                      AutomationProperties.AutomationId="Control.Confirm" AutomationProperties.HelpText="Apply the reviewed local cancellation once; remote stop is not verified." />
+            </WrapPanel>
+            <TextBlock x:Name="OwnedControlStatus" Text="Refresh owned streams to select a cancellation target." TextWrapping="Wrap"
+                       AutomationProperties.AutomationId="Control.Status" AutomationProperties.Name="Owned stream control status"
+                       AutomationProperties.LiveSetting="Polite" />
             <TextBlock FontSize="18" FontWeight="SemiBold" Text="Accessibility"
                        AutomationProperties.ControlTypeOverride="Header"
                        AutomationProperties.HeadingLevel="2"

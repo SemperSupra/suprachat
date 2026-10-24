@@ -1115,13 +1115,27 @@ jobs:
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
+                $script:uiaTransientRetries = 0
                 function Require-SemanticControl([string]$automationId) {
+                Write-Host "UIA semantic lookup: $automationId"
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
-                $element = $window.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $idCondition)
+                $element = $null
+                $semanticDeadline = (Get-Date).AddSeconds(3)
+                do {
+                  try {
+                    $element = $window.FindFirst(
+                      [System.Windows.Automation.TreeScope]::Descendants,
+                      $idCondition)
+                  }
+                  catch {
+                    if ($_.Exception.InnerException -and $_.Exception.InnerException.HResult -eq -2147418113) {
+                      $script:uiaTransientRetries++
+                    } else { throw }
+                  }
+                  if (-not $element) { Start-Sleep -Milliseconds 100 }
+                } while (-not $element -and (Get-Date) -lt $semanticDeadline)
                 if (-not $element) {
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
@@ -1141,7 +1155,7 @@ jobs:
                 }
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
@@ -1150,6 +1164,12 @@ jobs:
                     $null = Require-SemanticControl $automationId
                   }
                   if ($area.tab -eq 'Tab.AutomationAgents') {
+                    $ownedRefresh = Require-SemanticControl 'Control.Refresh'
+                    $ownedRefresh.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $ownedPreview = Require-SemanticControl 'Control.Preview'
+                    $ownedPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $ownedConfirm = Require-SemanticControl 'Control.Confirm'
+                    if ($ownedConfirm.Current.IsEnabled) { throw 'Owned cancellation was enabled without a selected, reviewed target.' }
                     foreach ($traceControl in @(
                       @{ id = 'Trace.Start'; mode = 'METADATA' },
                       @{ id = 'Trace.Stop'; mode = 'OFF' }
@@ -1179,6 +1199,7 @@ jobs:
                   root_class = $window.Current.ClassName
                   descendant_count = $allDescendants.Count
                   semantic_peer_count = $semanticPeers.Count
+                  transient_lookup_retries = $script:uiaTransientRetries
                   static_accessibility_contract = 'PASS'
                   gui_launch_smoke = 'PASS'
                 }
