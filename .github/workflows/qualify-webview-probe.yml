@@ -4,6 +4,7 @@ on:
     paths:
       - 'SupraChat.WebViewProbe/**'
       - 'SupraChat/Core/WindowsWebViewTraceAdapter.cs'
+      - 'SupraChat/Core/LocalTraceController.cs'
       - 'SupraChat/Core/TrafficTrace.cs'
       - 'tools/local/Test-SupraChatWebViewProbe.ps1'
       - '.github/workflows/qualify-webview-probe.yml'

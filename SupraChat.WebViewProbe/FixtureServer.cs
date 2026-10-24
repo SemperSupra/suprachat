@@ -17,6 +17,7 @@ internal sealed class FixtureServer : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _firstChunkAcks = new();
     public Uri Origin { get; }
     public string Nonce { get; } = Guid.NewGuid().ToString("N");
+    public Uri? ForeignRedirectTarget { get; set; }
 
     public FixtureServer()
     {
@@ -49,6 +50,21 @@ internal sealed class FixtureServer : IAsyncDisposable
             context.Response.Headers["Cache-Control"] = "no-store";
             switch (route)
             {
+                case "redirect-page":
+                    context.Response.ContentType = "text/html";
+                    context.Response.Headers["Content-Security-Policy"] =
+                        $"default-src 'none'; script-src 'unsafe-inline'; connect-src 'self' {ForeignRedirectTarget?.GetLeftPart(UriPartial.Authority)}";
+                    await WriteAsync(context, "<!doctype html><title>redirect-pending</title><script>fetch('redirect').then(async r=>{await r.text();document.title=r.status===201?'redirect-complete':'fixture-failed'}).catch(()=>document.title='fixture-failed')</script>");
+                    break;
+                case "redirect":
+                    if (ForeignRedirectTarget is null) { context.Response.StatusCode = 404; break; }
+                    context.Response.Redirect(ForeignRedirectTarget.AbsoluteUri);
+                    break;
+                case "foreign":
+                    context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+                    context.Response.StatusCode = 201;
+                    await WriteAsync(context, "synthetic-foreign-origin");
+                    break;
                 case "page":
                     context.Response.ContentType = "text/html";
                     context.Response.Headers["Content-Security-Policy"] =

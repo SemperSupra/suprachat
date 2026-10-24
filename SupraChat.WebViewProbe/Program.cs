@@ -5,6 +5,7 @@ using Avalonia.Platform;
 using System.Text.Json;
 using System.Runtime.CompilerServices;
 using SupraChat.Core;
+using Microsoft.Web.WebView2.Core;
 
 namespace SupraChat.WebViewProbe;
 
@@ -182,13 +183,44 @@ internal sealed class ProbeApp : Application
             try { await WindowsWebViewTraceAdapter.AttachSyntheticAsync(scopeHandle.CoreWebView2, scopeTrace, scopeSession, new Uri("https://chatgpt.com/")); }
             catch (UnauthorizedAccessException) { firstPartyRefused = true; }
             Require(wrongSessionRefused && firstPartyRefused);
+            phase = "native-domain-ownership";
             using var scopeOwner = new LocalTraceController();
             scopeOwner.Execute("start");
             await using var scopeAdapter = await scopeOwner.AttachSyntheticNativeAsync(scopeHandle.CoreWebView2, server.Origin);
+            Require(scopeOwner.Execute("status").GetProperty("browser_capture").GetBoolean());
+            var duplicateRefused = false;
+            try { await scopeOwner.AttachSyntheticNativeAsync(scopeHandle.CoreWebView2, server.Origin); }
+            catch (UnauthorizedAccessException) { duplicateRefused = true; }
+            Require(duplicateRefused);
+            scopeOwner.Dispose();
+            Require(scopeAdapter.IsStopped);
+            await scopeAdapter.DisposeAsync(); // Wait for the native domain to be released before replacement.
+            using var replacementOwner = new LocalTraceController();
+            replacementOwner.Execute("start");
+            await using var replacement = await replacementOwner.AttachSyntheticNativeAsync(scopeHandle.CoreWebView2, server.Origin);
+            await scopeAdapter.DisposeAsync(); // Repeated old disposal must not disable the replacement.
+            var scopeCore = CoreWebView2.CreateFromComICoreWebView2(scopeHandle.CoreWebView2);
+            phase = "cross-origin-redirect-revocation";
+            await using var foreignServer = new FixtureServer();
+            server.ForeignRedirectTarget = new Uri(foreignServer.Origin, $"{foreignServer.Nonce}/a/observed/foreign");
+            views[2].Navigate(new Uri(server.Origin, $"{server.Nonce}/a/observed/redirect-page"));
+            var redirectDeadline = DateTime.UtcNow.AddSeconds(8);
+            while (scopeCore.DocumentTitle != "redirect-complete" && DateTime.UtcNow < redirectDeadline) await Task.Delay(40);
+            Require(scopeCore.DocumentTitle == "redirect-complete");
+            await Task.Delay(200);
+            var redirectTrace = replacementOwner.Execute("read");
+            Require(foreignServer.Count("a", "observed", "foreign") == 1);
+            Require(replacement.ObservedEvents > 0 && replacement.DroppedObservations > 0);
+            Require(redirectTrace.GetProperty("page").GetProperty("events").EnumerateArray().Any(e =>
+                e.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Number && status.GetInt32() == 200));
+            Require(!redirectTrace.GetProperty("page").GetProperty("events").EnumerateArray().Any(e =>
+                e.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Number && status.GetInt32() == 201));
+            phase = "navigation-scope-exit";
             views[2].Navigate(new Uri("data:text/html,synthetic-scope-exit"));
             var scopeDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (!scopeAdapter.IsStopped && DateTime.UtcNow < scopeDeadline) await Task.Delay(40);
-            Require(scopeAdapter.IsStopped && scopeAdapter.DroppedObservations > 0 && scopeOwner.Execute("read").GetProperty("capture_gap").GetBoolean());
+            while (!replacement.IsStopped && DateTime.UtcNow < scopeDeadline) await Task.Delay(40);
+            Require(replacement.IsStopped && replacementOwner.Execute("read").GetProperty("capture_gap").GetBoolean());
+            Require(!replacementOwner.Execute("status").GetProperty("browser_capture").GetBoolean());
 
             passed = true;
             phase = "verified";
@@ -207,6 +239,10 @@ internal sealed class ProbeApp : Application
                 typed_events = sharedAdapters.Select(a => a.ObservedEvents).ToArray(),
                 typed_loss = sharedAdapters.Sum(a => a.DroppedObservations),
                 scope_exit_detached = scopeAdapter.IsStopped,
+                duplicate_domain_owner_refused = duplicateRefused,
+                controller_disposal_detached = scopeAdapter.IsStopped,
+                repeated_old_disposal_preserved_replacement = true,
+                foreign_redirect_revoked = true,
                 wrong_session_refused = wrongSessionRefused,
                 first_party_admission_refused = firstPartyRefused,
                 sessions = observers.Select((observer, index) => new { session = index, counts = observer.Counts }).ToArray()

@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 
@@ -9,8 +10,10 @@ namespace SupraChat.Core;
 /// This class has no signed-in ChatGPT attachment or arbitrary CDP-command API.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
+public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceObserver
 {
+    private static readonly object OwnersGate = new();
+    private static readonly Dictionary<IntPtr, WindowsWebViewTraceAdapter> Owners = new();
     private readonly CoreWebView2 _core;
     private readonly ITraceSink _sink;
     private readonly LocalTraceSession _session;
@@ -19,6 +22,9 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
     private readonly List<(CoreWebView2DevToolsProtocolEventReceiver Receiver,
         EventHandler<CoreWebView2DevToolsProtocolEventReceivedEventArgs> Handler)> _subscriptions = new();
     private bool _stopped;
+    private IntPtr _identity;
+    private Task? _enableTask;
+    private Task? _releaseTask;
     public long DroppedObservations { get; private set; }
     public long ObservedEvents { get; private set; }
     public bool IsStopped => _stopped;
@@ -39,6 +45,19 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
         if (current != "about:blank" && (!Uri.TryCreate(current, UriKind.Absolute, out var currentUri) || !SameOrigin(currentUri, origin)))
             throw new UnauthorizedAccessException("Native observer requires a blank or owned synthetic view.");
         var adapter = new WindowsWebViewTraceAdapter(core, sink, session, origin);
+        var unknown = new Guid("00000000-0000-0000-C000-000000000046");
+        if (Marshal.QueryInterface(nativeHandle, in unknown, out var identity) < 0 || identity == IntPtr.Zero)
+            throw new InvalidOperationException("Native identity unavailable.");
+        lock (OwnersGate)
+        {
+            if (Owners.ContainsKey(identity) || Owners.Count >= 16)
+            {
+                Marshal.Release(identity);
+                throw new UnauthorizedAccessException("Native observation domain already owned or capacity reached.");
+            }
+            adapter._identity = identity;
+            Owners.Add(identity, adapter);
+        }
         try
         {
             foreach (var kind in new[] { "requestWillBeSent", "responseReceived", "dataReceived", "loadingFinished", "loadingFailed",
@@ -50,8 +69,9 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
                 adapter._subscriptions.Add((receiver, handler));
             }
             core.NavigationStarting += adapter.NavigationStarting;
-            await core.CallDevToolsProtocolMethodAsync("Network.enable",
-                "{\"maxTotalBufferSize\":65536,\"maxResourceBufferSize\":16384,\"maxPostDataSize\":0}").WaitAsync(TimeSpan.FromSeconds(5));
+            adapter._enableTask = core.CallDevToolsProtocolMethodAsync("Network.enable",
+                "{\"maxTotalBufferSize\":65536,\"maxResourceBufferSize\":16384,\"maxPostDataSize\":0}");
+            await adapter._enableTask.WaitAsync(TimeSpan.FromSeconds(5));
             return adapter;
         }
         catch
@@ -64,6 +84,13 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
 
     private static bool SameOrigin(Uri value, Uri origin) => value.Scheme == origin.Scheme &&
         value.Host == origin.Host && value.Port == origin.Port && value.UserInfo.Length == 0;
+
+    private bool Admits(Uri uri) => SameOrigin(uri, _origin) ||
+        (uri.Scheme == (_origin.Scheme == "https" ? "wss" : "ws") && uri.Host == _origin.Host && uri.Port == _origin.Port && uri.UserInfo.Length == 0);
+    private void RevokeRequest(string id)
+    {
+        if (_requests.Remove(id)) Gap();
+    }
 
     private void NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args)
     {
@@ -91,15 +118,20 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
             if (name is "requestWillBeSent" or "webSocketCreated")
             {
                 var url = name == "requestWillBeSent" ? root.GetProperty("request").GetProperty("url").GetString() : root.GetProperty("url").GetString();
-                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) { Gap(); return; }
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) { RevokeRequest(id); Gap(); return; }
                 // WebSocket schemes share the admitted fixture host/port, never an inferred conversation.
-                var accepted = SameOrigin(uri, _origin) ||
-                    (uri.Scheme == (_origin.Scheme == "https" ? "wss" : "ws") && uri.Host == _origin.Host && uri.Port == _origin.Port && uri.UserInfo.Length == 0);
-                if (!accepted) return;
+                if (!Admits(uri)) { RevokeRequest(id); return; }
                 if (_requests.Count >= 256 && !_requests.Contains(id)) { Gap(); return; }
                 _requests.Add(id);
             }
             if (!_requests.Contains(id)) return;
+            if (name == "responseReceived")
+            {
+                var response = root.GetProperty("response");
+                if (!response.TryGetProperty("url", out var responseUrl) || responseUrl.ValueKind != JsonValueKind.String ||
+                    !Uri.TryCreate(responseUrl.GetString(), UriKind.Absolute, out var responseUri) || !Admits(responseUri))
+                { RevokeRequest(id); return; }
+            }
             var kind = name switch
             {
                 "requestWillBeSent" or "webSocketCreated" => TraceEventKind.Request,
@@ -133,6 +165,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
         DroppedObservations++;
         Emit(new TraceObservation(TraceSurface.Synthetic, TraceAdapter.WebView2, TraceDirection.Local, TraceEventKind.CaptureGap));
     }
+    public void StopObserving() => Stop();
     private void Stop()
     {
         if (_stopped) return;
@@ -142,11 +175,32 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable
             try { subscription.Receiver.DevToolsProtocolEventReceived -= subscription.Handler; } catch { Gap(); }
         _subscriptions.Clear();
         _requests.Clear();
+        _releaseTask ??= ReleaseDomainAsync();
+    }
+    private async Task ReleaseDomainAsync()
+    {
+        try
+        {
+            if (_enableTask is not null) { try { await _enableTask; } catch { Gap(); } }
+            try { await _core.CallDevToolsProtocolMethodAsync("Network.disable", "{}"); } catch { Gap(); }
+        }
+        finally
+        {
+            lock (OwnersGate)
+            {
+                if (_identity != IntPtr.Zero)
+                {
+                    Owners.Remove(_identity);
+                    Marshal.Release(_identity);
+                    _identity = IntPtr.Zero;
+                }
+            }
+        }
     }
     public async ValueTask DisposeAsync()
     {
         Stop();
-        try { await _core.CallDevToolsProtocolMethodAsync("Network.disable", "{}").WaitAsync(TimeSpan.FromSeconds(5)); }
-        catch { Gap(); }
+        try { if (_releaseTask is not null) await _releaseTask.WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch { Gap(); } // Pending disable retains exclusive ownership until the command actually settles.
     }
 }

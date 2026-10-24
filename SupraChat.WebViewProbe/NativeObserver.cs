@@ -24,13 +24,15 @@ internal sealed class NativeObserver : IDisposable
     public bool FixtureFailed => _core.DocumentTitle == "fixture-failed";
     public string RuntimeVersion => _core.Environment.BrowserVersionString;
     public bool CompareResources { get; }
+    private readonly bool _ownsNetworkDomain;
 
-    public NativeObserver(IntPtr handle, Uri origin, string nonce, string session, bool compareResources = true)
+    public NativeObserver(IntPtr handle, Uri origin, string nonce, string session, bool compareResources = true, bool ownsNetworkDomain = false)
     {
         _origin = origin;
         _pathPrefix = $"/{nonce}/{session}/observed/";
         _core = CoreWebView2.CreateFromComICoreWebView2(handle);
         CompareResources = compareResources;
+        _ownsNetworkDomain = ownsNetworkDomain;
     }
 
     public async Task AttachAsync()
@@ -50,7 +52,7 @@ internal sealed class NativeObserver : IDisposable
             _core.WebResourceResponseReceived += OnResourceResponse;
             _resourceAttached = true;
         }
-        await _core.CallDevToolsProtocolMethodAsync("Network.enable", "{}").WaitAsync(TimeSpan.FromSeconds(5));
+        if (_ownsNetworkDomain) await _core.CallDevToolsProtocolMethodAsync("Network.enable", "{}").WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     private string? Route(string url)
@@ -123,7 +125,7 @@ internal sealed class NativeObserver : IDisposable
     public async Task DetachAsync()
     {
         Dispose();
-        await _core.CallDevToolsProtocolMethodAsync("Network.disable", "{}").WaitAsync(TimeSpan.FromSeconds(5));
+        if (_ownsNetworkDomain) await _core.CallDevToolsProtocolMethodAsync("Network.disable", "{}").WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     public void Dispose()

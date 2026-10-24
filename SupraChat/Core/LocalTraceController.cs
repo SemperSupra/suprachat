@@ -3,11 +3,21 @@ using System.Runtime.Versioning;
 
 namespace SupraChat.Core;
 
+internal interface ILocalTraceObserver
+{
+    bool IsStopped { get; }
+    void StopObserving();
+}
+
 /// <summary>One local operator/process. Never a cross-process actor/session authority.</summary>
 public sealed class LocalTraceController : IDisposable
 {
     private readonly TraceNormalizer _normalizer = new();
     private readonly LocalTraceSession _session;
+    private readonly List<ILocalTraceObserver> _nativeAdapters = new();
+    private readonly object _nativeGate = new();
+    private bool _disposed;
+    private int _pendingNativeAttachments;
     public OwnedTransportTrace Binding { get; }
     public LocalOwnedStreamControls Controls { get; }
 
@@ -19,11 +29,34 @@ public sealed class LocalTraceController : IDisposable
     }
 
     [SupportedOSPlatform("windows")]
-    public Task<WindowsWebViewTraceAdapter> AttachSyntheticNativeAsync(IntPtr handle, Uri origin) =>
-        WindowsWebViewTraceAdapter.AttachSyntheticAsync(handle, _normalizer, _session, origin);
+    public async Task<WindowsWebViewTraceAdapter> AttachSyntheticNativeAsync(IntPtr handle, Uri origin)
+    {
+        lock (_nativeGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _nativeAdapters.RemoveAll(a => a.IsStopped);
+            if (_nativeAdapters.Count + _pendingNativeAttachments >= 16)
+                throw new UnauthorizedAccessException("Native attachment capacity reached.");
+            _pendingNativeAttachments++;
+        }
+        try
+        {
+            var adapter = await WindowsWebViewTraceAdapter.AttachSyntheticAsync(handle, _normalizer, _session, origin);
+            lock (_nativeGate)
+            {
+                if (!_disposed) { _nativeAdapters.Add(adapter); return adapter; }
+            }
+            {
+                await adapter.DisposeAsync();
+                throw new ObjectDisposedException(nameof(LocalTraceController));
+            }
+        }
+        finally { lock (_nativeGate) _pendingNativeAttachments--; }
+    }
 
     public JsonElement Execute(string operation, JsonElement? parameters = null)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         long after = 0;
         var limit = 100;
         Guid streamId = Guid.Empty, planId = Guid.Empty, actionKey = Guid.Empty;
@@ -90,6 +123,8 @@ public sealed class LocalTraceController : IDisposable
         }
 
         var page = _normalizer.Read(_session, after, limit);
+        bool nativeAttached;
+        lock (_nativeGate) nativeAttached = OperatingSystem.IsWindows() && _nativeAdapters.Any(a => !a.IsStopped);
         return JsonSerializer.SerializeToElement(new
         {
             schema = "suprachat-trace-control/v1", operation,
@@ -97,10 +132,26 @@ public sealed class LocalTraceController : IDisposable
             session_id = _session.SessionId, mode = page.Mode,
             recorder_failures = Binding.RecorderFailures,
             capture_gap = page.CaptureGap || Binding.RecorderFailures > 0,
-            payload_capture = false, browser_capture = false, cross_actor_authority = false,
+            payload_capture = false, browser_capture = nativeAttached && page.Mode == TraceCaptureMode.Metadata,
+            browser_observer_attached = nativeAttached,
+            browser_scope = nativeAttached ? "SYNTHETIC_LOOPBACK_ONLY" : "NONE", cross_actor_authority = false,
             page
         }, TraceNormalizer.JsonOptions);
     }
 
-    public void Dispose() { Controls.Dispose(); _normalizer.Dispose(); }
+    public void Dispose()
+    {
+        ILocalTraceObserver[] adapters;
+        lock (_nativeGate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            adapters = _nativeAdapters.ToArray();
+            _nativeAdapters.Clear();
+        }
+        if (OperatingSystem.IsWindows())
+            foreach (var adapter in adapters) adapter.StopObserving();
+        Controls.Dispose();
+        _normalizer.Dispose();
+    }
 }

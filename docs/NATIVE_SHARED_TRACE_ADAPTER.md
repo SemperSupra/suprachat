@@ -34,6 +34,16 @@ See the [official Network.enable contract](https://chromedevtools.github.io/devt
 The adapter requests no response bodies. Recorder exceptions do not propagate into browser event
 callbacks. Calls and disposal belong on the owner WebView UI thread; Avalonia retains native ownership.
 
+An IUnknown identity lease admits one Network-domain owner per native view (at most 16 views).
+Duplicate attachment is refused. Detach removes handlers immediately and releases that lease only
+after the pending enable and subsequent disable settle; a timed-out cleanup retains ownership.
+Repeated disposal cannot disable a replacement observer. Other components that independently issue
+Network.enable/disable on that view are unsupported; the qualification counter is passive and issues
+neither command. Controllers track their adapters, stop them on disposal and report actual attachment
+and metadata capture state, with SYNTHETIC_LOOPBACK_ONLY scope. Cross-origin redirects revoke a
+previously admitted request ID before later response/data events can be attributed to the fixture;
+response URLs are independently checked and revocation reports a gap.
+
 ## Native qualification
 
 The dedicated Windows probe references the actual product assembly. Two fresh InPrivate views emit
@@ -42,6 +52,9 @@ session isolation, request/status metadata, exact body behavior, explicit first-
 secret-sentinel exclusion, zero happy-path loss and no new typed events after detach. A third fresh view
 qualifies wrong-session refusal, first-party admission refusal and automatic gap/detach on an offline
 out-of-scope navigation. No authenticated application window or real provider request is used.
+It also checks duplicate-owner refusal, controller-driven detach, repeated old disposal after
+replacement, and a real redirect to a second loopback origin whose distinctive 201 response must
+never appear in the admitted origin's trace.
 
 ```powershell
 dotnet build SupraChat.WebViewProbe/SupraChat.WebViewProbe.csproj -c Release
