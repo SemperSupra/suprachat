@@ -49,7 +49,8 @@ internal static class Program
         if (receipt.Contains(sid, StringComparison.Ordinal) || receipt.Contains(Sentinel, StringComparison.Ordinal) ||
             receipt.Contains(Environment.MachineName, StringComparison.OrdinalIgnoreCase)) return 72;
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
-        File.WriteAllText(output, receipt);
+        using (var receiptFile = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(receiptFile)) writer.Write(receipt);
         Console.WriteLine(passed ? "Windows OS peer-binding fixture PASS; production identity remains unqualified." : "Windows peer-binding fixture incomplete.");
         return passed ? 0 : 1;
     }
@@ -100,17 +101,24 @@ internal static class Program
                 var allowedFields = request.EnumerateObject().All(p => p.Name is "claimed_pid" or "role");
                 var expectedRole = scenario == "agent" ? "agent" : "automation";
                 var roleMatches = request.TryGetProperty("role", out var role) && role.GetString() == expectedRole;
-                reason = !subjectMatches ? "OS_SUBJECT_REFUSED" : !processBound ? "UNENROLLED_OS_PROCESS" :
+                reason = !impersonationObserved ? "OS_TOKEN_OBSERVATION_REFUSED" : !subjectMatches ? "OS_SUBJECT_REFUSED" : !processBound ? "UNENROLLED_OS_PROCESS" :
                     !allowedFields ? "CLAIMED_AUTHORITY_REFUSED" : !claimedPidMatches ? "CLAIMED_PID_REFUSED" :
                     !roleMatches ? "ROLE_ESCALATION_REFUSED" : "ENROLLED_FIXTURE_PEER";
-                admitted = subjectMatches && processBound && allowedFields && claimedPidMatches && roleMatches;
+                admitted = impersonationObserved && subjectMatches && processBound && allowedFields && claimedPidMatches && roleMatches;
             }
             await WriteFrameAsync(pipe, JsonSerializer.SerializeToUtf8Bytes(new { admitted, reason }), deadline.Token);
             await child.WaitForExitAsync(deadline.Token);
             if (child.ExitCode != 0) throw new InvalidOperationException("Fixture child failed.");
             return new(scenario, processBound, subjectMatches, impersonationObserved, claimedPidMatches, admitted, reason);
         }
-        finally { if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(); } }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3));
+            }
+        }
     }
 
     private static async Task ChildAsync(string name, string scenario)
