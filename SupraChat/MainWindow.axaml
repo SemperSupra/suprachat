@@ -647,6 +647,32 @@
                      MinHeight="70" MaxHeight="180"
                      AutomationProperties.AutomationId="Sessions.SharedHostInventory"
                      AutomationProperties.Name="Unbound and unverified shared host session metadata list" />
+            <TextBlock Text="Observed shared-host session (read-only, not a local tab)"
+                       FontWeight="SemiBold"
+                       AutomationProperties.AutomationId="Sessions.SharedSelectionHeading"
+                       AutomationProperties.ControlTypeOverride="Header"
+                       AutomationProperties.HeadingLevel="3" />
+            <TextBlock TextWrapping="Wrap"
+                       Text="Select a session from the observed host, not from the local workbench. Refresh to catch up on host metadata events. Missing or truncated events are explicitly flagged; no browser binding, chat send or terminal actuation occurs." />
+            <ListBox x:Name="WorkbenchHostSessionList" MinHeight="65" MaxHeight="150"
+                     SelectionChanged="WorkbenchHostSessionList_SelectionChanged"
+                     AutomationProperties.AutomationId="Sessions.SharedHostSelection"
+                     AutomationProperties.Name="Observed shared host sessions, independent from local tabs">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DisplayLabel}" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBox x:Name="WorkbenchHostEvents" IsReadOnly="True"
+                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                     MaxHeight="145"
+                     AutomationProperties.AutomationId="Sessions.SharedHostEvents"
+                     AutomationProperties.Name="Selected host session retained metadata events, not ChatGPT messages" />
+            <TextBlock x:Name="WorkbenchHostFollowStatus" TextWrapping="Wrap"
+                       Text="No host session selected. No event cursor has been observed."
+                       AutomationProperties.AutomationId="Sessions.SharedHostFollowStatus"
+                       AutomationProperties.LiveSetting="Polite" />
             <TextBlock x:Name="WorkbenchLedgerStatus" TextWrapping="Wrap"
                        Text="No shared host observation has been attempted."
                        AutomationProperties.AutomationId="Sessions.SharedHostStatus"
