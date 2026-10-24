@@ -140,7 +140,8 @@ try {
  assert.equal(missing.value.status,'SELECTED_SESSION_MISSING_RESELECT_REQUIRED');
  record('rewind-and-missing-host-session-refuse-silent-selection');
  await stop();await launch();
- const restart=await invoke([...followArgs,'--after','3']);
+ const restart=await invoke(['session-ledger-follow','--port',String(port),
+  '--session-id',idA,'--after','3']);
  assert.equal(restart.value.status,'SEQUENCE_REWIND_RESELECT_REQUIRED');
  assert.equal(restart.value.selected_session_id,null);
  record('ephemeral-host-restart-invalidates-old-event-cursor');
