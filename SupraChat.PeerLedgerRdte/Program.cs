@@ -63,7 +63,7 @@ internal static class Program
         }
         finally { foreach (var root in CustodyRoots) root.Dispose(); }
         var passed = cases.Count == 17 && cases.All(c => c.Passed) &&
-            (!_custodyMode || custodyChecks.Count == 14 && custodyChecks.All(c => c.Passed));
+            (!_custodyMode || custodyChecks.Count == 15 && custodyChecks.All(c => c.Passed));
         var receipt = JsonSerializer.Serialize(new
         {
             schema = _custodyMode ? "suprachat-windows-custody-rdte/v1" : "suprachat-peer-ledger-integration/v1", passed,
@@ -122,7 +122,7 @@ internal static class Program
         var key = _custodyMode ? null : RandomNumberGenerator.GetBytes(32);
         using var issuer = persistedIssuer?.CreateAuthority(() => now) ?? new W12ScopedGrantAuthority(key!, () => now);
         if (key is not null) CryptographicOperations.ZeroMemory(key);
-        using (var store = new W9DurableSessionStore(path))
+        using (var store = OpenStore(path))
         {
             var ledger = new SharedSessionLedger(store.Load(), store.Save);
             // Trusted fixture setup, never a remotely exposed or claimed-human operation.
@@ -161,7 +161,7 @@ internal static class Program
             Require(trace.Read(ca).Events.All(e => e.SessionId.ToString("N") == a) && trace.Read(cb).Events.All(e => e.SessionId.ToString("N") == b));
         }
         StoreAdmission(create: false);
-        using (var recovered = new W9DurableSessionStore(path))
+        using (var recovered = OpenStore(path))
         {
             var ledger = new SharedSessionLedger(recovered.Load(), recovered.Save);
             Require(ledger.IsGrantRevoked(revokedGrant) && ledger.Inspect(a)!.Version == 1 && ledger.Inspect(b)!.Version == 1);
@@ -289,7 +289,7 @@ internal static class Program
     {
         if (fault is not ("BEFORE_COMMIT" or "AFTER_COMMIT_BEFORE_ACK" or "WRITE_FAILURE")) return 64;
         StoreAdmission(create: false, fault);
-        using var store = new W9DurableSessionStore(path);
+        using var store = OpenStore(path);
         var ledger = new SharedSessionLedger(store.Load(), store.Save);
         var session = ledger.InspectAll().Sessions.Single();
         ledger.Change("crash-operation-key", "automation", session.Id, 0, "set-title", "after");
@@ -300,7 +300,7 @@ internal static class Program
     {
         var path = FreshStore();
         StoreAdmission(create: true);
-        using (var store = new W9DurableSessionStore(path))
+        using (var store = OpenStore(path))
             new SharedSessionLedger(store.Load(), store.Save).Open("crash-open-session", "automation", "before");
         using var child = Spawn(_custodyMode ? "--custody-crash" : "--crash", path, fault);
         try
@@ -311,7 +311,7 @@ internal static class Program
         }
         finally { await CleanupAsync(child); }
         StoreAdmission(create: false);
-        using var recovered = new W9DurableSessionStore(path);
+        using var recovered = OpenStore(path);
         var ledger = new SharedSessionLedger(recovered.Load(), recovered.Save);
         var session = ledger.InspectAll().Sessions.Single();
         Require(session.Version == (fault == "AFTER_COMMIT_BEFORE_ACK" ? 1 : 0));
@@ -340,6 +340,8 @@ internal static class Program
         await pipe.FlushAsync(token);
     }
     private static void Require(bool condition) { if (!condition) throw new InvalidOperationException(); }
+    private static W9DurableSessionStore OpenStore(string path) => _custodyMode
+        ? CustodyNative.WithUserFileOwner(() => new W9DurableSessionStore(path)) : new W9DurableSessionStore(path);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint pid);

@@ -176,6 +176,19 @@ public sealed class W9DurableSessionStore : IDisposable
     {
         try
         {
+            if (_windowsCustody && OperatingSystem.IsWindows())
+                CustodyNative.WithUserFileOwner(() => { SaveCore(checkpoint); return 0; });
+            else SaveCore(checkpoint);
+        }
+        catch
+        {
+            Environment.Exit(78);
+            throw;
+        }
+    }
+
+    private void SaveCore(SessionLedgerCheckpoint checkpoint)
+    {
             VerifyCustody();
             var content = JsonSerializer.Serialize(checkpoint);
             if (Encoding.UTF8.GetByteCount(content) > 2_000_000)
@@ -203,14 +216,6 @@ public sealed class W9DurableSessionStore : IDisposable
             if (_testFault == "AFTER_COMMIT_BEFORE_ACK")
                 Environment.Exit(89);
             VerifyCustody();
-        }
-        catch
-        {
-            // Never let HTTP translate failed durable admission to APPLIED or
-            // continue serving reads from uncommitted advanced state.
-            Environment.Exit(78);
-            throw;
-        }
     }
 
     private string Scalar(string sql) =>

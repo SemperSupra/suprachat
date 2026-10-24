@@ -27,7 +27,7 @@ jobs:
           }
           $receipt = $json | ConvertFrom-Json
           if (!$receipt.passed -or $receipt.schema -ne 'suprachat-windows-custody-rdte/v1' -or !$receipt.windows_custody_mode -or
-              $receipt.cases.Count -ne 17 -or $receipt.custody_checks.Count -ne 14 -or $receipt.failure -ne 'NONE' -or
+              $receipt.cases.Count -ne 17 -or $receipt.custody_checks.Count -ne 15 -or $receipt.failure -ne 'NONE' -or
               $receipt.custody_phase -ne 'restricted-token-directory-create-denied' -or
               $receipt.key_protection -ne 'WINDOWS_DPAPI_CURRENT_USER_SYNTHETIC' -or
               @($receipt.cases | Where-Object { !$_.passed }).Count -ne 0 -or

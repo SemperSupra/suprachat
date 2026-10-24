@@ -53,6 +53,17 @@ internal static class CustodyChecks
             finally { CryptographicOperations.ZeroMemory(a); CryptographicOperations.ZeroMemory(b); }
         }
         Add("protected-root-key-roundtrip");
+        using (var before = WindowsIdentity.GetCurrent())
+        {
+            Require(CustodyNative.WithUserFileOwner(() =>
+            {
+                using var scoped = WindowsIdentity.GetCurrent();
+                return scoped.Owner == scoped.User && scoped.User == before.User;
+            }));
+            using var after = WindowsIdentity.GetCurrent();
+            Require(after.User == before.User && after.Owner == before.Owner && after.ImpersonationLevel == before.ImpersonationLevel);
+        }
+        Add("scoped-file-owner-restored");
         using (var initial = material.CreateAuthority())
         using (var loaded = root.LoadIssuer())
         using (var reopened = loaded.CreateAuthority())

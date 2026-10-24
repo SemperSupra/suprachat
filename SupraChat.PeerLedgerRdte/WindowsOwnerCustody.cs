@@ -80,7 +80,7 @@ internal sealed class WindowsOwnerCustody : IDisposable
         try
         {
             var encrypted = ProtectedData.Protect(plain, Entropy(), DataProtectionScope.CurrentUser);
-            using (var file = new FileStream(IssuerPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            using (var file = CustodyNative.WithUserFileOwner(() => new FileStream(IssuerPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None)))
             {
                 CustodyNative.VerifyHandle(file.SafeFileHandle, IssuerPath, directory: false);
                 file.Write(encrypted);
@@ -147,6 +147,33 @@ internal sealed class WindowsOwnerCustody : IDisposable
 [SupportedOSPlatform("windows")]
 internal static class CustodyNative
 {
+    // Scope ONLY synchronous filesystem work. RunAsClient reverts impersonation and must not run inside this scope.
+    internal static T WithUserFileOwner<T>(Func<T> action)
+    {
+        using var original = WindowsIdentity.GetCurrent(TokenAccessLevels.Duplicate | TokenAccessLevels.Query);
+        if (!DuplicateTokenEx(original.AccessToken, 0x8E, IntPtr.Zero, 2, 2, out var copy))
+            throw new UnauthorizedAccessException("CUSTODY_OWNER_TOKEN_REFUSED");
+        using (copy)
+        {
+            var bytes = new byte[original.User!.BinaryLength]; original.User.GetBinaryForm(bytes, 0);
+            var pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            try
+            {
+                var owner = pin.AddrOfPinnedObject();
+                if (!SetTokenInformation(copy, 4, ref owner, IntPtr.Size))
+                    throw new UnauthorizedAccessException("CUSTODY_OWNER_TOKEN_REFUSED");
+            }
+            finally { pin.Free(); }
+            return WindowsIdentity.RunImpersonated(copy, () =>
+            {
+                using var current = WindowsIdentity.GetCurrent();
+                if (current.User != original.User || current.Owner != current.User)
+                    throw new UnauthorizedAccessException("CUSTODY_OWNER_TOKEN_REFUSED");
+                return action();
+            });
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct SecurityAttributes { public int Length; public IntPtr Descriptor; [MarshalAs(UnmanagedType.Bool)] public bool Inherit; }
     [StructLayout(LayoutKind.Sequential)]
@@ -162,7 +189,7 @@ internal static class CustodyNative
         try
         {
             var attributes = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Descriptor = pin.AddrOfPinnedObject() };
-            if (!CreateDirectoryW(path, ref attributes)) throw new IOException("CUSTODY_CREATE_NEW_REFUSED");
+            if (!WithUserFileOwner(() => CreateDirectoryW(path, ref attributes))) throw new IOException("CUSTODY_CREATE_NEW_REFUSED");
         }
         finally { pin.Free(); }
     }
@@ -221,4 +248,8 @@ internal static class CustodyNative
         out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
     [DllImport("advapi32.dll")] private static extern uint GetSecurityDescriptorLength(IntPtr descriptor);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("advapi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DuplicateTokenEx(SafeAccessTokenHandle token, uint access, IntPtr security, int level, int type, out SafeAccessTokenHandle result);
+    [DllImport("advapi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetTokenInformation(SafeAccessTokenHandle token, int kind, ref IntPtr owner, int size);
 }

@@ -14,6 +14,11 @@ Directory handles are held without delete sharing. The W9 store holds its own di
 lifetime rather than depending on the fixture parent. Existing database, WAL, SHM and owner-lock
 objects are checked on admission/load/save; uncertain custody during Save reaches the same fail-stop
 hook as uncertain checkpoint writes. Session mutation/checkpoint authority remains unchanged.
+File creation and checkpoint saves use a synchronous scoped duplicate token whose default owner is
+explicitly the current user. Identity/privileges and the process token are not changed. This avoids
+accepting a group-owned object when the host's normal token has a group default owner. Pipe checks
+run outside that scope: the pinned .NET RunAsClient implementation reverts to the process context.
+Tests verify restoration of the original token context after scoped filesystem work.
 
 Issuer bootstrap is allowed only on the newly created root, uses atomic CreateNew and never falls
 back to regeneration. A bounded DPAPI CurrentUser record contains a random 256-bit synthetic key,
@@ -34,7 +39,7 @@ Checkpoint crashes and restart/replay retain the selected W9 semantics.
 
 ## Windows proving cases
 
-Fourteen additional cases cover protected root/key roundtrip, reopened scoped-grant validation,
+Fifteen additional cases cover protected root/key roundtrip, scoped file-owner restoration, reopened scoped-grant validation,
 fresh-host DPAPI reopen, widened root/store refusal, stripped inheritance refusal, widened key ACL
 refusal, corrupt/oversized/missing-key refusal with no reset, actual key hard-link refusal, actual
 junction-root refusal, restricted-token positive control, key-open denial and directory-create denial.
@@ -49,6 +54,9 @@ flags set, then positively reload the protected key. Earlier incomplete receipts
 test harness restored an unchanged ACL object, which did not persist the intended restore; later tests
 could therefore refuse for the wrong reason. Exact-reason and positive recovery checks prevent that
 false-positive pattern. An intermediate oversize test also needed to recognize InvalidDataException.
+The first public Windows run 40083288542 refused object ownership before any peer mutation. Its
+sanitized failure is preserved; creation now sets the user default owner on a duplicate token instead
+of broadening the accepted object-owner policy.
 
 ```powershell
 dotnet run --project SupraChat.PeerLedgerRdte -c Release -- --custody-receipt "$env:TEMP/fresh-custody-receipt.json"
@@ -79,3 +87,5 @@ Primary references: [DPAPI scope](https://learn.microsoft.com/en-us/dotnet/api/s
 [handle security descriptors](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo),
 [ACE inheritance](https://learn.microsoft.com/en-us/windows/win32/secauthz/ace-inheritance-rules) and
 [reparse operations](https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points-and-file-operations).
+The scoped-owner correction follows [Windows object ownership](https://learn.microsoft.com/en-us/windows/win32/secauthz/owner-of-a-new-object)
+and the [matching .NET pipe source](https://github.com/dotnet/runtime/blob/v10.0.12/src/libraries/System.IO.Pipes/src/System/IO/Pipes/NamedPipeServerStream.Windows.cs).
