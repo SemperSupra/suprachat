@@ -45,8 +45,8 @@ public sealed partial class SharedSessionLedger
                     _sessions.GetValueOrDefault(command.SessionId), _sequence);
             if (command.Operation == "revoke-self")
             {
-                var changed = RevokeOwnGrant(grant.GrantId, command.SessionId, grant.Audience);
-                return new(Schema, false, false, changed ? "REVOKED" : "ALREADY_REVOKED", null, _sequence);
+                RevokeOwnGrant(grant.GrantId, command.SessionId, grant.Audience);
+                return new(Schema, false, false, "REVOKED", null, _sequence);
             }
             ValidateIdempotencyKey(command.Key);
             var key = "peer-" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(

@@ -71,6 +71,7 @@ internal static class SharedSessionAdmissionChecks
         var denied = ledger.InspectProjectionAdmitted(a, AdmitA, _ => { callbackInvoked = true; return trace.Read(cap); });
         Require(denied.Admission.Status == "GRANT_REVOKED" && !callbackInvoked && denied.Projection is null);
         Require(ledger.ExecuteAdmitted(changeA, AdmitA).Status == "GRANT_REVOKED");
+        Require(ledger.ExecuteAdmitted(new("revoke-self", a, "unused-revoke-key"), AdmitA).Status == "GRANT_REVOKED");
         Require(ledger.ExecuteAdmitted(changeB, AdmitB).IsReplay);
         var recovered = new SharedSessionLedger(saved);
         Require(recovered.ExecuteAdmitted(changeA, AdmitA).Status == "GRANT_REVOKED");

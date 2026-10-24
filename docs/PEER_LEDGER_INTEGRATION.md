@@ -42,6 +42,8 @@ and namespaces idempotency by verified actor. Existing Open/Change/RevokeOwnGran
 mutations and checkpointing. A new grant for the same actor can replay its historical first
 outcome; a revoked grant cannot retrieve it. Admission refusals occur before operation execution
 and are not represented as durable provider-action outcomes.
+Repeated self-revocation with the revoked grant also returns GRANT_REVOKED; it does not bypass
+admission to manufacture a new success result.
 
 `InspectProjectionAdmitted` copies the bounded sanitized trace page inside that same gate.
 Revocation cannot commit between authorization and the copy. Callbacks are trusted synchronous
