@@ -89,13 +89,20 @@ public static class SharedSessionInventoryReader
                     return Failure("LEDGER_INVALID_SESSION_METADATA");
             }
             long lastSequence = 0;
+            var retainedEvents = new List<SharedSessionEventRow>(inventory.Events.Count);
             foreach (var item in inventory.Events)
             {
                 if (item is null || item.Sequence <= lastSequence ||
                     item.Sequence > inventory.Sequence ||
                     !Guid.TryParseExact(item.SessionId, "N", out _) ||
-                    item.SessionVersion < 0)
+                    !seenIds.Contains(item.SessionId) ||
+                    item.SessionVersion < 0 ||
+                    item.Audience is not ("human" or "automation" or "agent") ||
+                    item.Operation is not ("open" or "set-title" or "set-workspace" or
+                        "set-conversation" or "revoke-own-grant"))
                     return Failure("LEDGER_INVALID_EVENT_SEQUENCE");
+                retainedEvents.Add(new SharedSessionEventRow(item.Sequence,
+                    item.SessionId,item.Audience,item.Operation,item.SessionVersion));
                 lastSequence = item.Sequence;
             }
             // Bind neither desktop tabs nor terminal handles to this
@@ -111,7 +118,8 @@ public static class SharedSessionInventoryReader
                 // Report the host's unverified self-description, not proof of
                 // independent storage qualification or deployment admission.
                 DurableAcrossRestart:inventory.DurableAcrossProcessRestart,
-                ChatSubmissionAllowed:false,TerminalExecutionAllowed:false);
+                ChatSubmissionAllowed:false,TerminalExecutionAllowed:false,
+                Events:retainedEvents);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
             or IOException or JsonException or InvalidOperationException or NotSupportedException
@@ -133,11 +141,27 @@ public static class SharedSessionInventoryReader
 
 public sealed record SharedSessionInventoryRow(
     string Id,string Title,long Version,bool HasConversationReference,
-    string RemoteBindingState);
+    string RemoteBindingState)
+{
+    // Disambiguate same-titled sessions for screen readers and keyboard users.
+    public string DisplayLabel => $"{Title} — {Id[..8]}, revision {Version}";
+}
+
+public sealed record SharedSessionEventRow(
+    long Sequence,string SessionId,string Audience,string Operation,long SessionVersion)
+{
+    public string DisplayLabel =>
+        $"Event {Sequence}: {Audience} {Operation}, revision {SessionVersion}";
+}
 
 public sealed record SharedSessionInventoryReceipt(
     string Schema,bool Connected,string Status,long Sequence,
     IReadOnlyList<SharedSessionInventoryRow> Sessions,
     bool ReadOnly,bool BoundToDesktopSessions,
     bool ActorIdentityAuthenticated,bool DurableAcrossRestart,
-    bool ChatSubmissionAllowed,bool TerminalExecutionAllowed);
+    bool ChatSubmissionAllowed,bool TerminalExecutionAllowed,
+    IReadOnlyList<SharedSessionEventRow>? Events = null)
+{
+    public IReadOnlyList<SharedSessionEventRow> RetainedEvents =>
+        Events ?? Array.Empty<SharedSessionEventRow>();
+}

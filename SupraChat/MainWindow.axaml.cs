@@ -22,6 +22,12 @@ public partial class MainWindow : Window
     private readonly WorkbenchLocalDrafts _workbenchLocalDrafts;
     private readonly WorkbenchTerminalSupervisor _workbenchTerminalSupervisor;
     private long _sharedLedgerObservationEpoch;
+    // Host observation is never the local WorkbenchSession authority.
+    private SharedSessionInventoryReceipt? _lastSharedHostObservation;
+    private int? _sharedFollowHostPort;
+    private long? _sharedFollowSequence;
+    private string? _sharedFollowSelectedId;
+    private bool _updatingSharedFollowSelection;
     private bool _terminalShutdownInProgress;
     private bool _verifiedTerminalShutdown;
     private string? _currentDraftReviewId;
@@ -126,9 +132,8 @@ public partial class MainWindow : Window
     private void RefreshWorkbenchList(string? notice = null)
     {
         var snapshot = _workbenchSessions.Snapshot();
-        Interlocked.Increment(ref _sharedLedgerObservationEpoch);
-        WorkbenchLedgerInventory.Text = string.Empty;
-        WorkbenchLedgerStatus.Text = "Desktop session view changed; previous host inventory observation invalidated.";
+        // Local workbench lifecycle must never change the observed host's
+        // separate selection/cursor or grant extra authority to local tabs.
         _pendingMetadataExport = null;
         WorkbenchMetadataExportPreview.Text = string.Empty;
         WorkbenchMetadataExportStatus.Text = "Session metadata changed or selection refreshed; prior export approval cleared.";
@@ -369,18 +374,56 @@ public partial class MainWindow : Window
     private void WorkbenchTerminalRefresh_Click(object? sender, RoutedEventArgs e) =>
         RefreshWorkbenchTerminalStatus();
 
+    private void WorkbenchHostSessionList_SelectionChanged(object? sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_updatingSharedFollowSelection || _lastSharedHostObservation is null)
+            return;
+        if (WorkbenchHostSessionList.SelectedItem is not SharedSessionInventoryRow item)
+        {
+            _sharedFollowSelectedId = null;
+            WorkbenchHostEvents.Text = string.Empty;
+            WorkbenchHostFollowStatus.Text = "No observed host session selected. No local tab or browser binding changed.";
+            return;
+        }
+        if (!_lastSharedHostObservation.Sessions.Any(s => s.Id == item.Id))
+            return;
+        _sharedFollowSelectedId = item.Id;
+        // An explicit selection shows only the retained observation window;
+        // it does not claim the whole earlier history or change workbench.
+        var selected = SharedSessionFeedProjection.Project(
+            _lastSharedHostObservation,item.Id,previousSequence:null);
+        WorkbenchHostEvents.Text = selected.Events.Count == 0
+            ? "No retained metadata events for this host session."
+            : string.Join(Environment.NewLine,selected.Events.Select(x => x.DisplayLabel));
+        WorkbenchHostFollowStatus.Text =
+            $"Host session {item.Id[..8]}, revision {item.Version}. " +
+            $"Last observed sequence {selected.Sequence}. {selected.Status}. " +
+            "Read-only; no local tab, browser or terminal binding.";
+    }
+
     private async void WorkbenchReadSharedLedger_Click(object? sender, RoutedEventArgs e)
     {
         if (!int.TryParse(WorkbenchLedgerPort.Text, out var port) ||
             port is < 1024 or > 65535)
         {
             WorkbenchLedgerInventory.Text = string.Empty;
+            WorkbenchHostEvents.Text = string.Empty;
             WorkbenchLedgerStatus.Text = "Explicit nonprivileged 127.0.0.1 port required; no request sent.";
+            WorkbenchHostFollowStatus.Text = "Host observation unavailable; no session binding.";
             return;
         }
+        if (_sharedFollowHostPort != port)
+        {
+            // A port is NOT a durable host identity. A port switch always
+            // requires explicit re-selection; no auto-follow across hosts.
+            _sharedFollowHostPort = port;
+            _sharedFollowSequence = null;
+            _sharedFollowSelectedId = null;
+            _lastSharedHostObservation = null;
+        }
         var epoch = Interlocked.Increment(ref _sharedLedgerObservationEpoch);
-        WorkbenchLedgerInventory.Text = string.Empty;
-        WorkbenchLedgerStatus.Text = "Reading existing shared host inventory only; no session change or ChatGPT submission.";
+        WorkbenchLedgerStatus.Text = "Reading existing shared host metadata only. No session change or ChatGPT submission.";
         try
         {
             var snapshot = await SharedSessionInventoryReader.ObserveAsync(
@@ -389,23 +432,66 @@ public partial class MainWindow : Window
                 return;
             if (!snapshot.Connected)
             {
+                _lastSharedHostObservation = null;
+                _updatingSharedFollowSelection = true;
+                try
+                {
+                    WorkbenchHostSessionList.ItemsSource = null;
+                    WorkbenchHostSessionList.SelectedItem = null;
+                }
+                finally { _updatingSharedFollowSelection = false; }
+                WorkbenchLedgerInventory.Text = string.Empty;
+                WorkbenchHostEvents.Text = string.Empty;
                 WorkbenchLedgerStatus.Text = $"Read refused: {snapshot.Status}. No remote write attempted.";
+                WorkbenchHostFollowStatus.Text =
+                    "Host unavailable; selection not currently verified. Last cursor retained for gap detection.";
                 return;
             }
+            var projected = SharedSessionFeedProjection.Project(
+                snapshot,_sharedFollowSelectedId,_sharedFollowSequence);
+            if (projected.Status is "SEQUENCE_REWIND_RESELECT_REQUIRED" or
+                "SELECTED_SESSION_MISSING_RESELECT_REQUIRED")
+                _sharedFollowSelectedId = null;
+            _sharedFollowSequence = snapshot.Sequence;
+            _lastSharedHostObservation = snapshot;
+            _updatingSharedFollowSelection = true;
+            try
+            {
+                WorkbenchHostSessionList.ItemsSource = snapshot.Sessions;
+                WorkbenchHostSessionList.SelectedItem = snapshot.Sessions
+                    .FirstOrDefault(row => row.Id == _sharedFollowSelectedId);
+            }
+            finally { _updatingSharedFollowSelection = false; }
             WorkbenchLedgerInventory.Text = snapshot.Sessions.Count == 0
                 ? "No sessions currently reported by the host."
                 : string.Join(Environment.NewLine,
-                    snapshot.Sessions.Select(s =>
-                        $"{s.Id}: {s.Title} (version {s.Version}, bound-to-browser: unverified)"));
+                    snapshot.Sessions.Select(row => row.DisplayLabel));
+            WorkbenchHostEvents.Text = projected.Events.Count == 0
+                ? "No new retained events for the selected host session."
+                : string.Join(Environment.NewLine,
+                    projected.Events.Select(row => row.DisplayLabel));
+            WorkbenchHostFollowStatus.Text =
+                $"Host cursor {projected.Sequence}. {projected.Status}. " +
+                (projected.EventGapUnverified
+                    ? "Missing/truncated metadata event history: cannot claim continuous catch-up. "
+                    : "No gap detected in this bounded observation; historical completeness unproven. ") +
+                "Selection is read-only and not bound to local tabs or ChatGPT.";
             WorkbenchLedgerStatus.Text =
-                $"W6 host reports {snapshot.Sessions.Count} sessions; sequence {snapshot.Sequence}. " +
-                "This is an unverified, ephemeral metadata read. Desktop tabs are NOT bound " +
-                "to these host sessions. No actor identity authentication or chat submission authority.";
+                $"Observed {snapshot.Sessions.Count} host sessions; sequence {snapshot.Sequence}. " +
+                (snapshot.DurableAcrossRestart ? "Host reports experimental persistence. " :
+                    "Host does not report durable recovery. ") +
+                "Metadata are an unverified loopback self-report, not authenticated participant or product ChatGPT history.";
         }
         catch (Exception)
         {
             if (epoch == Interlocked.Read(ref _sharedLedgerObservationEpoch))
-                WorkbenchLedgerStatus.Text = "Shared host observation failed; no write or ChatGPT submission attempted.";
+            {
+                _lastSharedHostObservation = null;
+                WorkbenchLedgerStatus.Text =
+                    "Shared host observation failed; no write or ChatGPT submission attempted.";
+                WorkbenchHostFollowStatus.Text =
+                    "Read failure; event continuity unverified until another successful observation.";
+            }
         }
     }
 
