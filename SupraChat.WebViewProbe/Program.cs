@@ -238,7 +238,7 @@ internal sealed class ProbeApp : Application
                 shared_trace_schema = "suprachat-trace/v1",
                 typed_events = sharedAdapters.Select(a => a.ObservedEvents).ToArray(),
                 typed_loss = sharedAdapters.Sum(a => a.DroppedObservations),
-                scope_exit_detached = scopeAdapter.IsStopped,
+                scope_exit_detached = replacement.IsStopped,
                 duplicate_domain_owner_refused = duplicateRefused,
                 controller_disposal_detached = scopeAdapter.IsStopped,
                 repeated_old_disposal_preserved_replacement = true,
