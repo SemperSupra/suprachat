@@ -95,21 +95,21 @@ try {
    '--session-id',idA];
  const cli=await invoke(followArgs);
  assert.equal(cli.ok,true);
- assert.equal(cli.value.selectedSessionId,idA);
+ assert.equal(cli.value.selected_session_id,idA);
  assert.equal(cli.value.sequence,2);
  assert.equal(cli.value.events.length,1);
  assert.equal(cli.value.events[0].operation,'open');
- assert.equal(cli.value.boundToDesktopWorkbench,false);
- assert.equal(cli.value.remoteChatAuthority,false);
- assert.equal(cli.value.actorIdentityAuthenticated,false);
+ assert.equal(cli.value.bound_to_desktop_workbench,false);
+ assert.equal(cli.value.remote_chat_authority,false);
+ assert.equal(cli.value.actor_identity_authenticated,false);
  record('human-cli-selected-A-not-local-tab-while-B-open');
  const p={jsonrpc:'2.0',id:42,method:'session/ledger/follow',
    params:{port,sessionId:idB}};
  const agent=await invoke(['stdio'],p);
- assert.equal(agent.id,42);assert.equal(agent.result.selectedSessionId,idB);
+ assert.equal(agent.id,42);assert.equal(agent.result.selected_session_id,idB);
  assert.equal(agent.result.events.length,1);
  assert.equal(agent.result.events[0].sessionId,idB);
- assert.equal(agent.result.terminalAuthority,false);
+ assert.equal(agent.result.terminal_authority,false);
  record('separate-agent-process-selected-B-uses-identical-read-only-core');
  const update=await http('/v1/sessions/change',{
    idempotencyKey:'w14-change-A-000000001',audience:'automation',
@@ -121,7 +121,7 @@ try {
  assert.equal(after.value.events.length,1);
  assert.equal(after.value.events[0].sequence,3);
  assert.equal(after.value.events[0].sessionId,idA);
- assert.equal(after.value.eventGapUnverified,false);
+ assert.equal(after.value.event_gap_unverified,false);
  const idle=await invoke([...followArgs,'--after','3']);
  assert.equal(idle.value.status,'SELECTED_NO_NEW_EVENTS');
  assert.equal(idle.value.events.length,0);
@@ -129,12 +129,12 @@ try {
   jsonrpc:'2.0',id:43,method:'session/ledger/follow',
   params:{port,sessionId:idB,afterSequence:2}});
  assert.equal(bAfter.result.events.length,0);
- assert.equal(bAfter.result.selectedSessionId,idB);
+ assert.equal(bAfter.result.selected_session_id,idB);
  record('incremental-A-events-only-B-isolated-and-repeat-no-replay');
  const bad=await invoke([...followArgs,'--after','999']);
  assert.equal(bad.value.status,'SEQUENCE_REWIND_RESELECT_REQUIRED');
- assert.equal(bad.value.selectedSessionId,null);
- assert.equal(bad.value.eventGapUnverified,true);
+ assert.equal(bad.value.selected_session_id,null);
+ assert.equal(bad.value.event_gap_unverified,true);
  const missing=await invoke(['session-ledger-follow','--port',String(port),
   '--session-id','00000000000000000000000000000000']);
  assert.equal(missing.value.status,'SELECTED_SESSION_MISSING_RESELECT_REQUIRED');
@@ -142,7 +142,7 @@ try {
  await stop();await launch();
  const restart=await invoke([...followArgs,'--after','3']);
  assert.equal(restart.value.status,'SEQUENCE_REWIND_RESELECT_REQUIRED');
- assert.equal(restart.value.selectedSessionId,null);
+ assert.equal(restart.value.selected_session_id,null);
  record('ephemeral-host-restart-invalidates-old-event-cursor');
  console.log(JSON.stringify({schema:'suprachat-w14-actual-host-observer/v1',
   result:'PASS',stages,independent_sessions:2,cli_and_agent_parity:true,
