@@ -6,6 +6,8 @@ control tests, not live browser or provider interception.
 
 ## Boundaries
 
+The synthetic simulator and fixture trace source live exclusively in the contract-test project; the shipped core contains only the fail-closed classification helper. No fixture actuator is packaged into the desktop, CLI, or agent runtime.
+
 TraceControlBoundary classifies the existing metadata operation vocabulary
 without making an enum, untrusted role label or URL into an actor credential.
 Every provider actuation operation remains refused. Starting and stopping
