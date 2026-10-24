@@ -56,6 +56,7 @@ internal static class Program
                 "session-ledger-view" => WriteSuccess(await SharedSessionInventoryReader.ObserveAsync(
                     ParseLedgerPort(Option(args[1..], "--port")),
                     Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"))),
+                "session-ledger-follow" => WriteSuccess(await ReadSharedHostFollowAsync(args[1..])),
                 "session-ledger-open" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
                 "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
@@ -128,6 +129,7 @@ internal static class Program
             new { name = "session-ledger-host", description = "Explicitly start a token-protected loopback-only ephemeral W6 session coordinator. Uses SUPRACHAT_LEDGER_TOKEN process environment.", syntax = "session-ledger-host --port <1024-65535>" },
             new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
             new { name = "session-ledger-view", description = "Read the same bounded unbound host inventory core used by the desktop Sessions interface; no writes.", syntax = "session-ledger-view --port <host-port>" },
+            new { name = "session-ledger-follow", description = "Read a selected remote W6 host session's bounded metadata events with a caller-held cursor; never bind a local tab or send ChatGPT turns.", syntax = "session-ledger-follow --port <host-port> [--session-id <host-guid-N>] [--after <sequence>]" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
             new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
             new { name = "session-ledger-revoke-own", description = "W13 synthetic: explicitly revoke the currently signed actor grant, durably; cannot revoke another actor.", syntax = "session-ledger-revoke-own --port <host-port> < request.json" },
@@ -200,6 +202,7 @@ internal static class Program
             "session/ledger/read",
             "session/ledger/list",
             "session/ledger/view",
+            "session/ledger/follow",
             "session/ledger/open",
             "session/ledger/change",
             "session/ledger/revoke-own",
@@ -728,6 +731,7 @@ internal static class Program
             "session/ledger/read" => SharedSessionLedger.DescribeContract(),
             "session/ledger/list" => await RpcLedgerAsync(parameters, "list"),
             "session/ledger/view" => await RpcLedgerViewAsync(parameters),
+            "session/ledger/follow" => await RpcLedgerFollowAsync(parameters),
             "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
             "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
             "session/ledger/revoke-own" => await RpcLedgerAsync(parameters, "revoke-own"),
@@ -1522,6 +1526,52 @@ internal static class Program
         return await SharedSessionInventoryReader.ObserveAsync(
             ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)),
             Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
+    }
+
+    private static async Task<SharedSessionFeedView> ReadSharedHostFollowAsync(string[] args)
+    {
+        var port = ParseLedgerPort(Option(args, "--port"));
+        var cursorText = Option(args, "--after");
+        long? cursor = null;
+        if (cursorText is not null)
+        {
+            if (!long.TryParse(cursorText, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var parsed) || parsed < 0)
+                throw new MachineException(2, "INVALID_CURSOR", "Host event cursor must be nonnegative.");
+            cursor = parsed;
+        }
+        var observed = await SharedSessionInventoryReader.ObserveAsync(
+            port, Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
+        return SharedSessionFeedProjection.Project(observed,
+            Option(args, "--session-id"),cursor);
+    }
+
+    private static async Task<SharedSessionFeedView> RpcLedgerFollowAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        if (!p.TryGetProperty("port", out var rawPort) ||
+            rawPort.ValueKind != JsonValueKind.Number ||
+            !rawPort.TryGetInt32(out var port))
+            throw new MachineException(2, "INVALID_PARAMS", "Host port required.");
+        string? selected = null;
+        if (p.TryGetProperty("sessionId", out var id))
+        {
+            if (id.ValueKind != JsonValueKind.String)
+                throw new MachineException(2, "INVALID_PARAMS", "Session ID must be a string.");
+            selected = id.GetString();
+        }
+        long? cursor = null;
+        if (p.TryGetProperty("afterSequence", out var seq))
+        {
+            if (seq.ValueKind != JsonValueKind.Number ||
+                !seq.TryGetInt64(out var parsed) || parsed < 0)
+                throw new MachineException(2, "INVALID_CURSOR", "Host cursor must be nonnegative.");
+            cursor = parsed;
+        }
+        var observed = await SharedSessionInventoryReader.ObserveAsync(
+            ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)),
+            Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
+        return SharedSessionFeedProjection.Project(observed,selected,cursor);
     }
 
     private static async Task<object> RpcLedgerAsync(JsonElement? parameters, string operation)
