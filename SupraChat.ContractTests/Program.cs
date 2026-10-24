@@ -438,6 +438,72 @@ Require(sharedViewCode.Contains("SharedSessionInventoryReader.ObserveAsync(",Str
         sharedViewCode.Contains("epoch != Interlocked.Read(ref _sharedLedgerObservationEpoch)",StringComparison.Ordinal),
         "W6 desktop must use shared reader and discard stale async observations");
 
+// W14 explicit observed-host selection/cursor is separate from local tabs.
+foreach (var control in new [] {
+    "Sessions.SharedSelectionHeading", "Sessions.SharedHostSelection",
+    "Sessions.SharedHostEvents", "Sessions.SharedHostFollowStatus"
+})
+    Require(sharedViewXaml.Contains($"AutomationProperties.AutomationId=\"{control}\"",
+        StringComparison.Ordinal), "W14 missing accessible host follow control: " + control);
+Require(sharedViewCode.Contains("SharedSessionFeedProjection.Project(", StringComparison.Ordinal) &&
+        sharedViewCode.Contains("WorkbenchHostSessionList_SelectionChanged", StringComparison.Ordinal) &&
+        !sharedViewCode.Contains("_workbenchSessions.Select(item.Id)", StringComparison.Ordinal),
+    "W14 host selection must remain read-only and independent of local workbench");
+
+var observedA = Guid.NewGuid().ToString("N");
+var observedB = Guid.NewGuid().ToString("N");
+var hostRows = new [] {
+    new SharedSessionInventoryRow(observedA, "A", 1, false, "NO_REMOTE_BINDING"),
+    new SharedSessionInventoryRow(observedB, "B", 0, false, "NO_REMOTE_BINDING")
+};
+var hostEvents = new [] {
+    new SharedSessionEventRow(1, observedA, "human", "open", 0),
+    new SharedSessionEventRow(2, observedB, "agent", "open", 0),
+    new SharedSessionEventRow(3, observedA, "automation", "set-title", 1)
+};
+var hostReceipt = new SharedSessionInventoryReceipt(
+    SharedSessionInventoryReader.Schema, true, "UNVERIFIED_LOOPBACK_HOST_SELF_REPORT",
+    3, hostRows,true,false,false,true,false,false,hostEvents);
+var initialFollow = SharedSessionFeedProjection.Project(hostReceipt, observedA, null);
+Require(initialFollow.Connected &&
+        initialFollow.SelectedSessionId == observedA &&
+        initialFollow.Events.Count == 2 &&
+        !initialFollow.EventGapUnverified &&
+        initialFollow.ReadOnly && !initialFollow.BoundToDesktopWorkbench &&
+        !initialFollow.RemoteChatAuthority && !initialFollow.TerminalAuthority &&
+        !initialFollow.ActorIdentityAuthenticated,
+    "W14 first bounded host selection must not grant browser/workbench authority");
+var newOnly = SharedSessionFeedProjection.Project(hostReceipt, observedA, 2);
+Require(newOnly.Events.Count == 1 && newOnly.Events[0].Sequence == 3 &&
+        newOnly.Status == "SELECTED_NEW_EVENTS" && !newOnly.EventGapUnverified,
+    "W14 incremental event cursor did not isolate new selected events");
+var upToDate = SharedSessionFeedProjection.Project(hostReceipt, observedA, 3);
+Require(upToDate.Events.Count == 0 && upToDate.Status == "SELECTED_NO_NEW_EVENTS",
+    "W14 repeated snapshot must not re-display old events");
+var bOnly = SharedSessionFeedProjection.Project(hostReceipt, observedB, null);
+Require(bOnly.Events.Count == 1 && bOnly.Events[0].SessionId == observedB,
+    "W14 event stream must not confuse parallel sessions");
+var truncatedHost = hostReceipt with
+{
+    Sequence = 51,
+    Events = new [] {new SharedSessionEventRow(51, observedA, "agent", "set-title", 1)}
+};
+var gapHost = SharedSessionFeedProjection.Project(truncatedHost, observedA, 3);
+Require(gapHost.EventGapUnverified && gapHost.Status == "EVENT_GAP_UNVERIFIED",
+    "W14 truncated host event stream must be marked incomplete");
+var rewindHost = SharedSessionFeedProjection.Project(hostReceipt, observedA, 51);
+Require(rewindHost.EventGapUnverified &&
+        rewindHost.SelectedSessionId is null &&
+        rewindHost.Status == "SEQUENCE_REWIND_RESELECT_REQUIRED",
+    "W14 restarted/rewound host must force human re-selection");
+var missingHost = SharedSessionFeedProjection.Project(hostReceipt, Guid.NewGuid().ToString("N"), 3);
+Require(missingHost.SelectedSessionId is null &&
+        missingHost.Status == "SELECTED_SESSION_MISSING_RESELECT_REQUIRED",
+    "W14 disappeared host session must not silently switch to local tab");
+Require(hostRows[0].DisplayLabel.Contains(observedA[..8],StringComparison.Ordinal) &&
+        hostEvents[0].DisplayLabel.Contains("Event 1",StringComparison.Ordinal),
+    "W14 accessible labels must disambiguate sessions and event sequences");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
