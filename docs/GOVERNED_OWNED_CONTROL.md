@@ -75,3 +75,10 @@ for the exact candidate head before acceptance. Independent review remains requi
 T4 shared-actor actuation is blocked on actual peer identity and the selected session authority; this
 local registry is not a substitute. Browser modification, signed-in capture, durable action replay,
 encrypted payload storage and release admission are not enabled by this candidate.
+
+First public Windows rep 40060467458 passed transport/core/machine tests but hit E_UNEXPECTED in
+UIA FindFirst during the live accessibility step; Linux and macOS passed. Semantic lookups now log
+the exact public control ID and allow a bounded three-second readiness window only for missing
+elements or that specific provider-transition HRESULT. A persistent failure or missing accessible
+name still fails; successful receipts record the transient retry count. This is a qualification change,
+not evidence that the original UIA cause has been established.
