@@ -1,0 +1,52 @@
+name: Qualify W14 accessible shared host selection and event cursor
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionInventoryReader.cs'
+      - 'SupraChat/Core/SharedSessionFeedProjection.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'tools/qualify-w14-shared-follow.mjs'
+      - '.github/workflows/qualify-w14-host-follow.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  selected-host-read-only:
+    name: W14 selected host and cursor ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build accessible desktop and agent JSON-RPC host follower
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Contract qualify explicit selection, cursor, gap, rewind and a11y IDs
+        run: dotnet run -c Release --project SupraChat.ContractTests/SupraChat.ContractTests.csproj
+      - name: Real W6 CLI/agent same-core A/B selection and incremental catchup
+        run: node tools/qualify-w14-shared-follow.mjs
+      - name: Existing W6 localhost privacy and hostile response negatives
+        run: node tools/qualify-w6-hostile-inventory.mjs
+      - name: Existing W13 signed host and durable revoked-grant regression
+        run: node tools/qualify-w12-scoped-writes.mjs
+      - name: Reject provider or write methods in host observer path
+        shell: pwsh
+        run: |
+          foreach ($path in @('SupraChat/Core/SharedSessionInventoryReader.cs','SupraChat/Core/SharedSessionFeedProjection.cs')) {
+            $source = Get-Content -Raw $path
+            foreach ($term in @('HttpMethod.Post','HttpMethod.Put','Process.Start','AccessToken')) {
+              if ($source.Contains($term)) { throw "Observer authority regression in ${path}: $term" }
+            }
+          }
+          Write-Host 'W14 bounded read-only path PASS'
