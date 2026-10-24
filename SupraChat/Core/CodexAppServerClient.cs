@@ -51,8 +51,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private bool _initialized;
     private readonly OwnedTransportTrace? _trace;
     private readonly string _traceId = Guid.NewGuid().ToString("N");
+    private readonly LocalOwnedStreamControls? _controls;
+    private readonly ConcurrentDictionary<(string Thread, string Turn), ControlledTurn> _controlledTurns = new();
+    private sealed record ControlledTurn(LocalOwnedStreamControls.OwnedStreamLease Lease, CancellationTokenRegistration Registration);
 
-    private sealed record PendingRequest(string Method, TaskCompletionSource<JsonElement> Completion);
+    private sealed record PendingRequest(string Method, TaskCompletionSource<JsonElement> Completion, string? ThreadId = null);
 
     public sealed class CodexEventSubscription : IAsyncDisposable
     {
@@ -80,9 +83,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    internal CodexAppServerClient(Process process, OwnedTransportTrace? trace = null)
+    internal CodexAppServerClient(Process process, OwnedTransportTrace? trace = null, LocalOwnedStreamControls? controls = null)
     {
         _trace = trace;
+        _controls = controls;
         _process = process;
         _stdin = process.StandardInput;
         _stdout = process.StandardOutput;
@@ -156,10 +160,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     public static async Task<CodexAppServerClient> StartAsync(
         string accessToken,
         CancellationToken cancellationToken = default,
-        OwnedTransportTrace? trace = null)
+        OwnedTransportTrace? trace = null,
+        LocalOwnedStreamControls? controls = null)
     {
         var process = CodexAppServer.Start(accessToken);
-        var client = new CodexAppServerClient(process, trace);
+        var client = new CodexAppServerClient(process, trace, controls);
         try
         {
             await client.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -192,7 +197,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         var id = Guid.NewGuid().ToString("N");
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_pending.TryAdd(id, new PendingRequest(method, completion)))
+        if (!_pending.TryAdd(id, new PendingRequest(method, completion,
+            method == "turn/start" && parameters is { } p ? TryString(p, "threadId") : null)))
             throw new InvalidOperationException("Could not allocate Codex request id.");
 
         try
@@ -209,7 +215,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
             using var registration = cancellationToken.Register(
                 () => completion.TrySetCanceled(cancellationToken));
-            return await completion.Task.ConfigureAwait(false);
+            var result = await completion.Task.ConfigureAwait(false);
+            return result;
         }
         finally
         {
@@ -378,6 +385,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
                 var id = TryId(root);
                 var method = TryString(root, "method");
+                if (method == "turn/completed" && root.TryGetProperty("params", out var completedParams) &&
+                    TryString(completedParams, "threadId") is { } completedThread && completedParams.TryGetProperty("turn", out var completedTurn) &&
+                    TryString(completedTurn, "id") is { } completedTurnId)
+                    await CloseOwnedTurnAsync(completedThread, completedTurnId).ConfigureAwait(false);
 
                 if (id is not null && method is not null)
                 {
@@ -416,6 +427,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                         var result = root.TryGetProperty("result", out var resultValue)
                             ? resultValue.Clone()
                             : JsonSerializer.SerializeToElement(new { });
+                        // Track before publishing the response: a completion notification can be
+                        // the very next stdout frame, ahead of the caller's async continuation.
+                        if (pending.Method == "turn/start" && pending.ThreadId is { } threadId && result.ValueKind == JsonValueKind.Object &&
+                            result.TryGetProperty("turn", out var turn) && TryString(turn, "id") is { } turnId)
+                            TrackOwnedTurn(threadId, turnId);
                         pending.Completion.TrySetResult(result);
                     }
                 }
@@ -440,6 +456,50 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             _events.Writer.TryComplete(terminal);
             foreach (var subscriber in _subscribers.Values)
                 subscriber.Writer.TryComplete(terminal);
+        }
+    }
+
+    private void TrackOwnedTurn(string threadId, string turnId)
+    {
+        if (_controls is null) return;
+        try
+        {
+            var lease = _controls.Register(TraceSurface.CodexJsonRpc);
+            var registration = lease.Token.Register(() => { _ = InterruptOwnedTurnAsync(threadId, turnId); });
+            if (!_controlledTurns.TryAdd((threadId, turnId), new ControlledTurn(lease, registration)))
+            {
+                registration.Dispose();
+                _ = lease.DisposeAsync();
+            }
+            else _trace?.Record(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Local, TraceEventKind.Request,
+                lease.StreamId.ToString("N"));
+        }
+        catch
+        {
+            _trace?.Record(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Local, TraceEventKind.CaptureGap, _traceId);
+        }
+    }
+
+    private async Task InterruptOwnedTurnAsync(string threadId, string turnId)
+    {
+        try
+        {
+            if (_lifetime.IsCancellationRequested) return;
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await RequestAsync("turn/interrupt", JsonSerializer.SerializeToElement(new { threadId, turnId }), deadline.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            _trace?.Record(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Local, TraceEventKind.Error, _traceId);
+        }
+    }
+
+    private async Task CloseOwnedTurnAsync(string threadId, string turnId)
+    {
+        if (_controlledTurns.TryRemove((threadId, turnId), out var controlled))
+        {
+            controlled.Registration.Dispose();
+            await controlled.Lease.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -548,6 +608,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             return;
 
         _lifetime.Cancel();
+        foreach (var key in _controlledTurns.Keys) await CloseOwnedTurnAsync(key.Thread, key.Turn).ConfigureAwait(false);
         try
         {
             _stdin.Close();

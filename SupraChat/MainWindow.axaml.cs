@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private readonly LocalTraceController _trace = new();
     private readonly ResponsesClient _responses;
     private readonly SupraChatCore _core;
+    private JsonElement? _ownedCancellationPlan;
     private readonly List<ResponseAttachment> _attachments = new();
     private readonly Queue<CodexProtocolEvent> _pendingServerRequests = new();
 
@@ -33,7 +34,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        _responses = new ResponsesClient(_trace.Binding);
+        _responses = new ResponsesClient(_trace.Binding, _trace.Controls);
         _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
         ShowTrace("status");
@@ -947,7 +948,7 @@ public partial class MainWindow : Window
             await EnsureCredentialAsync();
             await StopResponsesWebSocketAsync();
 
-            _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken, trace: _trace.Binding);
+            _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken, trace: _trace.Binding, controls: _trace.Controls);
             _responsesWebSocketCts = new CancellationTokenSource();
             var socket = _responsesWebSocket;
             var cancellationToken = _responsesWebSocketCts.Token;
@@ -979,7 +980,7 @@ public partial class MainWindow : Window
 
             if (_responsesWebSocket is not { IsConnected: true })
             {
-                _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken, trace: _trace.Binding);
+                _responsesWebSocket = await ResponsesWebSocketClient.ConnectAsync(_credential!.AccessToken, trace: _trace.Binding, controls: _trace.Controls);
                 _responsesWebSocketCts = new CancellationTokenSource();
                 var socket = _responsesWebSocket;
                 var cancellationToken = _responsesWebSocketCts.Token;
@@ -1513,7 +1514,7 @@ public partial class MainWindow : Window
             return _codex;
 
         await StopCodexAsync();
-        _codex = await CodexAppServerClient.StartAsync(_credential!.AccessToken, trace: _trace.Binding);
+        _codex = await CodexAppServerClient.StartAsync(_credential!.AccessToken, trace: _trace.Binding, controls: _trace.Controls);
 
         _codexEventsCts = new CancellationTokenSource();
         _codexEvents = _codex.SubscribeEvents();
@@ -1697,6 +1698,50 @@ public partial class MainWindow : Window
     private void TraceStop_Click(object? sender, RoutedEventArgs e) => ShowTrace("stop");
     private void TraceRead_Click(object? sender, RoutedEventArgs e) => ShowTrace("read");
     private void TraceExport_Click(object? sender, RoutedEventArgs e) => ShowTrace("export");
+
+    private void OwnedStreamsRefresh_Click(object? sender, RoutedEventArgs e)
+    {
+        OwnedStreamsBox.ItemsSource = _trace.Controls.List();
+        _ownedCancellationPlan = null;
+        OwnedControlConfirm.IsEnabled = false;
+        OwnedControlStatus.Text = "Select an owned stream and preview its cancellation.";
+    }
+
+    private void OwnedStreamSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        _ownedCancellationPlan = null;
+        OwnedControlConfirm.IsEnabled = false;
+    }
+
+    private void OwnedControlPreview_Click(object? sender, RoutedEventArgs e)
+    {
+        if (OwnedStreamsBox.SelectedItem is not OwnedStreamState target)
+        {
+            OwnedControlStatus.Text = "Select an active owned stream first.";
+            return;
+        }
+        var plan = _trace.Execute("control/preview", JsonSerializer.SerializeToElement(new
+        { stream_id = target.StreamId, action = "cancel", expected_revision = target.Revision, action_key = Guid.NewGuid() }));
+        _ownedCancellationPlan = plan.Clone();
+        OwnedControlConfirm.IsEnabled = plan.GetProperty("outcome").GetString() == "REQUESTED";
+        OwnedControlStatus.Text = $"Cancel local {target.Surface} stream {target.StreamId.ToString("N")[..8]}? Remote processing may continue. " +
+            plan.GetProperty("reason").GetString();
+        TraceOutput.Text = JsonSerializer.Serialize(plan, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private void OwnedControlConfirm_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_ownedCancellationPlan is not { } plan) return;
+        var result = _trace.Execute("control/apply", JsonSerializer.SerializeToElement(new
+        {
+            plan_id = plan.GetProperty("plan_id").GetGuid(), expected_revision = plan.GetProperty("expected_revision").GetInt64(),
+            action_key = plan.GetProperty("action_key").GetGuid(), confirmed = true
+        }));
+        _ownedCancellationPlan = null;
+        OwnedControlConfirm.IsEnabled = false;
+        OwnedControlStatus.Text = result.GetProperty("reason").GetString();
+        TraceOutput.Text = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+    }
 
     private void ShowTrace(string operation)
     {

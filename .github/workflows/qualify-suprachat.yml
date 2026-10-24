@@ -1141,7 +1141,7 @@ jobs:
                 }
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
@@ -1150,6 +1150,12 @@ jobs:
                     $null = Require-SemanticControl $automationId
                   }
                   if ($area.tab -eq 'Tab.AutomationAgents') {
+                    $ownedRefresh = Require-SemanticControl 'Control.Refresh'
+                    $ownedRefresh.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $ownedPreview = Require-SemanticControl 'Control.Preview'
+                    $ownedPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $ownedConfirm = Require-SemanticControl 'Control.Confirm'
+                    if ($ownedConfirm.Current.IsEnabled) { throw 'Owned cancellation was enabled without a selected, reviewed target.' }
                     foreach ($traceControl in @(
                       @{ id = 'Trace.Start'; mode = 'METADATA' },
                       @{ id = 'Trace.Stop'; mode = 'OFF' }

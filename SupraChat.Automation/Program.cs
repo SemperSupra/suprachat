@@ -20,7 +20,7 @@ internal static class Program
     };
     private static readonly SemaphoreSlim StdoutGate = new(1, 1);
     private static readonly LocalTraceController Trace = new();
-    private static readonly ResponsesClient TracedResponses = new(Trace.Binding);
+    private static readonly ResponsesClient TracedResponses = new(Trace.Binding, Trace.Controls);
     private static readonly SupraChatCore Core = new(responses: TracedResponses);
 
     private static CodexAppServerClient? _agentCodex;
@@ -181,7 +181,7 @@ internal static class Program
             "doctor/read",
             "diagnostics/read",
             "diagnostics/export",
-            "trace/status", "trace/start", "trace/stop", "trace/read", "trace/export",
+            "trace/status", "trace/start", "trace/stop", "trace/read", "trace/export", "trace/streams", "control/preview", "control/apply",
             "auth/status",
             "auth/bundle/inspect",
             "auth/export",
@@ -614,7 +614,7 @@ internal static class Program
             parameters = document.RootElement.Clone();
         }
 
-        await using var client = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding);
+        await using var client = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
         var result = await client.RequestAsync(method, parameters);
         return new
         {
@@ -627,83 +627,90 @@ internal static class Program
 
     private static async Task<int> RunTraceSessionAsync()
     {
+        var pending = new List<Task>();
         while (await Console.In.ReadLineAsync() is { } line)
         {
+            pending.RemoveAll(task => task.IsCompleted);
+            var concurrent = false;
             try
             {
-                using var document = JsonDocument.Parse(line);
-                var root = document.RootElement;
-                var operation = root.GetProperty("operation").GetString();
-                var parameters = root.TryGetProperty("params", out var p) ? p : (JsonElement?)null;
-                var arguments = root.TryGetProperty("arguments", out var a)
-                    ? a.EnumerateArray().Select(value => value.GetString() ?? "").ToArray() : Array.Empty<string>();
-                object result = operation switch
-                {
-                    "status" or "start" or "stop" or "read" or "export" => Trace.Execute(operation, parameters),
-                    "respond" => await RespondAsync(arguments),
-                    "responses-raw" when Option(arguments, "--body") is not null => await RawResponsesAsync(arguments),
-                    "codex-rpc" => await CodexRpcAsync(arguments),
-                    _ => throw new UnauthorizedAccessException("Trace-session operation refused.")
-                };
-                await WriteRpcLineAsync(new { ok = true, value = result });
+                using var request = JsonDocument.Parse(line);
+                concurrent = request.RootElement.ValueKind == JsonValueKind.Object &&
+                    request.RootElement.TryGetProperty("operation", out var operation) && operation.ValueKind == JsonValueKind.String &&
+                    operation.GetString() is "respond" or "responses-raw" or "codex-rpc";
             }
-            catch
+            catch (JsonException) { }
+            if (concurrent)
             {
-                await WriteRpcLineAsync(new { ok = false, error = new { code = "TRACE_COMMAND_REFUSED", message = "Local trace command failed or was refused." } });
+                if (pending.Count >= 8)
+                    await WriteRpcLineAsync(new { ok = false, error = new { code = "BUSY", message = "Owned request capacity reached." } });
+                else
+                {
+                    var commandId = Guid.NewGuid();
+                    await WriteRpcLineAsync(new { ok = true, accepted = true, command_id = commandId });
+                    pending.Add(ProcessTraceLineAsync(line, commandId));
+                }
             }
+            else await ProcessTraceLineAsync(line);
         }
+        await Task.WhenAll(pending);
         return 0;
+    }
+
+    private static async Task ProcessTraceLineAsync(string line, Guid? commandId = null)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            var operation = root.GetProperty("operation").GetString();
+            var parameters = root.TryGetProperty("params", out var p) ? p : (JsonElement?)null;
+            var arguments = root.TryGetProperty("arguments", out var a)
+                ? a.EnumerateArray().Select(value => value.GetString() ?? "").ToArray() : Array.Empty<string>();
+            object result = operation switch
+            {
+                "status" or "start" or "stop" or "read" or "export" or "streams" or "control/preview" or "control/apply" => Trace.Execute(operation, parameters),
+                "respond" => await RespondAsync(arguments),
+                "responses-raw" when Option(arguments, "--body") is not null => await RawResponsesAsync(arguments),
+                "codex-rpc" => await CodexRpcAsync(arguments),
+                _ => throw new UnauthorizedAccessException("Trace-session operation refused.")
+            };
+            await WriteRpcLineAsync(new { ok = true, command_id = commandId, value = result });
+        }
+        catch
+        {
+            await WriteRpcLineAsync(new { ok = false, command_id = commandId, error = new { code = "TRACE_COMMAND_REFUSED", message = "Local trace command failed or was refused." } });
+        }
+
     }
 
     private static async Task<int> RunStdioAsync()
     {
         Console.Error.WriteLine("{\"suprachat\":\"stdio-ready\",\"schema\":\"suprachat-jsonrpc/v1\"}");
-
+        var pending = new List<Task>();
         try
         {
-            string? line;
-            while ((line = await Console.In.ReadLineAsync()) is not null)
+            while (await Console.In.ReadLineAsync() is { } line)
             {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                object response;
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                pending.RemoveAll(task => task.IsCompleted);
+                var concurrent = false;
                 try
                 {
-                    using var document = JsonDocument.Parse(line);
-                    var root = document.RootElement;
-                    var id = root.TryGetProperty("id", out var idValue) ? idValue.Clone() : default(JsonElement?);
-                    var method = root.TryGetProperty("method", out var methodValue)
-                        ? methodValue.GetString()
-                        : null;
-                    var parameters = root.TryGetProperty("params", out var p) ? p.Clone() : default(JsonElement?);
-
-                    if (string.IsNullOrWhiteSpace(method))
-                        throw new MachineException(2, "INVALID_REQUEST", "JSON-RPC method is required.");
-
-                    var result = await DispatchRpcAsync(method, parameters);
-                    response = new
-                    {
-                        jsonrpc = "2.0",
-                        id,
-                        result
-                    };
+                    using var request = JsonDocument.Parse(line);
+                    concurrent = request.RootElement.ValueKind == JsonValueKind.Object && request.RootElement.TryGetProperty("method", out var method) &&
+                        method.ValueKind == JsonValueKind.String && method.GetString() is "responses/create" or "responses/raw";
                 }
-                catch (MachineException ex)
+                catch (JsonException) { }
+                if (concurrent)
                 {
-                    response = RpcError(line, -32000, ex.Code, ex.Message);
+                    if (pending.Count >= 8)
+                        await WriteRpcLineAsync(RpcError(line, -32000, "BUSY", "Owned request capacity reached."));
+                    else pending.Add(ProcessRpcLineAsync(line));
                 }
-                catch (JsonException ex)
-                {
-                    response = RpcError(line, -32700, "PARSE_ERROR", ex.Message);
-                }
-                catch (Exception ex)
-                {
-                    response = RpcError(line, -32001, "FAILED", SafeMessage(ex));
-                }
-
-                await WriteRpcLineAsync(response);
+                else await ProcessRpcLineAsync(line);
             }
+            await Task.WhenAll(pending);
         }
         finally
         {
@@ -711,8 +718,47 @@ internal static class Program
             await StopAgentResponsesAsync();
             await StopAgentCodexAsync();
         }
-
         return 0;
+    }
+
+    private static async Task ProcessRpcLineAsync(string line)
+    {
+        object response;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            var id = root.TryGetProperty("id", out var idValue) ? idValue.Clone() : default(JsonElement?);
+            var method = root.TryGetProperty("method", out var methodValue)
+                ? methodValue.GetString()
+                : null;
+            var parameters = root.TryGetProperty("params", out var p) ? p.Clone() : default(JsonElement?);
+
+            if (string.IsNullOrWhiteSpace(method))
+                throw new MachineException(2, "INVALID_REQUEST", "JSON-RPC method is required.");
+
+            var result = await DispatchRpcAsync(method, parameters);
+            response = new
+            {
+                jsonrpc = "2.0",
+                id,
+                result
+            };
+        }
+        catch (MachineException ex)
+        {
+            response = RpcError(line, -32000, ex.Code, ex.Message);
+        }
+        catch (JsonException ex)
+        {
+            response = RpcError(line, -32700, "PARSE_ERROR", ex.Message);
+        }
+        catch (Exception ex)
+        {
+            response = RpcError(line, -32001, "FAILED", SafeMessage(ex));
+        }
+
+        await WriteRpcLineAsync(response);
     }
 
     private static async Task<object> DispatchRpcAsync(string method, JsonElement? parameters)
@@ -734,6 +780,9 @@ internal static class Program
             "trace/stop" => Trace.Execute("stop", parameters),
             "trace/read" => Trace.Execute("read", parameters),
             "trace/export" => Trace.Execute("export", parameters),
+            "trace/streams" => Trace.Execute("streams", parameters),
+            "control/preview" => Trace.Execute("control/preview", parameters),
+            "control/apply" => Trace.Execute("control/apply", parameters),
             "diagnostics/export" => await RpcDiagnosticsExportAsync(parameters),
             "auth/status" => await AuthStatusAsync(),
             "auth/bundle/inspect" => await RpcAuthBundleInspectAsync(parameters),
@@ -1115,7 +1164,7 @@ internal static class Program
 
         await StopAgentResponsesAsync();
         var credential = await RequireCredentialAsync();
-        _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(credential.AccessToken, trace: Trace.Binding);
+        _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(credential.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
         _agentResponsesCts = new CancellationTokenSource();
         var socket = _agentResponsesSocket;
         var token = _agentResponsesCts.Token;
@@ -1284,7 +1333,7 @@ internal static class Program
 
         await StopAgentCodexAsync();
         var credential = await RequireCredentialAsync();
-        _agentCodex = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding);
+        _agentCodex = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
         _agentCodexCts = new CancellationTokenSource();
         _agentCodexEvents = _agentCodex.SubscribeEvents();
         var subscription = _agentCodexEvents;
