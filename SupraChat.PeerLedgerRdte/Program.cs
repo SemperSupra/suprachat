@@ -23,9 +23,15 @@ internal static class Program
     private static readonly List<WindowsOwnerCustody> CustodyRoots = new();
     private static bool _custodyMode;
 
+    [STAThread]
     public static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) return 64;
+        if (args.Length == 2 && args[0] == "--shared-desktop-receipt") return SharedDesktopLab.Run(args[1]);
+        if (args.Length == 4 && args[0] == "--shared-client")
+        {
+            try { return await SharedDesktopHost.ClientAsync(args[1], args[2], args[3]); } catch { return 71; }
+        }
         if (args.Length == 5 && args[0] == "--peer")
         {
             try { await ChildAsync(args[1], args[2], args[3], args[4]); return 0; } catch { return 71; }
@@ -233,7 +239,7 @@ internal static class Program
         finally { await CleanupAsync(child); }
     }
 
-    private static bool ObservePeer(NamedPipeServerStream pipe, int expectedPid, DateTime expectedStart)
+    internal static bool ObservePeer(NamedPipeServerStream pipe, int expectedPid, DateTime expectedStart)
     {
         if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var pid) || pid != expectedPid) return false;
         using var peer = Process.GetProcessById(checked((int)pid));
@@ -264,7 +270,7 @@ internal static class Program
         await ReadFrameAsync(pipe, timeout.Token);
     }
 
-    private static Process Spawn(params string[] arguments)
+    internal static Process Spawn(params string[] arguments)
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "../../.."));
         var start = new ProcessStartInfo(Path.Combine(root, "dotnet.exe"))
@@ -280,7 +286,7 @@ internal static class Program
         return Process.Start(start) ?? throw new InvalidOperationException();
     }
 
-    private static async Task CleanupAsync(Process child)
+    internal static async Task CleanupAsync(Process child)
     {
         if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3)); }
     }
@@ -320,7 +326,7 @@ internal static class Program
         return new("checkpoint-" + fault.ToLowerInvariant(), true, false, "RESTART_REPLAY_VERIFIED");
     }
 
-    private static async Task<byte[]> ReadFrameAsync(Stream pipe, CancellationToken token)
+    internal static async Task<byte[]> ReadFrameAsync(Stream pipe, CancellationToken token)
     {
         var header = new byte[4];
         await pipe.ReadExactlyAsync(header, token);
@@ -330,7 +336,7 @@ internal static class Program
         await pipe.ReadExactlyAsync(data, token);
         return data;
     }
-    private static async Task WriteFrameAsync(Stream pipe, byte[] data, CancellationToken token)
+    internal static async Task WriteFrameAsync(Stream pipe, byte[] data, CancellationToken token)
     {
         if (data.Length is < 1 or > 2048) throw new InvalidDataException();
         var header = new byte[4];
