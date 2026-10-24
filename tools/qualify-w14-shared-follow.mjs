@@ -76,7 +76,7 @@ async function invoke(args,stdin){
   cli.once('close',code=>{
    if(done)return;done=true;clearTimeout(t);
    if(code!==0)return reject(new Error('CLIENT_EXIT_'+code));
-   try{return resolve(JSON.parse(out.trim().split(/\r?\n/).at(-1)))}catch(e){reject(e)}
+   try{return resolve(JSON.parse(out.trim()))}catch(e){reject(e)}
   });
   cli.stdin.end(stdin?JSON.stringify(stdin)+'\n':'');
  });
