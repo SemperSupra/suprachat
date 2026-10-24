@@ -115,10 +115,19 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
                 {
                     if (_socket.State == WebSocketState.CloseReceived)
                     {
-                        await _socket.CloseOutputAsync(
-                            WebSocketCloseStatus.NormalClosure,
-                            "SupraChat acknowledged server close.",
-                            CancellationToken.None).ConfigureAwait(false);
+                        try
+                        {
+                            await _socket.CloseOutputAsync(
+                                WebSocketCloseStatus.NormalClosure,
+                                "SupraChat acknowledged server close.",
+                                cancellationToken).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+                            throw;
+                        }
                     }
                     _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
                         TraceEventKind.Completed, _traceId);

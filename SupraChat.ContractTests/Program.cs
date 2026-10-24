@@ -10,6 +10,11 @@ if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-control-fixture")
     await GovernedControlChecks.RunRpcFixtureAsync();
     return;
 }
+if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-control-exit-fixture")
+{
+    await GovernedControlChecks.RunRpcFixtureAsync(abrupt: true);
+    return;
+}
 
 if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-fixture")
 {

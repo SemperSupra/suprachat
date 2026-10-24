@@ -51,3 +51,17 @@ if ($LASTEXITCODE -ne 0 -or $controlRpcResults.Count -ne 3 -or $controlRpcResult
     throw 'Owned control agent denial contract failed.'
 }
 'Owned control CLI/agent denial contracts PASS (no provider actions).'
+$framingCommands = @(
+    '{"operation":"responses-raw","arguments":["--model","synthetic","--body"," "]}',
+    '{"operation":"streams"}',
+    '{"operation":"status"}'
+)
+$framingResults = @($framingCommands | & $DotNet $traceCli trace-session | ForEach-Object { $_ | ConvertFrom-Json })
+if ($LASTEXITCODE -ne 0 -or $framingResults.Count -ne 4 -or
+    @($framingResults | Where-Object { $_.accepted }).Count -ne 1 -or
+    @($framingResults | Where-Object { $_.error.code -eq 'TRACE_COMMAND_REFUSED' }).Count -ne 1 -or
+    @($framingResults | Where-Object { $_.value.authority -eq 'SINGLE_OPERATOR_PROCESS_LOCAL' }).Count -ne 1 -or
+    @($framingResults | Where-Object { $_.value.operation -eq 'status' }).Count -ne 1) {
+    throw 'Rejected raw body consumed or blocked persistent control input.'
+}
+'Persistent control input survives whitespace raw-body rejection PASS.'
