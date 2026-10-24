@@ -575,12 +575,15 @@ internal static class Program
         };
     }
 
-    private static async Task<object> RawResponsesAsync(string[] args)
+    private static async Task<object> RawResponsesAsync(string[] args, bool allowStandardInput = true)
     {
         var model = RequiredOption(args, "--model");
         var raw = Option(args, "--body");
         if (string.IsNullOrWhiteSpace(raw))
+        {
+            if (!allowStandardInput) throw new MachineException(2, "INVALID_PARAMS", "A nonempty --body is required in a persistent command session.");
             raw = await Console.In.ReadToEndAsync();
+        }
         if (string.IsNullOrWhiteSpace(raw))
             throw new MachineException(2, "USAGE", "Provide --body <json> or JSON on stdin.");
 
@@ -671,7 +674,7 @@ internal static class Program
             {
                 "status" or "start" or "stop" or "read" or "export" or "streams" or "control/preview" or "control/apply" => Trace.Execute(operation, parameters),
                 "respond" => await RespondAsync(arguments),
-                "responses-raw" when Option(arguments, "--body") is not null => await RawResponsesAsync(arguments),
+                "responses-raw" when !string.IsNullOrWhiteSpace(Option(arguments, "--body")) => await RawResponsesAsync(arguments, allowStandardInput: false),
                 "codex-rpc" => await CodexRpcAsync(arguments),
                 _ => throw new UnauthorizedAccessException("Trace-session operation refused.")
             };

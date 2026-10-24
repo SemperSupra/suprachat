@@ -446,6 +446,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
         finally
         {
+            // stdout termination invalidates known-turn control targets even if the caller
+            // has not disposed the transport yet. Never present abandoned turns as active.
+            foreach (var key in _controlledTurns.Keys)
+                await CloseOwnedTurnAsync(key.Thread, key.Turn).ConfigureAwait(false);
             _trace?.Record(TraceSurface.CodexJsonRpc, TraceAdapter.Stdio, TraceDirection.Local,
                 _lifetime.IsCancellationRequested ? TraceEventKind.Cancelled :
                     terminal is null ? TraceEventKind.CaptureGap : TraceEventKind.Error, _traceId);

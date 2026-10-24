@@ -80,9 +80,13 @@ public sealed class LocalOwnedStreamControls : IDisposable
             if (_outcomes.TryGetValue(actionKey, out var first))
                 return first.Plan == planId && first.Revision == expectedRevision && first.Confirmed == confirmed ? first.Receipt :
                     Refused(Guid.Empty, actionKey, "IDEMPOTENCY_CONFLICT");
+            if (_outcomes.Count >= 128) return Refused(Guid.Empty, actionKey, "OUTCOME_CAPACITY");
             if (!_plans.TryGetValue(planId, out var plan) || plan.ActionKey != actionKey)
-                return Refused(Guid.Empty, actionKey, "PLAN_UNAVAILABLE");
-            if (_outcomes.Count >= 128) return Refused(plan.StreamId, actionKey, "OUTCOME_CAPACITY");
+            {
+                var unavailable = Refused(Guid.Empty, actionKey, "PLAN_UNAVAILABLE");
+                _outcomes.Add(actionKey, (planId, expectedRevision, confirmed, unavailable));
+                return unavailable;
+            }
             OwnedControlReceipt receipt;
             if (!confirmed) receipt = Refused(plan.StreamId, actionKey, "CONFIRMATION_REQUIRED");
             else if (plan.ExpiresAt <= _clock.GetUtcNow()) receipt = Refused(plan.StreamId, actionKey, "PLAN_EXPIRED");
