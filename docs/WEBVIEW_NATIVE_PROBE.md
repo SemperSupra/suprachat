@@ -112,6 +112,13 @@ Receipts contain only closed fixture route/event counters, runtime versions and 
 classifications. Fresh profiles are used, and known WebView2 environment overrides are refused.
 The Windows workflow repeats the independent comparison and preserves sanitized receipts only.
 
+Public rep 40060422171 exposed a separate test assumption: the browser coalesced two flushed server
+writes into one dataReceived event even though the exact body was consumed. The fixture now waits
+for an explicit page POST acknowledgment after the first reader chunk before sending the second.
+Server request counts and exact body verification prove progressive consumption independently of
+CDP event batching. At least one data event and exactly one terminal event remain required. This
+replaces a timing-sensitive packet-count assertion with a causal application-level oracle.
+
 Next: independent review and native adapter integration; preserve unknown completion confidence
 unless a separate semantic source proves provider completion.
 T2 owned Responses/Codex instrumentation may progress independently against the shared T0 contract.

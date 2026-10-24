@@ -58,7 +58,7 @@ internal sealed class NativeObserver : IDisposable
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Host != _origin.Host || uri.Port != _origin.Port ||
             uri.Scheme is not ("http" or "ws") || !uri.AbsolutePath.StartsWith(_pathPrefix, StringComparison.Ordinal)) return null;
         var route = uri.AbsolutePath[_pathPrefix.Length..];
-        return route is "page" or "stream" or "events" or "cancel" or "socket" ? route : null;
+        return route is "page" or "stream" or "events" or "cancel" or "socket" or "ack" ? route : null;
     }
 
     private void Count(string key) => Counts[key] = Counts.GetValueOrDefault(key) + 1;

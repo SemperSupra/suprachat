@@ -144,7 +144,8 @@ internal static class Program
         private readonly object _gate = new();
         private readonly Dictionary<string, string> _ids = new();
         private readonly Dictionary<string, int> _counts = new();
-        public bool Valid { get { lock (_gate) return _counts.GetValueOrDefault("requestWillBeSent:stream") == 1 && _counts.GetValueOrDefault("dataReceived:stream") > 0; } }
+        public bool Valid { get { lock (_gate) return _counts.GetValueOrDefault("requestWillBeSent:stream") == 1 &&
+            _counts.GetValueOrDefault("requestWillBeSent:ack") == 1 && _counts.GetValueOrDefault("dataReceived:stream") > 0; } }
         public Dictionary<string, int> Snapshot() { lock (_gate) return new(_counts); }
         private void Add(string key) => _counts[key] = _counts.GetValueOrDefault(key) + 1;
         private static string? Route(string url, Uri target)
@@ -153,7 +154,7 @@ internal static class Program
             var prefix = target.AbsolutePath[..(target.AbsolutePath.LastIndexOf('/') + 1)];
             if (!parsed.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal)) return null;
             var route = parsed.AbsolutePath[prefix.Length..];
-            return route is "page" or "stream" or "events" or "cancel" ? route : null;
+            return route is "page" or "stream" or "events" or "cancel" or "ack" ? route : null;
         }
         public void HighLevel(string kind, string url, Uri target)
         {

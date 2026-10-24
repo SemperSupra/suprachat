@@ -108,7 +108,7 @@ internal sealed class ProbeApp : Application
                 await Task.Delay(40);
             foreach (var observer in observers)
             {
-                foreach (var route in new[] { "page", "stream", "events", "cancel" })
+                foreach (var route in new[] { "page", "stream", "events", "cancel", "ack" })
                 {
                     Require(observer.Counts.GetValueOrDefault("requestWillBeSent:" + route) == 1);
                     Require(observer.Counts.GetValueOrDefault("responseReceived:" + route) == 1);
@@ -125,12 +125,12 @@ internal sealed class ProbeApp : Application
                 // discrepancy instead of manufacturing provider-success semantics from page success.
                 Require(observer.Counts.GetValueOrDefault("loadingFinished:stream") +
                     observer.Counts.GetValueOrDefault("loadingFailed:stream") == 1, "stream-terminal-event");
-                Require(observer.Counts.GetValueOrDefault("dataReceived:stream") >= 2, "stream-incremental-chunks");
-                Require(!observer.CallbackFailed && observer.RequestAliases.Count == 5);
+                Require(observer.Counts.GetValueOrDefault("dataReceived:stream") >= 1, "stream-data-observed");
+                Require(!observer.CallbackFailed && observer.RequestAliases.Count == 6);
             }
             Require(!observers[0].RequestAliases.Overlaps(observers[1].RequestAliases));
             foreach (var session in new[] { "a", "b" })
-                foreach (var route in new[] { "page", "stream", "events", "cancel", "socket" })
+                foreach (var route in new[] { "page", "stream", "events", "cancel", "socket", "ack" })
                     Require(server.Count(session, "observed", route) == 1);
 
             phase = "detach-with-behavior-preserved";
@@ -143,7 +143,7 @@ internal sealed class ProbeApp : Application
             for (var i = 0; i < observers.Count; i++)
                 Require(!observers[i].CallbackFailed && observers[i].TotalCallbacks == callbacksAtDetach[i]);
             foreach (var session in new[] { "a", "b" })
-                foreach (var route in new[] { "page", "stream", "events", "cancel", "socket" })
+                foreach (var route in new[] { "page", "stream", "events", "cancel", "socket", "ack" })
                     Require(server.Count(session, "detached", route) == 1);
 
             passed = true;
@@ -158,6 +158,7 @@ internal sealed class ProbeApp : Application
                 isolated_correlation = true,
                 detached_callbacks = 0,
                 fixture_behavior_preserved = true,
+                progressive_stream_acknowledged = true,
                 sessions = observers.Select((observer, index) => new { session = index, counts = observer.Counts }).ToArray()
             };
         }

@@ -37,7 +37,7 @@ try {
         $probeReceipt.production_admitted -or $probeReceipt.completeness -ne 'UNKNOWN' -or
         $probeReceipt.real_credentials -or $probeReceipt.real_chatgpt_traffic -or $probeReceipt.raw_payload_exported -or
         $probeReceipt.remote_debugging_listener -or $probeReceipt.details.concurrent_sessions -ne 2 -or
-        $probeReceipt.details.detached_callbacks -ne 0) {
+        $probeReceipt.details.detached_callbacks -ne 0 -or !$probeReceipt.details.progressive_stream_acknowledged) {
         throw 'Probe receipt scope/qualification contract failed.'
     }
     [ordered]@{

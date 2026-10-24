@@ -14,6 +14,7 @@ internal sealed class FixtureServer : IAsyncDisposable
     public const string Sentinel = "synthetic-private-sentinel-51";
     private readonly WebApplication _app;
     private readonly ConcurrentDictionary<string, int> _requests = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _firstChunkAcks = new();
     public Uri Origin { get; }
     public string Nonce { get; } = Guid.NewGuid().ToString("N");
 
@@ -56,13 +57,20 @@ internal sealed class FixtureServer : IAsyncDisposable
                     break;
                 case "stream":
                 case "events":
+                    var ack = route == "stream" ? _firstChunkAcks.GetOrAdd(parts[1] + "/" + parts[2], _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)) : null;
                     context.Response.ContentType = "text/event-stream";
                     if (route == "stream")
                         context.Response.ContentLength = Encoding.UTF8.GetByteCount($"data: {Sentinel}-one\n\ndata: {Sentinel}-two\n\n");
                     await WriteAsync(context, $"data: {Sentinel}-one\n\n");
                     await context.Response.Body.FlushAsync(context.RequestAborted);
-                    await Task.Delay(80, context.RequestAborted);
+                    if (ack is not null) await ack.Task.WaitAsync(TimeSpan.FromSeconds(5), context.RequestAborted);
+                    else await Task.Delay(80, context.RequestAborted);
                     await WriteAsync(context, $"data: {Sentinel}-two\n\n");
+                    break;
+                case "ack":
+                    if (context.Request.Method != "POST" || !_firstChunkAcks.TryGetValue(parts[1] + "/" + parts[2], out var firstChunk))
+                        context.Response.StatusCode = 404;
+                    else { firstChunk.TrySetResult(); context.Response.StatusCode = 204; }
                     break;
                 case "cancel":
                     await WriteAsync(context, "ready");
@@ -100,7 +108,9 @@ internal sealed class FixtureServer : IAsyncDisposable
             }).then(async r => { const reader = r.body.getReader(); let body = '';
               if (new URLSearchParams(location.search).get('retain') === '1') globalThis.__fixtureRetained = {r, reader};
               const decoder = new TextDecoder();
-              for (;;) { const v = await reader.read(); if (v.done) break; body += decoder.decode(v.value, {stream:true}); }
+              let acknowledged = false;
+              for (;;) { const v = await reader.read(); if (v.done) break; body += decoder.decode(v.value, {stream:true});
+                if (!acknowledged) { const ack = await fetch('ack', {method:'POST'}); if (!ack.ok) throw Error('fixture'); acknowledged = true; } }
               body += decoder.decode();
               if (body !== 'data: synthetic-private-sentinel-51-one\n\ndata: synthetic-private-sentinel-51-two\n\n') throw Error('fixture'); });
             const events = new Promise((resolve, reject) => { const s = new EventSource('events');
