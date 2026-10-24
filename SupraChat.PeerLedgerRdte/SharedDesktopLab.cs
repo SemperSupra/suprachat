@@ -18,13 +18,13 @@ internal static class SharedDesktopLab
     internal static string Phase = "STARTUP";
     internal static int Result = 1;
 
-    internal static int Run(string receiptPath)
+    internal static int Run(string receiptPath, bool requireConsent = false)
     {
         var path = Path.GetFullPath(receiptPath);
         if (File.Exists(path)) return 64;
         try
         {
-            Host = new SharedDesktopHost();
+            Host = new SharedDesktopHost(requireConsent);
             AppBuilder.Configure<SharedDesktopApp>().UsePlatformDetect().StartWithClassicDesktopLifetime(Array.Empty<string>());
         }
         catch { Result = 1; Phase = "INCOMPLETE"; }
@@ -35,7 +35,7 @@ internal static class SharedDesktopLab
             using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             JsonSerializer.Serialize(output, new
             {
-                schema = "suprachat-shared-desktop-rdte/v1", passed = Result == 0, phase = Phase, details = Details,
+                schema = requireConsent ? "suprachat-metadata-consent-rdte/v1" : "suprachat-shared-desktop-rdte/v1", passed = Result == 0, phase = Phase, details = Details,
                 scope = "DISPOSABLE_SHARED_METADATA_WORKBENCH", provider_actions = false, first_party_capture = false,
                 human_identity_qualified = false, production_shared_host_qualified = false,
                 production_issuer_custody_qualified = false, payload_exported = false
@@ -54,9 +54,10 @@ internal sealed class SharedDesktopApp : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var model = SharedDesktopLab.Host!;
-            var window = new Window { Title = "SupraChat shared-session research", Width = 850, Height = 780 };
+            var window = new Window { Title = "SupraChat shared-session research", Width = model.ConsentEnabled ? 1180 : 850, Height = 800 };
             AutomationProperties.SetAutomationId(window, "Shared.Window");
             var sessions = Named(new ComboBox { ItemsSource = new[] { "Session A", "Session B" }, SelectedIndex = 0 }, "Shared.Sessions", "Session");
+            var consentPane = model.ConsentEnabled ? new MetadataConsentPane(model, () => sessions.SelectedIndex) : null;
             var title = Named(new TextBox { MaxLength = 80 }, "Shared.Title", "Session title");
             var snapshot = Named(new TextBox { IsReadOnly = true, Height = 120, AcceptsReturn = true }, "Shared.Snapshot", "Shared session snapshot");
             var status = Named(new TextBox { IsReadOnly = true, Text = "Ready" }, "Shared.Status", "Workbench status");
@@ -70,7 +71,12 @@ internal sealed class SharedDesktopApp : Application
             panel.Children.Add(new TextBlock { Text = "Disposable shared-session workbench", FontSize = 24 });
             panel.Children.Add(new TextBlock { Text = "Synthetic metadata only. No ChatGPT sign-in, provider actions or production identity." });
             foreach (var control in new Control[] { sessions, title, save, refresh, clients, revoke, verify, status, snapshot }) panel.Children.Add(control);
-            window.Content = panel;
+            if (consentPane is not null)
+            {
+                var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*") };
+                grid.Children.Add(panel); Grid.SetColumn(consentPane, 1); grid.Children.Add(consentPane); window.Content = grid;
+            }
+            else window.Content = panel;
             long displayedVersion = 0;
             var busy = false;
             void Render(bool replaceTitle = true)
@@ -84,19 +90,21 @@ internal sealed class SharedDesktopApp : Application
             {
                 if (busy) return;
                 busy = true; sessions.IsEnabled = false; title.IsEnabled = false;
+                if (consentPane is not null) consentPane.IsEnabled = false;
                 foreach (var button in buttons) button.IsEnabled = false;
                 try { await action(); }
                 catch { status.Text = "Fixture incomplete"; SharedDesktopLab.Phase = "ACTION_INCOMPLETE"; }
                 finally
                 {
                     busy = false; sessions.IsEnabled = true; title.IsEnabled = true;
+                    if (consentPane is not null) consentPane.IsEnabled = true;
                     foreach (var button in buttons) button.IsEnabled = true;
                     clients.IsEnabled = !model.ClientsComplete;
                     revoke.IsEnabled = model.ClientsComplete && !model.AgentRevoked;
                     verify.IsEnabled = model.AgentRevoked;
                 }
             }
-            sessions.SelectionChanged += (_, _) => { if (!busy) Render(); };
+            sessions.SelectionChanged += (_, _) => { if (!busy) { consentPane?.SelectionChanged(); Render(); } };
             refresh.Click += async (_, _) => await Action(() => { Render(); status.Text = "Refreshed"; return Task.CompletedTask; });
             save.Click += async (_, _) => await Action(() =>
             {
