@@ -37,7 +37,7 @@ public static class SharedSessionFeedProjection
         // Initial observation is a bounded retained window, NOT complete history.
         // Subsequent reads return strictly new events from the selected host
         // session and never treat a discarded/torn window as full catch-up.
-        var selectedEvents = observation.Events
+        var selectedEvents = observation.RetainedEvents
             .Where(x => x.SessionId == selected.Id &&
                 (previousSequence is null || x.Sequence > previousSequence))
             .TakeLast(MaxVisibleEvents)
@@ -53,9 +53,9 @@ public static class SharedSessionFeedProjection
     {
         if (observed.Sequence == 0) return false;
         if (cursor is null)
-            return observed.Events.Count == 0 || observed.Events[0].Sequence > 1;
+            return observed.RetainedEvents.Count == 0 || observed.RetainedEvents[0].Sequence > 1;
         if (cursor >= observed.Sequence) return false;
-        var newer = observed.Events.Where(e => e.Sequence > cursor).ToArray();
+        var newer = observed.RetainedEvents.Where(e => e.Sequence > cursor).ToArray();
         return newer.Length == 0 || newer[0].Sequence > cursor + 1;
     }
 
