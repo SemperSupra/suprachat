@@ -83,7 +83,36 @@ receipt. The normal product build remains independent of this experimental proje
   established fixed-length/chunk termination behavior during fixture isolation. The fixture now uses
   Microsoft's Kestrel server; no Microsoft source files are copied into the product.
 
-Next: independent review and public Windows qualification; investigate the terminal-event discrepancy
-with an independent clean-room browser oracle before claiming successful stream completion from CDP.
+## Independent comparison — 2026-10-24
+
+SupraChat.WebViewOracle now runs the same fixture in a fresh Playwright Chromium context and a
+minimal Microsoft WinForms WebView2 host without Avalonia. Runtime versions were Chromium
+153.0.8010.12 and WebView2 155.0.4283.62. The Microsoft-only host reproduced the abort, ruling out
+an Avalonia-only explanation. An initial Chromium rep reported normal loadingFinished, but repeated
+Chromium reps also reported ERR_ABORTED while consuming the exact complete body. Therefore an
+engine-specific explanation is not established. Retaining the Response and reader in the synthetic
+page did not eliminate the discrepancy. Original receipts are preserved; no outcome is rewritten.
+
+The initial Playwright polling helper also conflicted with the fixture CSP's eval restriction. The
+oracle now polls the title from the host, without weakening CSP or changing stream traffic. The
+matching pinned Playwright headless runtime is installed explicitly. The comparison script checks
+both page completion and exactly one observed terminal event per finite stream; it records the
+actual success/error distinction rather than requiring the two browsers to agree. This comparison
+does not prove why an abort was emitted or infer remote provider success.
+
+Run after building the oracle project and installing its pinned browser:
+
+```powershell
+dotnet build SupraChat.WebViewOracle/SupraChat.WebViewOracle.csproj -c Release
+./SupraChat.WebViewOracle/bin/Release/net10.0-windows/playwright.ps1 install chromium --only-shell
+./tools/local/Compare-SupraChatWebViewOracle.ps1 -OutputDirectory "$env:TEMP/fresh-oracle-receipts"
+```
+
+Receipts contain only closed fixture route/event counters, runtime versions and scope/boolean
+classifications. Fresh profiles are used, and known WebView2 environment overrides are refused.
+The Windows workflow repeats the independent comparison and preserves sanitized receipts only.
+
+Next: independent review and native adapter integration; preserve unknown completion confidence
+unless a separate semantic source proves provider completion.
 T2 owned Responses/Codex instrumentation may progress independently against the shared T0 contract.
 No signed-in ChatGPT observation or live first-party actuation is admitted by this experiment.

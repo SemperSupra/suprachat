@@ -29,7 +29,7 @@ internal sealed class FixtureServer : IAsyncDisposable
         Origin = new Uri(_app.Urls.Single().TrimEnd('/') + "/");
     }
 
-    public Uri Page(string session, string phase) => new(Origin, $"{Nonce}/{session}/{phase}/page?private={Sentinel}");
+    public Uri Page(string session, string phase, bool retain = false) => new(Origin, $"{Nonce}/{session}/{phase}/page?private={Sentinel}&retain={(retain ? 1 : 0)}");
     public int Count(string session, string phase, string route) => _requests.GetValueOrDefault($"{session}/{phase}/{route}");
 
     private async Task ServeAsync(HttpContext context)
@@ -98,6 +98,7 @@ internal sealed class FixtureServer : IAsyncDisposable
             const stream = fetch('stream?private=synthetic-private-sentinel-51', {
               headers: {'X-Synthetic-Private': 'synthetic-private-sentinel-51'}
             }).then(async r => { const reader = r.body.getReader(); let body = '';
+              if (new URLSearchParams(location.search).get('retain') === '1') globalThis.__fixtureRetained = {r, reader};
               const decoder = new TextDecoder();
               for (;;) { const v = await reader.read(); if (v.done) break; body += decoder.decode(v.value, {stream:true}); }
               body += decoder.decode();
