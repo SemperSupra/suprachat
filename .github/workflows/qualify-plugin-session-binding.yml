@@ -1,0 +1,30 @@
+name: Qualify supported ChatGPT plugin session-correlation oracle
+
+on:
+  pull_request:
+    paths:
+      - 'tools/test_plugin_session_binding.py'
+      - 'docs/w14-plugin-session-correlation-contract.md'
+      - '.github/workflows/qualify-plugin-session-binding.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: suprachat-plugin-binding-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-plugin-correlation:
+    name: Synthetic oracle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run stdlib-only consent, correlation, isolation and denial contracts
+        run: python -m unittest discover -s tools -p test_plugin_session_binding.py -v
