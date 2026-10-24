@@ -108,7 +108,7 @@ try {
  const agent=await invoke(['stdio'],p);
  assert.equal(agent.id,42);assert.equal(agent.result.selected_session_id,idB);
  assert.equal(agent.result.events.length,1);
- assert.equal(agent.result.events[0].sessionId,idB);
+ assert.equal(agent.result.events[0].session_id,idB);
  assert.equal(agent.result.terminal_authority,false);
  record('separate-agent-process-selected-B-uses-identical-read-only-core');
  const update=await http('/v1/sessions/change',{
@@ -120,7 +120,7 @@ try {
  assert.equal(after.value.sequence,3);
  assert.equal(after.value.events.length,1);
  assert.equal(after.value.events[0].sequence,3);
- assert.equal(after.value.events[0].sessionId,idA);
+ assert.equal(after.value.events[0].session_id,idA);
  assert.equal(after.value.event_gap_unverified,false);
  const idle=await invoke([...followArgs,'--after','3']);
  assert.equal(idle.value.status,'SELECTED_NO_NEW_EVENTS');
