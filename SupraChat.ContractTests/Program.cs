@@ -622,4 +622,5 @@ Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\
 await TrafficTraceChecks.RunAsync();
 await OwnedTransportTraceChecks.RunAsync();
 await GovernedControlChecks.RunAsync();
+await SharedSessionAdmissionChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");
