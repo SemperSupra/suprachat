@@ -1,0 +1,34 @@
+name: Qualify synthetic native WebView probe
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.WebViewProbe/**'
+      - 'SupraChat/Core/WindowsWebViewTraceAdapter.cs'
+      - 'SupraChat/Core/TrafficTrace.cs'
+      - 'tools/local/Test-SupraChatWebViewProbe.ps1'
+      - '.github/workflows/qualify-webview-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-native-synthetic:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build isolated probe
+        run: dotnet build SupraChat.WebViewProbe/SupraChat.WebViewProbe.csproj -c Release
+      - name: Qualify two disposable native browsers against synthetic loopback fixtures
+        shell: pwsh
+        run: |
+          ./tools/local/Test-SupraChatWebViewProbe.ps1 -ReceiptPath "$env:RUNNER_TEMP/webview-probe-receipt.json"
+      - name: Preserve sanitized receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-webview-probe-receipt
+          path: ${{ runner.temp }}/webview-probe-receipt.json
+          if-no-files-found: ignore
