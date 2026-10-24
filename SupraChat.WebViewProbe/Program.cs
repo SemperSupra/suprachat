@@ -182,11 +182,13 @@ internal sealed class ProbeApp : Application
             try { await WindowsWebViewTraceAdapter.AttachSyntheticAsync(scopeHandle.CoreWebView2, scopeTrace, scopeSession, new Uri("https://chatgpt.com/")); }
             catch (UnauthorizedAccessException) { firstPartyRefused = true; }
             Require(wrongSessionRefused && firstPartyRefused);
-            await using var scopeAdapter = await WindowsWebViewTraceAdapter.AttachSyntheticAsync(scopeHandle.CoreWebView2, scopeTrace, scopeSession, server.Origin);
+            using var scopeOwner = new LocalTraceController();
+            scopeOwner.Execute("start");
+            await using var scopeAdapter = await scopeOwner.AttachSyntheticNativeAsync(scopeHandle.CoreWebView2, server.Origin);
             views[2].Navigate(new Uri("data:text/html,synthetic-scope-exit"));
             var scopeDeadline = DateTime.UtcNow.AddSeconds(5);
             while (!scopeAdapter.IsStopped && DateTime.UtcNow < scopeDeadline) await Task.Delay(40);
-            Require(scopeAdapter.IsStopped && scopeAdapter.DroppedObservations > 0 && scopeTrace.Read(scopeSession).CaptureGap);
+            Require(scopeAdapter.IsStopped && scopeAdapter.DroppedObservations > 0 && scopeOwner.Execute("read").GetProperty("capture_gap").GetBoolean());
 
             passed = true;
             phase = "verified";

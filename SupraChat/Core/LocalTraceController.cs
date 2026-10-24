@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Runtime.Versioning;
 
 namespace SupraChat.Core;
 
@@ -16,6 +17,10 @@ public sealed class LocalTraceController : IDisposable
         Binding = new OwnedTransportTrace(_normalizer, _session);
         Controls = new LocalOwnedStreamControls(_session.SessionId);
     }
+
+    [SupportedOSPlatform("windows")]
+    public Task<WindowsWebViewTraceAdapter> AttachSyntheticNativeAsync(IntPtr handle, Uri origin) =>
+        WindowsWebViewTraceAdapter.AttachSyntheticAsync(handle, _normalizer, _session, origin);
 
     public JsonElement Execute(string operation, JsonElement? parameters = null)
     {
