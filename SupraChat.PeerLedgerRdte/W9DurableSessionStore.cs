@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SupraChat.Core;
+using SupraChat.PeerLedgerRdte;
 
 namespace SupraChat.Automation;
 
@@ -18,6 +19,9 @@ public sealed class W9DurableSessionStore : IDisposable
     private readonly FileStream _ownerLock;
     private readonly SqliteConnection _db;
     private readonly string? _testFault;
+    private readonly string _path;
+    private readonly bool _windowsCustody;
+    private readonly IDisposable? _custodyLease;
 
     public W9DurableSessionStore(string absolutePath)
     {
@@ -28,6 +32,13 @@ public sealed class W9DurableSessionStore : IDisposable
                 StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("W9_EXPLICIT_OWNED_ABSOLUTE_SQLITE_PATH_REQUIRED");
         var full = Path.GetFullPath(absolutePath);
+        _path = full;
+        _windowsCustody = Environment.GetEnvironmentVariable("SUPRACHAT_W14_WINDOWS_CUSTODY") == "synthetic";
+        if (_windowsCustody)
+        {
+            if (!OperatingSystem.IsWindows()) throw new InvalidOperationException("WINDOWS_CUSTODY_REQUIRED");
+            WindowsOwnerCustody.VerifyStore(full);
+        }
         var parent = Directory.GetParent(full)
             ?? throw new InvalidDataException("W9_PARENT_DIRECTORY_REQUIRED");
         if (!parent.Exists || !parent.Name.StartsWith("suprachat-w9-owned-",
@@ -60,6 +71,8 @@ public sealed class W9DurableSessionStore : IDisposable
             FileAccess.ReadWrite, FileShare.None);
         try
         {
+            if (_windowsCustody && OperatingSystem.IsWindows())
+                _custodyLease = WindowsOwnerCustody.Open(parent.FullName);
             if (create)
             {
                 // CreateNew is an atomic file-exists guard; a host restart
@@ -114,6 +127,7 @@ public sealed class W9DurableSessionStore : IDisposable
                 var schema = cmd.ExecuteScalar();
                 if (schema is not string id || id != StoreSchema)
                     throw new InvalidDataException("W9_MISSING_OR_UNSUPPORTED_CHECKPOINT");
+                VerifyCustody();
                 // Only disposable, local synthetic RDTE hosts may deliberately
                 // inject crashes; external actions cannot be admitted here.
                 if (Environment.GetEnvironmentVariable("SUPRACHAT_W9_RDTE_FAULTS") == "1")
@@ -128,12 +142,14 @@ public sealed class W9DurableSessionStore : IDisposable
         catch
         {
             _ownerLock.Dispose();
+            _custodyLease?.Dispose();
             throw;
         }
     }
 
     public SessionLedgerCheckpoint? Load()
     {
+        VerifyCustody();
         using var cmd = Command(
             "SELECT schema_id, revision, sha256, json FROM checkpoint WHERE slot=1");
         using var record = cmd.ExecuteReader();
@@ -160,6 +176,20 @@ public sealed class W9DurableSessionStore : IDisposable
     {
         try
         {
+            if (_windowsCustody && OperatingSystem.IsWindows())
+                CustodyNative.WithUserFileOwner(() => { SaveCore(checkpoint); return 0; });
+            else SaveCore(checkpoint);
+        }
+        catch
+        {
+            Environment.Exit(78);
+            throw;
+        }
+    }
+
+    private void SaveCore(SessionLedgerCheckpoint checkpoint)
+    {
+            VerifyCustody();
             var content = JsonSerializer.Serialize(checkpoint);
             if (Encoding.UTF8.GetByteCount(content) > 2_000_000)
                 throw new InvalidDataException("CHECKPOINT_CAPACITY_REACHED");
@@ -185,14 +215,7 @@ public sealed class W9DurableSessionStore : IDisposable
             }
             if (_testFault == "AFTER_COMMIT_BEFORE_ACK")
                 Environment.Exit(89);
-        }
-        catch
-        {
-            // Never let HTTP translate failed durable admission to APPLIED or
-            // continue serving reads from uncommitted advanced state.
-            Environment.Exit(78);
-            throw;
-        }
+            VerifyCustody();
     }
 
     private string Scalar(string sql) =>
@@ -209,9 +232,14 @@ public sealed class W9DurableSessionStore : IDisposable
         cmd.Transaction = tx;
         return cmd;
     }
+    private void VerifyCustody()
+    {
+        if (_windowsCustody && OperatingSystem.IsWindows())
+            WindowsOwnerCustody.VerifyStore(_path, _ownerLock.SafeFileHandle);
+    }
     public void Dispose()
     {
-        _db.Dispose();
-        _ownerLock.Dispose();
+        try { _db.Dispose(); }
+        finally { _ownerLock.Dispose(); _custodyLease?.Dispose(); }
     }
 }

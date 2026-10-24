@@ -20,6 +20,8 @@ internal static class Program
     private sealed record Request(string Operation, string SessionId, string Key, long Version, string? Value, string Audience);
     private sealed record CaseReceipt(string Case, bool Passed, bool PeerObserved, string Status);
     private sealed record Policy(string Actor, string Audience, string Session, string[] Scopes);
+    private static readonly List<WindowsOwnerCustody> CustodyRoots = new();
+    private static bool _custodyMode;
 
     public static async Task<int> Main(string[] args)
     {
@@ -28,19 +30,52 @@ internal static class Program
         {
             try { await ChildAsync(args[1], args[2], args[3], args[4]); return 0; } catch { return 71; }
         }
-        if (args.Length == 3 && args[0] == "--crash") return CrashWriter(args[1], args[2]);
-        if (args.Length != 2 || args[0] != "--receipt") return 64;
+        if (args.Length == 3 && args[0] is "--crash" or "--custody-crash")
+        {
+            _custodyMode = args[0] == "--custody-crash";
+            return CrashWriter(args[1], args[2]);
+        }
+        if (args.Length == 2 && args[0] == "--custody-reopen") return CustodyChecks.Reopen(args[1]);
+        if (args.Length != 2 || args[0] is not ("--receipt" or "--custody-receipt")) return 64;
+        _custodyMode = args[0] == "--custody-receipt";
         var cases = new List<CaseReceipt>();
-        try { await QualifyAsync(cases); }
-        catch { cases.Add(new("host-boundary", false, false, "INCOMPLETE")); }
-        var passed = cases.Count == 17 && cases.All(c => c.Passed);
+        var failure = "NONE";
+        IReadOnlyList<CustodyChecks.Check> custodyChecks = Array.Empty<CustodyChecks.Check>();
+        try
+        {
+            await QualifyAsync(cases);
+            if (_custodyMode) custodyChecks = await CustodyChecks.RunAsync(Spawn);
+        }
+        catch (Exception ex)
+        {
+            failure = ex.Message switch
+            {
+                "CUSTODY_CHECK_FAILED" => "CHECK_FAILED",
+                "CUSTODY_REFUSAL_NOT_OBSERVED" => "REFUSAL_NOT_OBSERVED",
+                "CUSTODY_OWNER_ACL_REFUSED" => "OWNER_ACL_REFUSED",
+                "CUSTODY_ACCESS_RULE_REFUSED" => "ACCESS_RULE_REFUSED",
+                "CUSTODY_FINAL_PATH_REFUSED" => "FINAL_PATH_REFUSED",
+                "RESTRICTED_TOKEN_UNAVAILABLE" => "RESTRICTED_TOKEN_UNAVAILABLE",
+                "RESTRICTED_TOKEN_NOT_RESTRICTED" => "RESTRICTED_TOKEN_NOT_RESTRICTED",
+                _ => "INCOMPLETE"
+            };
+            cases.Add(new("host-boundary", false, false, "INCOMPLETE"));
+        }
+        finally { foreach (var root in CustodyRoots) root.Dispose(); }
+        var passed = cases.Count == 17 && cases.All(c => c.Passed) &&
+            (!_custodyMode || custodyChecks.Count == 15 && custodyChecks.All(c => c.Passed));
         var receipt = JsonSerializer.Serialize(new
         {
-            schema = "suprachat-peer-ledger-integration/v1", passed,
+            schema = _custodyMode ? "suprachat-windows-custody-rdte/v1" : "suprachat-peer-ledger-integration/v1", passed,
             scope = "SYNTHETIC_ENROLLED_CHILD_METADATA_ONLY", cases,
+            windows_custody_mode = _custodyMode, custody_checks = custodyChecks,
+            custody_phase = CustodyChecks.Phase, failure,
             os_peer_observed = true, one_w6_mutation_gate = true, one_w9_checkpoint_authority = true,
             grants_exported = false, signing_key_exported = false, peer_identity_values_exported = false,
             human_identity_qualified = false, production_issuer_custody_qualified = false,
+            different_user_denial_qualified = false, general_path_race_resistance_qualified = false,
+            owner_admin_resistance_qualified = false,
+            key_protection = _custodyMode ? "WINDOWS_DPAPI_CURRENT_USER_SYNTHETIC" : "EPHEMERAL_PARENT",
             shared_provider_control_qualified = false, first_party_capture = false,
             trace_completeness = "UNKNOWN", durable_trace_recovery = false
         }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, WriteIndented = true });
@@ -60,10 +95,17 @@ internal static class Program
         Environment.SetEnvironmentVariable("SUPRACHAT_W9_CREATE_ONCE", create ? "yes" : null);
         Environment.SetEnvironmentVariable("SUPRACHAT_W9_RDTE_FAULTS", fault is null ? null : "1");
         Environment.SetEnvironmentVariable("SUPRACHAT_W9_FAULT", fault);
+        Environment.SetEnvironmentVariable("SUPRACHAT_W14_WINDOWS_CUSTODY", _custodyMode ? "synthetic" : null);
     }
 
     private static string FreshStore()
     {
+        if (_custodyMode)
+        {
+            var custody = WindowsOwnerCustody.Create();
+            CustodyRoots.Add(custody);
+            return Path.Combine(custody.Root, "fixture.sqlite");
+        }
         var directory = Path.Combine(Path.GetTempPath(), "suprachat-w9-owned-peer-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, "fixture.sqlite"); // Retained disposable evidence; never delete an inferred path.
@@ -75,11 +117,12 @@ internal static class Program
         var path = FreshStore();
         string a, b, revokedGrant;
         using var trace = new TraceNormalizer();
-        var key = RandomNumberGenerator.GetBytes(32);
         var now = DateTimeOffset.UtcNow;
-        using var issuer = new W12ScopedGrantAuthority(key, () => now);
-        CryptographicOperations.ZeroMemory(key);
-        using (var store = new W9DurableSessionStore(path))
+        using var persistedIssuer = _custodyMode ? CustodyRoots[0].InitializeIssuer() : null;
+        var key = _custodyMode ? null : RandomNumberGenerator.GetBytes(32);
+        using var issuer = persistedIssuer?.CreateAuthority(() => now) ?? new W12ScopedGrantAuthority(key!, () => now);
+        if (key is not null) CryptographicOperations.ZeroMemory(key);
+        using (var store = OpenStore(path))
         {
             var ledger = new SharedSessionLedger(store.Load(), store.Save);
             // Trusted fixture setup, never a remotely exposed or claimed-human operation.
@@ -118,7 +161,7 @@ internal static class Program
             Require(trace.Read(ca).Events.All(e => e.SessionId.ToString("N") == a) && trace.Read(cb).Events.All(e => e.SessionId.ToString("N") == b));
         }
         StoreAdmission(create: false);
-        using (var recovered = new W9DurableSessionStore(path))
+        using (var recovered = OpenStore(path))
         {
             var ledger = new SharedSessionLedger(recovered.Load(), recovered.Save);
             Require(ledger.IsGrantRevoked(revokedGrant) && ledger.Inspect(a)!.Version == 1 && ledger.Inspect(b)!.Version == 1);
@@ -246,7 +289,7 @@ internal static class Program
     {
         if (fault is not ("BEFORE_COMMIT" or "AFTER_COMMIT_BEFORE_ACK" or "WRITE_FAILURE")) return 64;
         StoreAdmission(create: false, fault);
-        using var store = new W9DurableSessionStore(path);
+        using var store = OpenStore(path);
         var ledger = new SharedSessionLedger(store.Load(), store.Save);
         var session = ledger.InspectAll().Sessions.Single();
         ledger.Change("crash-operation-key", "automation", session.Id, 0, "set-title", "after");
@@ -257,9 +300,9 @@ internal static class Program
     {
         var path = FreshStore();
         StoreAdmission(create: true);
-        using (var store = new W9DurableSessionStore(path))
+        using (var store = OpenStore(path))
             new SharedSessionLedger(store.Load(), store.Save).Open("crash-open-session", "automation", "before");
-        using var child = Spawn("--crash", path, fault);
+        using var child = Spawn(_custodyMode ? "--custody-crash" : "--crash", path, fault);
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
@@ -268,7 +311,7 @@ internal static class Program
         }
         finally { await CleanupAsync(child); }
         StoreAdmission(create: false);
-        using var recovered = new W9DurableSessionStore(path);
+        using var recovered = OpenStore(path);
         var ledger = new SharedSessionLedger(recovered.Load(), recovered.Save);
         var session = ledger.InspectAll().Sessions.Single();
         Require(session.Version == (fault == "AFTER_COMMIT_BEFORE_ACK" ? 1 : 0));
@@ -297,6 +340,8 @@ internal static class Program
         await pipe.FlushAsync(token);
     }
     private static void Require(bool condition) { if (!condition) throw new InvalidOperationException(); }
+    private static W9DurableSessionStore OpenStore(string path) => _custodyMode
+        ? CustodyNative.WithUserFileOwner(() => new W9DurableSessionStore(path)) : new W9DurableSessionStore(path);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint pid);
