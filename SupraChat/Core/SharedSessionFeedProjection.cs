@@ -13,11 +13,20 @@ public static class SharedSessionFeedProjection
 
     public static SharedSessionFeedView Project(
         SharedSessionInventoryReceipt observation, string? selectedSessionId,
-        long? previousSequence)
+        long? previousSequence, string? previousHostInstanceId = null)
     {
         if (!observation.Connected)
             return View(observation, "HOST_UNAVAILABLE", null, true,
                 Array.Empty<SharedSessionEventRow>());
+        if (previousHostInstanceId is not null &&
+            !Guid.TryParseExact(previousHostInstanceId, "N", out _))
+            return View(observation, "INVALID_HOST_EPOCH", null, true,
+                Array.Empty<SharedSessionEventRow>());
+        if (previousHostInstanceId is not null &&
+            !string.Equals(observation.HostInstanceId, previousHostInstanceId,
+                StringComparison.Ordinal))
+            return View(observation, "HOST_INSTANCE_CHANGED_RESELECT_REQUIRED",
+                null, true, Array.Empty<SharedSessionEventRow>());
         if (previousSequence is < 0)
             return View(observation, "INVALID_CURSOR", null, true,
                 Array.Empty<SharedSessionEventRow>());
@@ -66,7 +75,9 @@ public static class SharedSessionFeedProjection
             selected, events, gap, receipt.DurableAcrossRestart,
             ReadOnly: true, BoundToDesktopWorkbench: false,
             RemoteChatAuthority: false, TerminalAuthority: false,
-            ActorIdentityAuthenticated: false);
+            ActorIdentityAuthenticated: false,
+            HostInstanceId: receipt.HostInstanceId,
+            HostEpochAttested: false);
 }
 
 public sealed record SharedSessionFeedView(
@@ -75,4 +86,7 @@ public sealed record SharedSessionFeedView(
     bool EventGapUnverified,bool HostReportsDurableRestart,
     bool ReadOnly,bool BoundToDesktopWorkbench,
     bool RemoteChatAuthority,bool TerminalAuthority,
-    bool ActorIdentityAuthenticated);
+    bool ActorIdentityAuthenticated,
+    // Process-epoch discriminator, not trustworthy provenance or identity.
+    string? HostInstanceId = null,
+    bool HostEpochAttested = false);
