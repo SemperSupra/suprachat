@@ -1125,6 +1125,11 @@ jobs:
                 $semanticDeadline = (Get-Date).AddSeconds($timeoutSeconds)
                 do {
                   try {
+                    # Detaching the native WebView on tab selection can replace the UIA root.
+                    # Query the current top-level provider instead of polling a stale subtree.
+                    $freshWindow = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                      [System.Windows.Automation.TreeScope]::Children, $processCondition)
+                    if ($freshWindow) { $script:window = $freshWindow }
                     $element = $window.FindFirst(
                       [System.Windows.Automation.TreeScope]::Descendants,
                       $idCondition)
