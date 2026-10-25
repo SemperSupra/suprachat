@@ -113,10 +113,10 @@ public sealed class MetadataCaptureConsent : IDisposable
                 state.Revision != plan.Review.ViewRevision ? "VIEW_CHANGED" : state.Epoch != pending.Epoch ? "REVIEW_INVALIDATED" :
                 _time.GetElapsedTime(pending.Started) >= TimeSpan.FromSeconds(60) ? "REVIEW_EXPIRED" : null;
             if (refusal is not null) return pending.Result = new(plan.Review.PlanId, plan.Review.SessionId, "REFUSED", refusal);
+            // A renewed review revokes its previous lease before enabling replacement capture.
+            if (state.Active) StopState(state, "REPLACED");
             try { _normalizer.SetCapture(state.Capability, TraceCaptureMode.Metadata); }
             catch { return pending.Result = new(plan.Review.PlanId, plan.Review.SessionId, "REFUSED", "RECORDER_UNAVAILABLE"); }
-            // Reaffirming an active lease is a new review: revoke the old native observer first.
-            if (state.Active) StopState(state, "REPLACED");
             state.Active = true; state.State = "ACTIVE"; state.LeaseStarted = _time.GetTimestamp();
             state.Revoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (state.NativeSyntheticEnabled)
