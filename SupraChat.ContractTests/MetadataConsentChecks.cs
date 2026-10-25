@@ -152,6 +152,7 @@ internal static class MetadataConsentChecks
         var disposalRevocation = revocation.GetNativeRevocationTask(revocationBinding, newRevocationView);
         revocation.Dispose();
         await disposalRevocation.WaitAsync(TimeSpan.FromSeconds(1));
+        await NativeConsentIdleExpiryChecks.RunAsync();
         Console.WriteLine("Metadata consent checks PASS (review, scope, session/view binding, expiry, stop, replay, bounded retention)");
     }
 }
