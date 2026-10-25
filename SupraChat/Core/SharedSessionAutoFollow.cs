@@ -56,7 +56,12 @@ public static class SharedSessionAutoFollow
                     return new(Schema, "STOPPED_CONTINUITY_UNVERIFIED_" + projected.Status,
                         count, sequence,
                         ContinuousHistoryProven:false, RealChatGptHistoryObserved:false);
-                await onObservation(snapshot, projected, stop).ConfigureAwait(false);
+                // A GUI dispatcher may be stalled while Stop/window-close cancels.
+                // Don't hold the network observer hostage to a queued presentation.
+                // Callbacks MUST still check the token before touching UI state:
+                // cancellation releases this wait, not arbitrary callback side effects.
+                await onObservation(snapshot, projected, stop)
+                    .WaitAsync(stop).ConfigureAwait(false);
                 stop.ThrowIfCancellationRequested();
                 sequence = snapshot.Sequence;
                 count++;
