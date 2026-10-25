@@ -142,6 +142,16 @@ internal static class MetadataConsentChecks
         revocationClock.Advance(121);
         Require(revocation.Status(revocationBinding).State == "EXPIRED");
         await secondRevocation.WaitAsync(TimeSpan.FromSeconds(1));
+        revocation.Confirm(revocationBinding, revocation.Preview(revocationBinding), true);
+        var viewRevocation = revocation.GetNativeRevocationTask(revocationBinding, revocationView);
+        var newRevocationView = new object();
+        revocation.ReplaceView(revocationBinding, revocationView, newRevocationView);
+        await viewRevocation.WaitAsync(TimeSpan.FromSeconds(1));
+        Require(!revocation.IsNativeSyntheticAdmitted(revocationBinding, revocationView));
+        revocation.Confirm(revocationBinding, revocation.Preview(revocationBinding), true);
+        var disposalRevocation = revocation.GetNativeRevocationTask(revocationBinding, newRevocationView);
+        revocation.Dispose();
+        await disposalRevocation.WaitAsync(TimeSpan.FromSeconds(1));
         Console.WriteLine("Metadata consent checks PASS (review, scope, session/view binding, expiry, stop, replay, bounded retention)");
     }
 }
