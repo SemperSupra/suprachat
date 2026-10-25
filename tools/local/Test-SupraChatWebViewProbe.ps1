@@ -38,7 +38,8 @@ try {
         $probeReceipt.real_credentials -or $probeReceipt.real_chatgpt_traffic -or $probeReceipt.raw_payload_exported -or
         $probeReceipt.remote_debugging_listener -or $probeReceipt.details.concurrent_sessions -ne 2 -or
         $probeReceipt.details.detached_callbacks -ne 0 -or !$probeReceipt.details.progressive_stream_acknowledged -or $probeReceipt.details.typed_loss -ne 0 -or
-        $probeReceipt.details.shared_trace_schema -ne 'suprachat-trace/v1' -or !$probeReceipt.details.scope_exit_detached -or
+        $probeReceipt.details.shared_trace_schema -ne 'suprachat-trace/v1' -or !$probeReceipt.details.native_synthetic_consent -or
+        !$probeReceipt.details.native_consent_stopped -or !$probeReceipt.details.scope_exit_detached -or
         !$probeReceipt.details.wrong_session_refused -or !$probeReceipt.details.first_party_admission_refused -or
         !$probeReceipt.details.duplicate_domain_owner_refused -or !$probeReceipt.details.controller_disposal_detached -or
         !$probeReceipt.details.repeated_old_disposal_preserved_replacement -or !$probeReceipt.details.foreign_redirect_revoked) {
