@@ -23,18 +23,22 @@ public sealed class MetadataConsentPlan
 }
 
 /// <summary>
-/// Volatile, synthetic-only consent workflow. Host callers own registration and GUI confirmation.
-/// Every producer must use this gateway; it does not authorize the existing native adapter or a human.
+/// Volatile consent workflow. Public registration admits fixture producers only; internal native
+/// registration binds the guarded adapter to its current view and plan. Hosts own GUI confirmation.
+/// Consent does not verify a human identity or authorize provider operations.
 /// Lock order is consent then normalizer; callbacks into the ledger or external I/O are prohibited.
 /// </summary>
 public sealed class MetadataCaptureConsent : IDisposable
 {
+    internal enum Producer { Fixture, SyntheticNative, FirstPartyNative }
     private sealed class BindingState(LocalTraceSession capability, object view)
     {
         public readonly LocalTraceSession Capability = capability;
         public object View = view;
         public long Revision, Epoch, LeaseStarted, Refused;
         public bool Active;
+        public Producer Source;
+        public MetadataConsentPlan? ActivePlan;
         public string State = "OFF";
     }
     private sealed class PlanState(MetadataConsentBinding binding, long epoch, long started)
@@ -52,7 +56,10 @@ public sealed class MetadataCaptureConsent : IDisposable
     public MetadataCaptureConsent(TraceNormalizer normalizer, TimeProvider? time = null)
     { _normalizer = normalizer; _time = time ?? TimeProvider.System; }
 
-    public MetadataConsentBinding Register(LocalTraceSession capability, object view)
+    public MetadataConsentBinding Register(LocalTraceSession capability, object view) => RegisterCore(capability, view, Producer.Fixture);
+    internal MetadataConsentBinding RegisterNative(LocalTraceSession capability, object view, bool firstParty) =>
+        RegisterCore(capability, view, firstParty ? Producer.FirstPartyNative : Producer.SyntheticNative);
+    private MetadataConsentBinding RegisterCore(LocalTraceSession capability, object view, Producer producer)
     {
         lock (_gate)
         {
@@ -64,7 +71,7 @@ public sealed class MetadataCaptureConsent : IDisposable
             if (page.Mode != TraceCaptureMode.Off || page.Events.Count != 0)
                 throw new UnauthorizedAccessException("CONSENT_REQUIRES_FRESH_OFF_SESSION");
             var binding = new MetadataConsentBinding(capability.SessionId);
-            _bindings.Add(binding, new(capability, view));
+            _bindings.Add(binding, new(capability, view) { Source = producer });
             return binding;
         }
     }
@@ -83,9 +90,11 @@ public sealed class MetadataCaptureConsent : IDisposable
         {
             var state = Authorize(binding);
             if (_plans.Count >= 64) throw new InvalidOperationException("CONSENT_REVIEW_CAPACITY_REACHED");
-            var available = scope == MetadataConsentScope.SyntheticMetadata;
+            var available = scope == MetadataConsentScope.SyntheticMetadata && state.Source != Producer.FirstPartyNative ||
+                scope == MetadataConsentScope.FirstPartyMetadata && state.Source == Producer.FirstPartyNative;
             var review = new MetadataConsentReview(Guid.NewGuid(), binding.SessionId, state.Revision, scope, available,
-                available ? "SYNTHETIC_METADATA_REVIEW" : "CAPTURE_SCOPE_UNAVAILABLE", _time.GetUtcNow().AddSeconds(60));
+                available ? (scope == MetadataConsentScope.FirstPartyMetadata ? "FIRST_PARTY_METADATA_REVIEW" : "SYNTHETIC_METADATA_REVIEW") :
+                    "CAPTURE_SCOPE_UNAVAILABLE", _time.GetUtcNow().AddSeconds(60));
             var plan = new MetadataConsentPlan(review);
             _plans.Add(plan, new(binding, state.Epoch, _time.GetTimestamp()));
             return plan;
@@ -108,7 +117,9 @@ public sealed class MetadataCaptureConsent : IDisposable
             try { _normalizer.SetCapture(state.Capability, TraceCaptureMode.Metadata); }
             catch { return pending.Result = new(plan.Review.PlanId, plan.Review.SessionId, "REFUSED", "RECORDER_UNAVAILABLE"); }
             state.Active = true; state.State = "ACTIVE"; state.LeaseStarted = _time.GetTimestamp();
-            return pending.Result = new(plan.Review.PlanId, binding.SessionId, "ALLOWED", "SYNTHETIC_METADATA_LEASE_STARTED", _time.GetUtcNow().AddSeconds(120));
+            state.ActivePlan = plan;
+            return pending.Result = new(plan.Review.PlanId, binding.SessionId, "ALLOWED",
+                state.Source == Producer.FirstPartyNative ? "FIRST_PARTY_METADATA_LEASE_STARTED" : "SYNTHETIC_METADATA_LEASE_STARTED", _time.GetUtcNow().AddSeconds(120));
         }
     }
 
@@ -135,7 +146,7 @@ public sealed class MetadataCaptureConsent : IDisposable
 
     private void StopState(BindingState state, string reason)
     {
-        state.Active = false; state.State = reason; state.Epoch++;
+        state.Active = false; state.ActivePlan = null; state.State = reason; state.Epoch++;
         try { _normalizer.SetCapture(state.Capability, TraceCaptureMode.Off); } catch { state.State = "RECORDER_UNAVAILABLE"; }
     }
     private void Refresh(BindingState state)
@@ -159,13 +170,20 @@ public sealed class MetadataCaptureConsent : IDisposable
     }
 
     public bool TryObserve(MetadataConsentBinding binding, object view, TraceObservation observation)
+        => Observe(binding, view, null, null, observation, native: false);
+
+    private bool Observe(MetadataConsentBinding binding, object view, MetadataConsentPlan? plan,
+        LocalTraceSession? capability, TraceObservation observation, bool native)
     {
         lock (_gate)
         {
             if (_disposed || !_bindings.TryGetValue(binding, out var state)) return false;
             Refresh(state);
-            if (!state.Active || !ReferenceEquals(state.View, view) || observation is null ||
-                observation.ProviderSurface != TraceSurface.Synthetic || observation.Adapter != TraceAdapter.Fixture)
+            var sourceMatches = native ? state.Source != Producer.Fixture && ReferenceEquals(state.ActivePlan, plan) &&
+                ReferenceEquals(state.Capability, capability) && observation?.Adapter == TraceAdapter.WebView2 &&
+                observation.ProviderSurface == (state.Source == Producer.FirstPartyNative ? TraceSurface.ChatGptWebView : TraceSurface.Synthetic) :
+                state.Source == Producer.Fixture && observation?.ProviderSurface == TraceSurface.Synthetic && observation.Adapter == TraceAdapter.Fixture;
+            if (!state.Active || !ReferenceEquals(state.View, view) || !sourceMatches || observation is null)
             { state.Refused++; return false; }
             try
             {
@@ -177,13 +195,34 @@ public sealed class MetadataCaptureConsent : IDisposable
         }
     }
 
+    internal bool NativeLeaseActive(MetadataConsentBinding binding, object view, MetadataConsentPlan plan)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_bindings.TryGetValue(binding, out var state)) return false;
+            Refresh(state);
+            return state.Source != Producer.Fixture && state.Active && ReferenceEquals(state.View, view) && ReferenceEquals(state.ActivePlan, plan);
+        }
+    }
+    internal TimeSpan NativeLeaseRemaining(MetadataConsentBinding binding, object view, MetadataConsentPlan plan)
+    {
+        lock (_gate) return NativeLeaseActive(binding, view, plan)
+            ? TimeSpan.FromSeconds(120) - _time.GetElapsedTime(_bindings[binding].LeaseStarted) : TimeSpan.Zero;
+    }
+    internal ITraceSink NativeSink(MetadataConsentBinding binding, object view, MetadataConsentPlan plan) => new GuardedSink(this, binding, view, plan);
+    private sealed class GuardedSink(MetadataCaptureConsent owner, MetadataConsentBinding binding, object view, MetadataConsentPlan plan) : ITraceSink
+    {
+        public bool TryObserve(LocalTraceSession session, TraceObservation observation) => owner.Observe(binding, view, plan, session, observation, native: true);
+    }
+
     public MetadataConsentStatus Status(MetadataConsentBinding binding)
     {
         lock (_gate)
         {
             var state = Authorize(binding);
             var capture = _normalizer.CaptureState(state.Capability);
-            return new(binding.SessionId, state.Revision, state.State, state.Active && capture.Mode == TraceCaptureMode.Metadata, capture.Count, state.Refused);
+            return new(binding.SessionId, state.Revision, state.State, state.Active && capture.Mode == TraceCaptureMode.Metadata,
+                capture.Count, state.Refused, state.Active && state.Source == Producer.FirstPartyNative);
         }
     }
     public void Dispose()

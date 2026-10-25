@@ -41,7 +41,12 @@ try {
         $probeReceipt.details.shared_trace_schema -ne 'suprachat-trace/v1' -or !$probeReceipt.details.scope_exit_detached -or
         !$probeReceipt.details.wrong_session_refused -or !$probeReceipt.details.first_party_admission_refused -or
         !$probeReceipt.details.duplicate_domain_owner_refused -or !$probeReceipt.details.controller_disposal_detached -or
-        !$probeReceipt.details.repeated_old_disposal_preserved_replacement -or !$probeReceipt.details.foreign_redirect_revoked) {
+        !$probeReceipt.details.repeated_old_disposal_preserved_replacement -or !$probeReceipt.details.foreign_redirect_revoked -or
+        !$probeReceipt.details.consented_native.gateway_native_capture -or !$probeReceipt.details.consented_native.off_before_review -or
+        !$probeReceipt.details.consented_native.historical_confirmation_refused -or !$probeReceipt.details.consented_native.idle_expiry_detached -or
+        !$probeReceipt.details.consented_native.native_view_replacement_revoked -or !$probeReceipt.details.consented_native.blank_navigation_revoked -or
+        !$probeReceipt.details.consented_native.stop_during_pending_enable_refused -or !$probeReceipt.details.consented_native.expiry_during_pending_enable_refused -or
+        $probeReceipt.details.consented_native.first_party_live_executed) {
         throw 'Probe receipt scope/qualification contract failed.'
     }
     [ordered]@{

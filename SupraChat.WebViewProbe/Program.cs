@@ -222,6 +222,9 @@ internal sealed class ProbeApp : Application
             Require(replacement.IsStopped && replacementOwner.Execute("read").GetProperty("capture_gap").GetBoolean());
             Require(!replacementOwner.Execute("status").GetProperty("browser_capture").GetBoolean());
 
+            phase = "consented-native-gateway";
+            var consentedNative = await ConsentedNativeChecks.RunAsync(views);
+
             passed = true;
             phase = "verified";
             details = new
@@ -243,6 +246,7 @@ internal sealed class ProbeApp : Application
                 controller_disposal_detached = scopeAdapter.IsStopped,
                 repeated_old_disposal_preserved_replacement = true,
                 foreign_redirect_revoked = true,
+                consented_native = consentedNative,
                 wrong_session_refused = wrongSessionRefused,
                 first_party_admission_refused = firstPartyRefused,
                 sessions = observers.Select((observer, index) => new { session = index, counts = observer.Counts }).ToArray()

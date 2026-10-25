@@ -6,6 +6,13 @@ on:
       - 'SupraChat/Core/WindowsWebViewTraceAdapter.cs'
       - 'SupraChat/Core/LocalTraceController.cs'
       - 'SupraChat/Core/TrafficTrace.cs'
+      - 'SupraChat/Core/MetadataCaptureConsent.cs'
+      - 'SupraChat/Core/NativeMetadata*.cs'
+      - 'SupraChat/Core/NativeNetworkRegistration.cs'
+      - 'SupraChat/Core/WindowsConsentedMetadataSession.cs'
+      - 'SupraChat/NativeMetadataReviewWindow.cs'
+      - 'SupraChat/ReviewOperationFence.cs'
+      - 'SupraChat/MainWindow.axaml*'
       - 'tools/local/Test-SupraChatWebViewProbe.ps1'
       - '.github/workflows/qualify-webview-probe.yml'
   workflow_dispatch:

@@ -624,4 +624,5 @@ await OwnedTransportTraceChecks.RunAsync();
 await GovernedControlChecks.RunAsync();
 await SharedSessionAdmissionChecks.RunAsync();
 await MetadataConsentChecks.RunAsync();
+await NativeConsentChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");

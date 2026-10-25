@@ -32,6 +32,7 @@ internal sealed class FixtureServer : IAsyncDisposable
     }
 
     public Uri Page(string session, string phase, bool retain = false) => new(Origin, $"{Nonce}/{session}/{phase}/page?private={Sentinel}&retain={(retain ? 1 : 0)}");
+    public Uri ManualPage(string session) => new(Origin, $"{Nonce}/{session}/observed/page?manual=1");
     public int Count(string session, string phase, string route) => _requests.GetValueOrDefault($"{session}/{phase}/{route}");
 
     private async Task ServeAsync(HttpContext context)
@@ -117,7 +118,7 @@ internal sealed class FixtureServer : IAsyncDisposable
     private const string PageHtml = """
         <!doctype html><html><head><title>SupraChat synthetic WebView probe</title></head>
         <body><h1>Synthetic fixture only</h1><p>No ChatGPT sign-in or real traffic.</p><script>
-        (async () => {
+        window.runFixture = async () => {
           try {
             const stream = fetch('stream?private=synthetic-private-sentinel-51', {
               headers: {'X-Synthetic-Private': 'synthetic-private-sentinel-51'}
@@ -142,7 +143,10 @@ internal sealed class FixtureServer : IAsyncDisposable
             await Promise.all([stream, events, ws, cancel]);
             document.title = 'fixture-complete-' + location.pathname.split('/')[3];
           } catch { document.title = 'fixture-failed'; }
-        })();</script></body></html>
+        };
+        if (new URLSearchParams(location.search).get('manual') !== '1') window.runFixture();
+        else document.title = 'fixture-ready';
+        </script></body></html>
         """;
 
     public async ValueTask DisposeAsync()

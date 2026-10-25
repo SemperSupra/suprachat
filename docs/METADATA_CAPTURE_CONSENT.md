@@ -1,5 +1,8 @@
 # Per-session metadata consent prototype — issue #51
 
+This document describes the fixture-only prototype. Its subsequent guarded native integration is
+described in [Native metadata consent integration](NATIVE_METADATA_CONSENT_INTEGRATION.md).
+
 Stacked on #64. This packet implements a real review/confirmation/stop workflow in the isolated
 workbench, backed by the shared core. It admits only Synthetic/Fixture observations. It neither
 authorizes a human nor enables a first-party native entry point. The existing WebView adapter still

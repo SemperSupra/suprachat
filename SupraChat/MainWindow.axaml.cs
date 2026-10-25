@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private WindowsCompanionHotkey? _windowsCompanionHotkey;
     private BrowserSession? _browserSession;
     private AccessibilityPreferences _accessibilityPreferences = AccessibilityPreferences.Default;
+    private Window? _nativeMetadataWindow;
+    private SharedSessionLedger? _nativeMetadataLedger;
 
     public MainWindow()
     {
@@ -777,6 +779,11 @@ public partial class MainWindow : Window
         var imported = 0;
         foreach (var raw in args.Where(value => !string.IsNullOrWhiteSpace(value)))
         {
+            if (raw == "--first-party-metadata-hil")
+            {
+                NativeMetadataReview.IsVisible = OperatingSystem.IsWindows();
+                continue; // Only a local launch flag exposes the review; it never starts capture.
+            }
             if (File.Exists(raw))
             {
                 var bytes = await File.ReadAllBytesAsync(raw);
@@ -1695,6 +1702,19 @@ public partial class MainWindow : Window
     }
 
     private void TraceStart_Click(object? sender, RoutedEventArgs e) => ShowTrace("start");
+    private void NativeMetadataReview_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!OperatingSystem.IsWindows() || !NativeMetadataReview.IsVisible) return;
+        if (_nativeMetadataWindow is { } existing) { existing.Activate(); return; }
+        _nativeMetadataLedger ??= new SharedSessionLedger();
+        var session = _nativeMetadataLedger.Open("native-hil-window-session", "automation", "ChatGPT browser window").Session!;
+        IntPtr CurrentHandle() => ChatView.TryGetPlatformHandle() is Avalonia.Platform.IWindowsWebView2PlatformHandle handle
+            ? handle.CoreWebView2 : IntPtr.Zero;
+        var review = new NativeMetadataReviewWindow(Guid.ParseExact(session.Id, "N"), CurrentHandle);
+        _nativeMetadataWindow = review;
+        review.Closed += (_, _) => _nativeMetadataWindow = null;
+        review.Show(this);
+    }
     private void TraceStop_Click(object? sender, RoutedEventArgs e) => ShowTrace("stop");
     private void TraceRead_Click(object? sender, RoutedEventArgs e) => ShowTrace("read");
     private void TraceExport_Click(object? sender, RoutedEventArgs e) => ShowTrace("export");
@@ -1794,6 +1814,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _nativeMetadataWindow?.Close();
         _trace.Dispose();
         try
         {
