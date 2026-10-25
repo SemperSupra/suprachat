@@ -1,0 +1,43 @@
+name: Qualify W16 bounded automatic host metadata following
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionAutoFollow.cs'
+      - 'SupraChat/Core/SharedSessionInventoryReader.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'docs/w16-bounded-readonly-auto-follow.md'
+      - '.github/workflows/qualify-w16-bounded-follow.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bounded-follow:
+    name: W16 contract and real W15 regression ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build actual desktop and automation
+        run: dotnet build SupraChat/SupraChat.csproj -c Release
+      - name: Compile and execute W16 cancellation, cursor and backpressure contracts
+        run: dotnet run --project SupraChat.ContractTests/SupraChat.ContractTests.csproj -c Release
+      - name: Preserve real W15 separate-process A/B host and exact-epoch boundary
+        run: node tools/qualify-w14-shared-follow.mjs
+      - name: Preserve host metadata hostile-response denials
+        run: node tools/qualify-w6-hostile-inventory.mjs
+      - name: Preserve signed W13 scope and durable revocation
+        run: node tools/qualify-w12-scoped-writes.mjs
+      - name: Preserve W9 persistence recovery
+        run: node tools/qualify-w9-durable-w6-host.mjs
