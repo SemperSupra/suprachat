@@ -29,10 +29,11 @@ public sealed class MetadataConsentPlan
 /// </summary>
 public sealed class MetadataCaptureConsent : IDisposable
 {
-    private sealed class BindingState(LocalTraceSession capability, object view)
+    private sealed class BindingState(LocalTraceSession capability, object view, bool nativeSyntheticEnabled)
     {
         public readonly LocalTraceSession Capability = capability;
         public object View = view;
+        public readonly bool NativeSyntheticEnabled = nativeSyntheticEnabled;
         public long Revision, Epoch, LeaseStarted, Refused;
         public bool Active;
         public string State = "OFF";
@@ -52,7 +53,12 @@ public sealed class MetadataCaptureConsent : IDisposable
     public MetadataCaptureConsent(TraceNormalizer normalizer, TimeProvider? time = null)
     { _normalizer = normalizer; _time = time ?? TimeProvider.System; }
 
-    public MetadataConsentBinding Register(LocalTraceSession capability, object view)
+    public MetadataConsentBinding Register(LocalTraceSession capability, object view) => RegisterCore(capability, view, false);
+
+    // Native synthetic WebView frames require explicit registration; this is not first-party authorization.
+    public MetadataConsentBinding RegisterNativeSynthetic(LocalTraceSession capability, object view) => RegisterCore(capability, view, true);
+
+    private MetadataConsentBinding RegisterCore(LocalTraceSession capability, object view, bool nativeSyntheticEnabled)
     {
         lock (_gate)
         {
@@ -64,7 +70,7 @@ public sealed class MetadataCaptureConsent : IDisposable
             if (page.Mode != TraceCaptureMode.Off || page.Events.Count != 0)
                 throw new UnauthorizedAccessException("CONSENT_REQUIRES_FRESH_OFF_SESSION");
             var binding = new MetadataConsentBinding(capability.SessionId);
-            _bindings.Add(binding, new(capability, view));
+            _bindings.Add(binding, new(capability, view, nativeSyntheticEnabled));
             return binding;
         }
     }
@@ -158,6 +164,18 @@ public sealed class MetadataCaptureConsent : IDisposable
         }
     }
 
+    /// <summary>Read-only native attachment preflight. Never admits a first-party origin or payload.</summary>
+    public bool IsNativeSyntheticAdmitted(MetadataConsentBinding binding, object view)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_bindings.TryGetValue(binding, out var state)) return false;
+            Refresh(state);
+            return state.NativeSyntheticEnabled && state.Active &&
+                ReferenceEquals(state.View, view) && _normalizer.IsCapturing(state.Capability);
+        }
+    }
+
     public bool TryObserve(MetadataConsentBinding binding, object view, TraceObservation observation)
     {
         lock (_gate)
@@ -165,7 +183,9 @@ public sealed class MetadataCaptureConsent : IDisposable
             if (_disposed || !_bindings.TryGetValue(binding, out var state)) return false;
             Refresh(state);
             if (!state.Active || !ReferenceEquals(state.View, view) || observation is null ||
-                observation.ProviderSurface != TraceSurface.Synthetic || observation.Adapter != TraceAdapter.Fixture)
+                observation.ProviderSurface != TraceSurface.Synthetic ||
+                (observation.Adapter != TraceAdapter.Fixture &&
+                 !(state.NativeSyntheticEnabled && observation.Adapter == TraceAdapter.WebView2)))
             { state.Refused++; return false; }
             try
             {
