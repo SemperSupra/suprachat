@@ -46,6 +46,8 @@ try {
         !$probeReceipt.details.consented_native.historical_confirmation_refused -or !$probeReceipt.details.consented_native.idle_expiry_detached -or
         !$probeReceipt.details.consented_native.native_view_replacement_revoked -or !$probeReceipt.details.consented_native.blank_navigation_revoked -or
         !$probeReceipt.details.consented_native.stop_during_pending_enable_refused -or !$probeReceipt.details.consented_native.expiry_during_pending_enable_refused -or
+        !$probeReceipt.details.consented_native.intentional_stop_not_loss -or !$probeReceipt.details.consented_native.first_end_reason_preserved -or
+        !$probeReceipt.details.consented_native.cleanup_settled_before_summary -or
         $probeReceipt.details.consented_native.first_party_live_executed) {
         throw 'Probe receipt scope/qualification contract failed.'
     }

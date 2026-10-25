@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 
 namespace SupraChat.Core;
@@ -21,7 +20,8 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private readonly TraceSurface _surface;
     private readonly Func<bool>? _captureAllowed;
     private readonly Action? _invalidate;
-    private readonly HashSet<string> _requests = new(StringComparer.Ordinal);
+    private readonly NativeCaptureDiagnostics _diagnostics = new();
+    private readonly NativeMetadataEventProcessor _processor;
     private readonly List<(CoreWebView2DevToolsProtocolEventReceiver Receiver,
         EventHandler<CoreWebView2DevToolsProtocolEventReceivedEventArgs> Handler)> _subscriptions = new();
     private bool _stopped;
@@ -29,14 +29,19 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private Task? _enableTask;
     private readonly NativeNetworkRegistration _registration = new();
     private Task? _releaseTask;
-    public long DroppedObservations { get; private set; }
-    public long ObservedEvents { get; private set; }
-    public long ObservedNetworkEvents { get; private set; }
+    private bool _cleanupTimeoutReported;
+    public bool EnableCompleted => _enableTask?.IsCompletedSuccessfully == true;
+    public bool DisableCompleted { get; private set; }
+    public long DroppedObservations => Diagnostics.TotalIncidents;
+    public NativeDiagnosticSnapshot Diagnostics => _diagnostics.Snapshot();
+    public bool CleanupComplete => _releaseTask?.IsCompletedSuccessfully == true;
+    public long ObservedEvents => _processor.ObservedEvents;
+    public long ObservedNetworkEvents => _processor.ObservedNetworkEvents;
     public bool IsStopped => _stopped;
 
     private WindowsWebViewTraceAdapter(CoreWebView2 core, ITraceSink sink, LocalTraceSession session, Uri origin,
         TraceSurface surface, Func<bool>? captureAllowed = null, Action? invalidate = null)
-    { _core = core; _sink = sink; _session = session; _origin = origin; _surface = surface; _captureAllowed = captureAllowed; _invalidate = invalidate; }
+    { _core = core; _sink = sink; _session = session; _origin = origin; _surface = surface; _captureAllowed = captureAllowed; _invalidate = invalidate; _processor = new(origin, surface, sink, session, _diagnostics, Stop); }
 
     public static async Task<WindowsWebViewTraceAdapter> AttachSyntheticAsync(IntPtr nativeHandle,
         TraceNormalizer sink, LocalTraceSession session, Uri origin)
@@ -96,9 +101,11 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
                     try
                     {
                         if (!adapter.AllowedNow()) { adapter.Stop(); return; }
-                        adapter.OnEvent(kind, args.ParameterObjectAsJson);
+                        var json = args.ParameterObjectAsJson;
+                        if (!adapter.AllowedNow()) { adapter.Stop(); return; } // SDK getter can reenter navigation/Stop.
+                        adapter._processor.Process(kind, json);
                     }
-                    catch { adapter.Gap(); adapter.Stop(); }
+                    catch { adapter._processor.Gap(NativeDiagnosticReason.CallbackFailure); adapter.Stop(); }
                 };
                 adapter._subscriptions.Add((receiver, handler));
                 receiver.DevToolsProtocolEventReceived += handler;
@@ -124,7 +131,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
         catch
         {
             adapter.Stop();
-            adapter.Gap();
+            adapter._diagnostics.Record(NativeDiagnosticReason.AttachFailure);
             throw new InvalidOperationException("Native observer could not attach; capture is incomplete.");
         }
     }
@@ -135,112 +142,36 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private static bool SameOrigin(Uri value, Uri origin) => value.Scheme == origin.Scheme &&
         value.Host == origin.Host && value.Port == origin.Port && value.UserInfo.Length == 0;
 
-    private bool Admits(Uri uri) => SameOrigin(uri, _origin) ||
-        (uri.Scheme == (_origin.Scheme == "https" ? "wss" : "ws") && uri.Host == _origin.Host && uri.Port == _origin.Port && uri.UserInfo.Length == 0);
-    private void RevokeRequest(string id)
-    {
-        if (_requests.Remove(id)) Gap();
-    }
-
     private void NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args)
     {
-        // Do not block or rewrite navigation. Detach before a view leaves the admitted fixture origin.
         try
         {
             if (_invalidate is not null) { _invalidate(); Stop(); return; }
             if (args.Uri == "about:blank") return;
             if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var next) || !SameOrigin(next, _origin))
-            { Gap(); Stop(); }
+            { _processor.Gap(NativeDiagnosticReason.NavigationFailure); Stop(); }
         }
-        catch { Gap(); Stop(); }
+        catch { _processor.Gap(NativeDiagnosticReason.NavigationFailure); Stop(); }
     }
 
-    private void OnEvent(string name, string json)
-    {
-        if (_stopped) return;
-        if (json.Length > 1024 * 1024) { Gap(); return; }
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            var root = document.RootElement;
-            if (!root.TryGetProperty("requestId", out var idElement) || idElement.ValueKind != JsonValueKind.String) { Gap(); return; }
-            var id = idElement.GetString()!;
-            if (id.Length > 512) { Gap(); return; }
-            if (name is "requestWillBeSent" or "webSocketCreated")
-            {
-                var url = name == "requestWillBeSent" ? root.GetProperty("request").GetProperty("url").GetString() : root.GetProperty("url").GetString();
-                if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) { RevokeRequest(id); Gap(); return; }
-                // WebSocket schemes share the admitted fixture host/port, never an inferred conversation.
-                if (!Admits(uri)) { RevokeRequest(id); return; }
-                if (_requests.Count >= 256 && !_requests.Contains(id)) { Gap(); return; }
-                _requests.Add(id);
-            }
-            if (!_requests.Contains(id)) return;
-            if (name == "responseReceived")
-            {
-                var response = root.GetProperty("response");
-                if (!response.TryGetProperty("url", out var responseUrl) || responseUrl.ValueKind != JsonValueKind.String ||
-                    !Uri.TryCreate(responseUrl.GetString(), UriKind.Absolute, out var responseUri) || !Admits(responseUri))
-                { RevokeRequest(id); return; }
-            }
-            var kind = name switch
-            {
-                "requestWillBeSent" or "webSocketCreated" => TraceEventKind.Request,
-                "responseReceived" => TraceEventKind.Response,
-                "loadingFinished" or "webSocketClosed" => TraceEventKind.Completed,
-                "loadingFailed" => TraceEventKind.Error,
-                _ => TraceEventKind.Chunk
-            };
-            var direction = name is "requestWillBeSent" or "webSocketCreated" or "webSocketFrameSent" ? TraceDirection.Egress : TraceDirection.Ingress;
-            int? status = null;
-            long bytes = 0;
-            if (name == "responseReceived" && root.GetProperty("response").TryGetProperty("status", out var statusElement) &&
-                statusElement.TryGetInt32(out var code) && code is >= 100 and <= 599) status = code;
-            if (name == "dataReceived" && root.TryGetProperty("dataLength", out var size) && size.TryGetInt64(out var count) && count >= 0) bytes = count;
-            Emit(new TraceObservation(_surface, TraceAdapter.WebView2, direction, kind,
-                _origin.AbsoluteUri, id, id, ByteCount: bytes, Status: status));
-            if (name is "loadingFinished" or "loadingFailed" or "webSocketClosed") _requests.Remove(id);
-        }
-        catch { Gap(); }
-    }
-
-    private void Emit(TraceObservation observation)
-    {
-        try
-        {
-            if (_sink.TryObserve(_session, observation))
-            {
-                ObservedEvents++;
-                if (observation.Direction != TraceDirection.Local && observation.EventKind != TraceEventKind.CaptureGap) ObservedNetworkEvents++;
-            }
-        }
-        catch (UnauthorizedAccessException) { DroppedObservations++; Stop(); }
-        catch (ObjectDisposedException) { DroppedObservations++; Stop(); }
-        catch { DroppedObservations++; }
-    }
-    private void Gap()
-    {
-        DroppedObservations++;
-        Emit(new TraceObservation(_surface, TraceAdapter.WebView2, TraceDirection.Local, TraceEventKind.CaptureGap));
-    }
     public void StopObserving() => Stop();
     private void Stop()
     {
         if (_stopped) return;
         _stopped = true;
-        try { _core.NavigationStarting -= NavigationStarting; } catch { Gap(); }
+        try { _core.NavigationStarting -= NavigationStarting; } catch { _diagnostics.Record(NativeDiagnosticReason.UnsubscribeFailure); }
         foreach (var subscription in _subscriptions)
-            try { subscription.Receiver.DevToolsProtocolEventReceived -= subscription.Handler; } catch { Gap(); }
+            try { subscription.Receiver.DevToolsProtocolEventReceived -= subscription.Handler; } catch { _diagnostics.Record(NativeDiagnosticReason.UnsubscribeFailure); }
         _subscriptions.Clear();
-        _requests.Clear();
+        _processor.Clear();
         _releaseTask ??= ReleaseDomainAsync();
     }
     private async Task ReleaseDomainAsync()
     {
         try
         {
-            try { await _registration.WaitForEnableAsync(); } catch { Gap(); }
-            try { await _core.CallDevToolsProtocolMethodAsync("Network.disable", "{}"); } catch { Gap(); }
+            try { await _registration.WaitForEnableAsync(); } catch { _diagnostics.Record(NativeDiagnosticReason.EnableFailure); }
+            try { await _core.CallDevToolsProtocolMethodAsync("Network.disable", "{}"); DisableCompleted = true; } catch { _diagnostics.Record(NativeDiagnosticReason.DisableFailure); }
         }
         finally
         {
@@ -259,6 +190,6 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     {
         Stop();
         try { if (_releaseTask is not null) await _releaseTask.WaitAsync(TimeSpan.FromSeconds(5)); }
-        catch { Gap(); } // Pending disable retains exclusive ownership until the command actually settles.
+        catch { if (!_cleanupTimeoutReported) { _cleanupTimeoutReported = true; _diagnostics.Record(NativeDiagnosticReason.CleanupTimeout); } } // Pending disable retains exclusive ownership until the command actually settles.
     }
 }

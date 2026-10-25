@@ -77,7 +77,8 @@ internal sealed class NativeMetadataReviewWindow : Window
         _save.Click += async (_, _) => await RunOperation(async generation =>
         {
                 if (_capture is not { } capture) { _message.Text = "No experiment to summarize."; return; }
-                _plan = null; capture.Stop();
+                _plan = null; await capture.StopForSummaryAsync();
+                if (!_operations.Current(generation)) return;
                 var summary = BuildSummary(capture); // No event arrays/aliases survive the file-picker await.
                 var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
                 { Title = "Save a new sanitized metadata summary", SuggestedFileName = "suprachat-metadata-summary-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json" });
@@ -91,7 +92,7 @@ internal sealed class NativeMetadataReviewWindow : Window
         timer.Tick += (_, _) => Refresh();
         Opened += (_, _) => timer.Start();
         Closed += (_, _) => { _closed = true; _operations.Close(); timer.Stop(); _plan = null;
-            var capture = _capture; _capture = null; if (capture is not null) { SafeStop(capture); _ = SafeDispose(capture); } };
+            var capture = _capture; _capture = null; if (capture is not null) { try { capture.StopForReviewClose(); } catch { } _ = SafeDispose(capture); } };
     }
 
     private async Task RunOperation(Func<long, Task> action)

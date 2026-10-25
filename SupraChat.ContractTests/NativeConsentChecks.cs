@@ -12,6 +12,7 @@ internal static class NativeConsentChecks
     private static void Require(bool value) { if (!value) throw new InvalidOperationException("Native consent contract failed."); }
     public static async Task RunAsync()
     {
+        NativeDiagnosticChecks.Run();
         NativeMetadataOriginPolicy.Validate(new Uri("https://chatgpt.com/"), TraceSurface.ChatGptWebView);
         foreach (var uri in new[] { "http://chatgpt.com/", "https://chatgpt.com:444/", "https://chatgpt.com.evil/",
             "https://user@chatgpt.com/", "https://chatgpt.com/path", "https://chatgpt.com/?key=x", "https://chatgpt.com/#fragment", "https://www.chatgpt.com/", "about:blank" })

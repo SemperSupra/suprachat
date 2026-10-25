@@ -8,6 +8,7 @@ on:
       - 'SupraChat/Core/TrafficTrace.cs'
       - 'SupraChat/Core/MetadataCaptureConsent.cs'
       - 'SupraChat/Core/NativeMetadata*.cs'
+      - 'SupraChat/Core/NativeCaptureDiagnostics.cs'
       - 'SupraChat/Core/NativeNetworkRegistration.cs'
       - 'SupraChat/Core/WindowsConsentedMetadataSession.cs'
       - 'SupraChat/NativeMetadataReviewWindow.cs'

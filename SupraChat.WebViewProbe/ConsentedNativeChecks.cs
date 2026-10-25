@@ -43,10 +43,15 @@ internal static class ConsentedNativeChecks
         var before = a.Read().Events.Count;
         a.Stop(); Require(!await a.ConfirmAsync(planA, true));
         Require(!a.Status().ObserverAttached && !a.Status().Consent.CaptureActive);
+        await a.StopForSummaryAsync();
+        Require(a.Status().EndReason == NativeCaptureEndReason.OperatorStop && a.Status().CleanupComplete && a.Status().DisableCompleted);
+        Require(a.Status().Diagnostics!.TotalIncidents == 0 && a.Read().CaptureGap);
         // Idle expiry: advancing the test timer revokes ingestion before any status polling or traffic.
         clock.Advance(TimeSpan.FromSeconds(121));
         await Task.Delay(100);
         Require(!b.Status().ObserverAttached && !b.Status().Consent.CaptureActive);
+        await b.StopForSummaryAsync();
+        Require(b.Status().EndReason == NativeCaptureEndReason.LeaseExpired && b.Status().CleanupComplete);
         Require(!await b.ConfirmAsync(planB, true));
         Require(a.Read().Events.Count == before);
         await b.DisposeAsync();
@@ -71,10 +76,13 @@ internal static class ConsentedNativeChecks
         views[0].Navigate(new Uri("about:blank"));
         await WaitAsync(() => !a.Status().ObserverAttached);
         Require(!a.Status().Consent.CaptureActive && !await a.ConfirmAsync(navigation, true));
+        await a.StopForSummaryAsync();
+        Require(a.Status().EndReason == NativeCaptureEndReason.Navigation && a.Status().CleanupComplete);
         return new { gateway_native_capture = true, concurrent_sessions = 2, off_before_review = true,
             no_ack_no_observer = true, historical_confirmation_refused = true, idle_expiry_detached = true,
             stop_during_pending_enable_refused = true, expiry_during_pending_enable_refused = true,
             native_view_replacement_revoked = true, blank_navigation_revoked = true, sentinel_excluded = true,
+            intentional_stop_not_loss = true, first_end_reason_preserved = true, cleanup_settled_before_summary = true,
             first_party_live_executed = false };
     }
 
