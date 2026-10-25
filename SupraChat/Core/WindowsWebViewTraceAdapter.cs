@@ -33,19 +33,23 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private WindowsWebViewTraceAdapter(CoreWebView2 core, ITraceSink sink, LocalTraceSession session, Uri origin, Func<bool>? admission)
     { _core = core; _sink = sink; _session = session; _origin = origin; _admissionStillActive = admission; }
 
-    public static async Task<WindowsWebViewTraceAdapter> AttachSyntheticAsync(IntPtr nativeHandle,
-        TraceNormalizer sink, LocalTraceSession session, Uri origin)
+    public static Task<WindowsWebViewTraceAdapter> AttachSyntheticAsync(IntPtr nativeHandle,
+        TraceNormalizer sink, LocalTraceSession session, Uri origin) =>
+        AttachCoreAsync(nativeHandle, sink, session, origin, sink, null);
+
+    private static async Task<WindowsWebViewTraceAdapter> AttachCoreAsync(IntPtr nativeHandle,
+        TraceNormalizer normalizer, LocalTraceSession session, Uri origin, ITraceSink sink, Func<bool>? admission)
     {
         if (!origin.IsAbsoluteUri || !origin.IsLoopback || origin.Scheme is not ("http" or "https") ||
             origin.UserInfo.Length != 0 || origin.AbsolutePath != "/" || origin.Query.Length != 0 || origin.Fragment.Length != 0)
             throw new UnauthorizedAccessException("Synthetic native observer origin refused.");
-        sink.Read(session, limit: 1); // A UUID or a capability from another normalizer is not admission.
+        normalizer.Read(session, limit: 1); // A UUID or a capability from another normalizer is not admission.
         if (nativeHandle == IntPtr.Zero) throw new ArgumentException("Native observer handle unavailable.");
         var core = CoreWebView2.CreateFromComICoreWebView2(nativeHandle);
         var current = core.Source;
         if (current != "about:blank" && (!Uri.TryCreate(current, UriKind.Absolute, out var currentUri) || !SameOrigin(currentUri, origin)))
             throw new UnauthorizedAccessException("Native observer requires a blank or owned synthetic view.");
-        var adapter = new WindowsWebViewTraceAdapter(core, sink, session, origin);
+        var adapter = new WindowsWebViewTraceAdapter(core, sink, session, origin, admission);
         var unknown = new Guid("00000000-0000-0000-C000-000000000046");
         if (Marshal.QueryInterface(nativeHandle, in unknown, out var identity) < 0 || identity == IntPtr.Zero)
             throw new InvalidOperationException("Native identity unavailable.");
