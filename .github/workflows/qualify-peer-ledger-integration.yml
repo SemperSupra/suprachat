@@ -4,6 +4,7 @@ on:
     paths:
       - 'SupraChat.PeerLedgerRdte/**'
       - 'SupraChat/Core/SharedSession*.cs'
+      - 'SupraChat/Core/LocalOwnedStreamControls.cs'
       - 'SupraChat/Core/ChatGptControlContract.cs'
       - 'SupraChat/Core/TrafficTrace.cs'
       - '.github/workflows/qualify-peer-ledger-integration.yml'
@@ -34,10 +35,22 @@ jobs:
               $receipt.signing_key_exported -or $receipt.durable_trace_recovery -or $receipt.trace_completeness -ne 'UNKNOWN') {
             throw 'Peer-ledger receipt scope failed.'
           }
+      - name: Qualify durable local cancellation write-ahead and SQLite crash windows
+        shell: pwsh
+        run: |
+          dotnet run --project SupraChat.PeerLedgerRdte -c Release --no-build -- --control-receipt "$env:RUNNER_TEMP/control-receipt.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Durable control fixture failed.' }
+          $receipt = Get-Content "$env:RUNNER_TEMP/control-receipt.json" -Raw | ConvertFrom-Json
+          if (!$receipt.passed -or $receipt.cases.Count -ne 6 -or $receipt.production_control_admitted -or
+              $receipt.provider_stop_verified -or $receipt.credentials_used -or $receipt.checkpoint_exported -or $receipt.automatic_recovery_dispatch) {
+            throw 'Durable control receipt scope failed.'
+          }
       - name: Preserve sanitized receipt only
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sanitized-peer-ledger-receipt
-          path: ${{ runner.temp }}/peer-ledger-receipt.json
+          path: |
+            ${{ runner.temp }}/peer-ledger-receipt.json
+            ${{ runner.temp }}/control-receipt.json
           if-no-files-found: ignore

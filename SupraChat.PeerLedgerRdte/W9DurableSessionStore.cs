@@ -195,7 +195,9 @@ public sealed class W9DurableSessionStore : IDisposable
                 throw new InvalidDataException("CHECKPOINT_CAPACITY_REACHED");
             var digest = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-            if (_testFault == "WRITE_FAILURE")
+            var controlStage = checkpoint.CancellationJournal is { Length: 1 } controlJournal
+                ? controlJournal[0].Stages.LastOrDefault()?.Stage : null;
+            if (_testFault == "WRITE_FAILURE" || _testFault == "CONTROL_WRITE_FAILURE" && controlStage == "REQUESTED")
                 Exec("PRAGMA query_only=ON"); // Real SQLite write exception exercises Save's fail-stop catch.
             using (var tx = _db.BeginTransaction(deferred: false))
             {
@@ -209,11 +211,13 @@ public sealed class W9DurableSessionStore : IDisposable
                 put.Parameters.AddWithValue("$json", content);
                 if (put.ExecuteNonQuery() != 1)
                     throw new InvalidDataException("CHECKPOINT_WRITE_FAILED");
-                if (_testFault == "BEFORE_COMMIT")
+                if (_testFault == "BEFORE_COMMIT" || _testFault == "CONTROL_BEFORE_REQUEST" && controlStage == "REQUESTED" ||
+                    _testFault == "CONTROL_BEFORE_APPLIED" && controlStage == "APPLIED_LOCAL_SIGNAL")
                     Environment.Exit(88);
                 tx.Commit();
             }
-            if (_testFault == "AFTER_COMMIT_BEFORE_ACK")
+            if (_testFault == "AFTER_COMMIT_BEFORE_ACK" || _testFault == "CONTROL_AFTER_REQUEST" && controlStage == "REQUESTED" ||
+                _testFault == "CONTROL_AFTER_APPLIED" && controlStage == "APPLIED_LOCAL_SIGNAL")
                 Environment.Exit(89);
             VerifyCustody();
     }

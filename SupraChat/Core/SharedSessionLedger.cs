@@ -32,9 +32,10 @@ public sealed partial class SharedSessionLedger
     /// normally after an uncertain durable write. All calls run under _gate.
     /// </summary>
     public SharedSessionLedger(SessionLedgerCheckpoint? checkpoint = null,
-        Action<SessionLedgerCheckpoint>? persist = null)
+        Action<SessionLedgerCheckpoint>? persist = null, TimeProvider? controlClock = null)
     {
         _persist = persist;
+        _controlClock = controlClock ?? TimeProvider.System;
         if (checkpoint is null) return;
         if (checkpoint.Schema != Schema || checkpoint.Sequence < 0 ||
             checkpoint.Sessions is null || checkpoint.Operations is null ||
@@ -75,6 +76,7 @@ public sealed partial class SharedSessionLedger
                 throw new InvalidDataException("INVALID_REVOKED_GRANT_CHECKPOINT");
         }
         _sequence = checkpoint.Sequence;
+        RestoreCancellationJournal(checkpoint.CancellationJournal);
     }
 
     /// <summary>
@@ -257,7 +259,8 @@ public sealed partial class SharedSessionLedger
                 .Select(x => new SessionLedgerCheckpointOperation(x.Key,
                     x.Value.Fingerprint, x.Value.Outcome)).ToArray(),
             _events.ToArray(),
-            _revokedGrants.OrderBy(id => id, StringComparer.Ordinal).ToArray());
+            _revokedGrants.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            _cancellationJournal.Values.Select(CopyCancellationEntry).ToArray());
 
     private static SessionLedgerResult Replay(PriorAction prior, string fingerprint) =>
         prior.Fingerprint == fingerprint
@@ -325,7 +328,7 @@ public sealed record SessionLedgerCheckpoint(
     SessionLedgerState[] Sessions,
     SessionLedgerCheckpointOperation[] Operations,
     SessionLedgerEvent[] Events,
-    string[]? RevokedGrantIds = null);
+    string[]? RevokedGrantIds = null, DurableCancellationEntry[]? CancellationJournal = null);
 public sealed record SessionLedgerCheckpointOperation(
     string Key, string Fingerprint, SessionLedgerResult Outcome);
 
