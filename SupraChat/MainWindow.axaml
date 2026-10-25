@@ -669,6 +669,20 @@
                      MaxHeight="145"
                      AutomationProperties.AutomationId="Sessions.SharedHostEvents"
                      AutomationProperties.Name="Selected host session retained metadata events, not ChatGPT messages" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Start bounded read-only auto-follow" Margin="0,0,8,8"
+                      Click="WorkbenchHostAutoFollowStart_Click"
+                      AutomationProperties.AutomationId="Sessions.SharedHostAutoFollowStart"
+                      AutomationProperties.HelpText="Explicitly follow one selected host session for at most 64 reads. Never sends to ChatGPT or changes sessions." />
+              <Button Content="Stop auto-follow" Margin="0,0,8,8"
+                      Click="WorkbenchHostAutoFollowStop_Click"
+                      AutomationProperties.AutomationId="Sessions.SharedHostAutoFollowStop"
+                      AutomationProperties.HelpText="Cancel pending metadata reads and stop automatic following." />
+            </WrapPanel>
+            <TextBlock x:Name="WorkbenchHostAutoFollowStatus" TextWrapping="Wrap"
+                       Text="Auto-follow off. Start requires a selected session, observed cursor and host process epoch."
+                       AutomationProperties.AutomationId="Sessions.SharedHostAutoFollowStatus"
+                       AutomationProperties.LiveSetting="Polite" />
             <TextBlock x:Name="WorkbenchHostFollowStatus" TextWrapping="Wrap"
                        Text="No host session selected. No event cursor has been observed."
                        AutomationProperties.AutomationId="Sessions.SharedHostFollowStatus"
