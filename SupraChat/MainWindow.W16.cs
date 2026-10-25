@@ -15,6 +15,34 @@ public partial class MainWindow
     private CancellationTokenSource? _sharedAutoFollowStop;
     private long _sharedAutoFollowGeneration;
 
+    // Cancellation can complete while the Avalonia dispatcher is busy.
+    // A queued callback still checks the same token and generation gate
+    // before any UI mutation; no old observer is allowed to update a new view.
+    private static async Task QueueAutoFollowUiAsync(Action update, CancellationToken stop)
+    {
+        stop.ThrowIfCancellationRequested();
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                stop.ThrowIfCancellationRequested();
+                update();
+                completion.TrySetResult(true);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                completion.TrySetCanceled(stop);
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        });
+        await completion.Task.WaitAsync(stop);
+    }
+
     private void StopSharedAutoFollow(string reason)
     {
         var previous = _sharedAutoFollowStop;
@@ -73,7 +101,7 @@ public partial class MainWindow
                 ct => SharedSessionInventoryReader.ObserveAsync(port, accessToken, ct),
                 async (snapshot, projection, ct) =>
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    await QueueAutoFollowUiAsync(() =>
                     {
                         ct.ThrowIfCancellationRequested();
                         if (!ReferenceEquals(_sharedAutoFollowStop, stop) ||
@@ -108,7 +136,7 @@ public partial class MainWindow
                         WorkbenchAutoFollowStatus.Text =
                             "Read-only follow active; one GET at a time, " +
                             "cancellable; no provider or terminal authority.";
-                    });
+                    }, ct);
                 }, stop.Token);
             if (ReferenceEquals(_sharedAutoFollowStop, stop) &&
                 generation == Interlocked.Read(ref _sharedAutoFollowGeneration))
