@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private AccessibilityPreferences _accessibilityPreferences = AccessibilityPreferences.Default;
     private Window? _nativeMetadataWindow;
     private SharedSessionLedger? _nativeMetadataLedger;
+    private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
 
     public MainWindow()
     {
@@ -777,8 +778,17 @@ public partial class MainWindow : Window
     public async Task HandleStartupArgumentsAsync(IEnumerable<string> args)
     {
         var imported = 0;
-        foreach (var raw in args.Where(value => !string.IsNullOrWhiteSpace(value)))
+        var startupArgs = args.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+        var nativeMetadataHil = OperatingSystem.IsWindows() && startupArgs.Contains("--first-party-metadata-hil", StringComparer.Ordinal);
+        foreach (var raw in startupArgs)
         {
+            const string metadataOutputPrefix = "--metadata-summary-directory=";
+            if (nativeMetadataHil && raw.StartsWith(metadataOutputPrefix, StringComparison.Ordinal))
+            {
+                var directory = raw[metadataOutputPrefix.Length..];
+                if (Path.IsPathFullyQualified(directory)) _nativeMetadataOutputDirectory = Path.GetFullPath(directory);
+                continue;
+            }
             if (raw == "--first-party-metadata-hil")
             {
                 NativeMetadataReview.IsVisible = OperatingSystem.IsWindows();
@@ -810,6 +820,8 @@ public partial class MainWindow : Window
             RefreshAttachmentStatus();
             AuthStatus.Text = $"Imported {imported} file(s) from the desktop launch request.";
         }
+        if (nativeMetadataHil && startupArgs.Contains("--open-metadata-review", StringComparer.Ordinal))
+            NativeMetadataReview_Click(this, new RoutedEventArgs()); // Opens review only; never confirms or starts capture.
     }
 
     private void AddAttachmentBytes(string name, byte[] bytes)
@@ -1710,7 +1722,7 @@ public partial class MainWindow : Window
         var session = _nativeMetadataLedger.Open("native-hil-window-session", "automation", "ChatGPT browser window").Session!;
         IntPtr CurrentHandle() => ChatView.TryGetPlatformHandle() is Avalonia.Platform.IWindowsWebView2PlatformHandle handle
             ? handle.CoreWebView2 : IntPtr.Zero;
-        var review = new NativeMetadataReviewWindow(Guid.ParseExact(session.Id, "N"), CurrentHandle);
+        var review = new NativeMetadataReviewWindow(Guid.ParseExact(session.Id, "N"), CurrentHandle, _nativeMetadataOutputDirectory);
         _nativeMetadataWindow = review;
         review.Closed += (_, _) => _nativeMetadataWindow = null;
         review.Show(this);

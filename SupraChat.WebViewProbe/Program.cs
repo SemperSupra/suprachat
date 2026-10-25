@@ -224,6 +224,9 @@ internal sealed class ProbeApp : Application
 
             phase = "consented-native-gateway";
             var consentedNative = await ConsentedNativeChecks.RunAsync(views);
+            phase = "native-review-controls";
+            foreach (var adapter in sharedAdapters) await adapter.DisposeAsync();
+            var nativeReviewUi = await NativeReviewUiChecks.RunAsync(views[2]);
 
             passed = true;
             phase = "verified";
@@ -247,6 +250,7 @@ internal sealed class ProbeApp : Application
                 repeated_old_disposal_preserved_replacement = true,
                 foreign_redirect_revoked = true,
                 consented_native = consentedNative,
+                native_review_ui = nativeReviewUi,
                 wrong_session_refused = wrongSessionRefused,
                 first_party_admission_refused = firstPartyRefused,
                 sessions = observers.Select((observer, index) => new { session = index, counts = observer.Counts }).ToArray()

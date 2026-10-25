@@ -11,10 +11,11 @@ internal sealed class LocalFirstPartyMetadataOptIn
     private readonly IntPtr _handle;
     private int _used;
     private LocalFirstPartyMetadataOptIn(Guid session, IntPtr handle) { _session = session; _handle = handle; }
-    internal static LocalFirstPartyMetadataOptIn FromExplicitReview(Guid session, IntPtr handle, bool acknowledged, string phrase)
+    internal static LocalFirstPartyMetadataOptIn FromExplicitReview(Guid session, IntPtr handle, bool acknowledged)
     {
-        if (!acknowledged || phrase != "ALLOW METADATA" || session == Guid.Empty || handle == IntPtr.Zero)
-            throw new UnauthorizedAccessException("Explicit local metadata experiment opt-in required.");
+        if (!acknowledged) throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.AcknowledgementRequired);
+        if (session == Guid.Empty || handle == IntPtr.Zero)
+            throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.NativeViewUnavailable);
         return new(session, handle);
     }
     internal void Consume(Guid session, IntPtr handle)
@@ -64,14 +65,16 @@ public sealed class WindowsConsentedMetadataSession : IAsyncDisposable
         if (new[] { "WEBVIEW2_USER_DATA_FOLDER", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
             "WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER", "WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER" }.Any(name =>
                 !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name))))
-            throw new UnauthorizedAccessException("Native metadata environment overrides refused.");
+            throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.EnvironmentOverride);
         WindowsWebViewTraceAdapter.ValidateOrigin(origin, surface);
-        if (handle == IntPtr.Zero || currentHandle() != handle) throw new UnauthorizedAccessException("Owned native view unavailable.");
-        _core = CoreWebView2.CreateFromComICoreWebView2(handle);
+        if (handle == IntPtr.Zero) throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.NativeViewUnavailable);
+        if (currentHandle() != handle) throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.NativeViewChanged);
+        try { _core = CoreWebView2.CreateFromComICoreWebView2(handle); }
+        catch { throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.NativeInteropUnavailable); }
         ValidateSource();
         var unknown = new Guid("00000000-0000-0000-C000-000000000046");
         if (Marshal.QueryInterface(handle, in unknown, out _identity) < 0 || _identity == IntPtr.Zero)
-            throw new InvalidOperationException("Native identity unavailable.");
+            throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.NativeInteropUnavailable);
         _session = _trace.CreateSession(sessionId);
         _consent = new(_trace, time);
         _binding = _consent.RegisterNative(_session, _view, surface == TraceSurface.ChatGptWebView);
@@ -89,7 +92,7 @@ public sealed class WindowsConsentedMetadataSession : IAsyncDisposable
             try { _core.NavigationStarting -= NavigationStarting; _core.NavigationCompleted -= NavigationCompleted; } catch { }
             _consent.Dispose(); _trace.Dispose();
             Marshal.Release(_identity); _identity = IntPtr.Zero;
-            throw new InvalidOperationException("Native metadata review could not prepare.");
+            throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.NativeInteropUnavailable);
         }
     }
 
@@ -112,7 +115,7 @@ public sealed class WindowsConsentedMetadataSession : IAsyncDisposable
     {
         if (!Uri.TryCreate(_core.Source, UriKind.Absolute, out var uri) || uri.Scheme != _origin.Scheme ||
             uri.IdnHost != _origin.IdnHost || uri.Port != _origin.Port || uri.UserInfo.Length != 0)
-            throw new UnauthorizedAccessException("Navigate the owned view to its admitted origin first.");
+            throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.OriginNotReady);
     }
     private bool CheckView()
     {
@@ -139,7 +142,7 @@ public sealed class WindowsConsentedMetadataSession : IAsyncDisposable
     {
         ThreadCheck();
         if (!CheckView() || _starting || _attachment is not null || _consent.Status(_binding).CaptureActive)
-            throw new InvalidOperationException("Stop capture and wait for the owned view before reviewing again.");
+            throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.ReviewNotReady);
         return _consent.Preview(_binding, _surface == TraceSurface.ChatGptWebView ? MetadataConsentScope.FirstPartyMetadata : MetadataConsentScope.SyntheticMetadata);
     }
     public bool IsPending(MetadataConsentPlan plan) { ThreadCheck(); return CheckView() && _consent.IsPending(_binding, plan); }

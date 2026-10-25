@@ -41,6 +41,20 @@ internal static class NativeDiagnosticChecks
         Require(summary.GetProperty("first_lease_end_reason").GetString() == "SummarySave" && !summary.GetProperty("capture_active").GetBoolean());
         var json = summary.GetRawText();
         Require(!json.Contains("private-diagnostic-sentinel") && !json.Contains("private=value") && !json.Contains("foreign.invalid"));
+        var outputDirectory = Path.Combine(Path.GetTempPath(), "suprachat-summary-save-" + Guid.NewGuid().ToString("N"));
+        var store = new NativeMetadataSummaryStore(outputDirectory);
+        Require(!Directory.Exists(outputDirectory));
+        var firstPath = store.Save(summary); var secondPath = store.Save(summary);
+        Require(firstPath != secondPath && File.Exists(firstPath) && File.Exists(secondPath));
+        Require(!File.ReadAllText(firstPath).Contains("private-diagnostic-sentinel"));
+        var optIn = LocalFirstPartyMetadataOptIn.FromExplicitReview(session.SessionId, new IntPtr(1), true);
+        optIn.Consume(session.SessionId, new IntPtr(1));
+        var reused = false; try { optIn.Consume(session.SessionId, new IntPtr(1)); } catch (UnauthorizedAccessException) { reused = true; }
+        Require(reused);
+        var unacknowledged = false;
+        try { LocalFirstPartyMetadataOptIn.FromExplicitReview(session.SessionId, new IntPtr(1), false); }
+        catch (NativeMetadataPreparationException error) { unacknowledged = error.Reason == NativeMetadataPreparationReason.AcknowledgementRequired; }
+        Require(unacknowledged);
         Console.WriteLine("Native diagnostic checks PASS (synthetic parser incidents, intentional stop, lifecycle distinction, summary privacy)");
     }
 }

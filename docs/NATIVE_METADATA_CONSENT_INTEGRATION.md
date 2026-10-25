@@ -23,13 +23,13 @@ before retention. Stop and navigation revoke the current plan before asynchronou
 
 On Windows, the explicit command-line flag `--first-party-metadata-hil` exposes a local review button.
 The flag alone attaches no observer. The local operator must review the scope, acknowledge it,
-type `ALLOW METADATA`, prepare the current view and confirm within 60 seconds. Capture lasts at
+prepare the current view and confirm within 60 seconds. No typed phrase is required. Capture lasts at
 most 120 seconds. Any navigation, native view change, stop or review-window close ends capture.
 The controller requires a loaded view at the exact HTTPS chatgpt.com origin and rejects known
 WebView2 environment overrides. The admission origin is not a sign-in or conversation identity.
 
 This is a single-operator experiment with an ephemeral local ledger session, not the production
-shared host, durable issuer, cross-actor privileged export or human identity admission. The typed
+shared host, durable issuer, cross-actor privileged export or human identity admission. The local
 acknowledgement is an interaction safeguard, not proof that a human authorized an operation.
 The normal profile is used only if an operator explicitly elects to run this path. Qualification
 does not launch this flag or access a signed-in profile. Source review and explicit operator opt-in
@@ -44,11 +44,19 @@ direction, status, byte counts, origin category and pseudonymous correlation rea
 not retained or exported. This is not a claim that sensitive fields never enter process memory.
 There is no generic CDP command, provider action, replay, traffic modification or automatic upload.
 
-The explicit save action stops capture, then offers an aggregate-only new JSON file. It exports no
+The explicit Save summary action stops capture and writes an aggregate-only new JSON file directly
+to the local experiment folder, without a file picker. The HIL launch may specify an absolute
+`--metadata-summary-directory=...`; otherwise the app uses its local metadata-experiments folder. It exports no
 event arrays, correlation aliases, URLs or titles. Diagnostic events alone cannot label evidence as
 first-party observations. A nonzero admitted network-event count labels the summary
 FIRST_PARTY_LIVE_REDACTED; sign-in remains OPERATOR_CHECK_REQUIRED, completeness UNKNOWN,
 and provider-operation, conversation-binding and human-verification claims remain false.
+
+With the HIL flag, `--open-metadata-review` opens the review dialog on launch; it never starts capture.
+Preparation errors and disabled confirmation now show fixed reasons and recovery guidance, without
+raw exception messages or browser URLs. The native qualification includes the actual dialog controls
+with a disposable loopback view, repeated platform-handle lookup and detach/reattach. Direct summary
+file writes are checked separately with synthetic aggregate data; this is not live Save qualification.
 
 ## Remaining gates
 

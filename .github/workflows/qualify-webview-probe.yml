@@ -9,6 +9,7 @@ on:
       - 'SupraChat/Core/MetadataCaptureConsent.cs'
       - 'SupraChat/Core/NativeMetadata*.cs'
       - 'SupraChat/Core/NativeCaptureDiagnostics.cs'
+      - 'SupraChat/Properties/AssemblyInfo.cs'
       - 'SupraChat/Core/NativeNetworkRegistration.cs'
       - 'SupraChat/Core/WindowsConsentedMetadataSession.cs'
       - 'SupraChat/NativeMetadataReviewWindow.cs'

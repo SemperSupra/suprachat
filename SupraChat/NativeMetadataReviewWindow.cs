@@ -5,7 +5,6 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using SupraChat.Core;
 
@@ -19,30 +18,47 @@ internal sealed class NativeMetadataReviewWindow : Window
     private MetadataConsentPlan? _plan;
     private readonly ReviewOperationFence _operations = new();
     private bool _closed, _busy;
-    private readonly TextBox _phrase = Named(new TextBox(), "Native.Metadata.Phrase", "Type ALLOW METADATA to opt in");
     private readonly CheckBox _ack = Named(new CheckBox { Content = "I reviewed this window and metadata-only scope" }, "Native.Metadata.Acknowledge", "Acknowledge the local metadata experiment");
     private readonly Button _review = Named(new Button { Content = "Prepare this window's review" }, "Native.Metadata.Prepare", "Prepare metadata review");
     private readonly Button _confirm = Named(new Button { Content = "Confirm two-minute metadata capture", IsEnabled = false }, "Native.Metadata.Confirm", "Confirm reviewed first-party metadata capture");
     private readonly TextBlock _message = Named(new TextBlock { Text = "Capture OFF. No network observer is attached.", TextWrapping = TextWrapping.Wrap }, "Native.Metadata.Message", "Native metadata experiment status");
     private readonly TextBox _status = Named(new TextBox { IsReadOnly = true, AcceptsReturn = true, Height = 160 }, "Native.Metadata.Status", "Sanitized metadata capture state");
-    private readonly Button _save = Named(new Button { Content = "Save sanitized summary…" }, "Native.Metadata.Save", "Save aggregate metadata experiment summary");
+    private readonly Button _save = Named(new Button { Content = "Save summary" }, "Native.Metadata.Save", "Save aggregate metadata experiment summary");
+    private readonly TextBlock _readiness = Named(new TextBlock { TextWrapping = TextWrapping.Wrap }, "Native.Metadata.Readiness", "Capture confirmation readiness");
 
-    internal NativeMetadataReviewWindow(Guid sessionId, Func<IntPtr> currentHandle)
+    internal NativeMetadataReviewWindow(Guid sessionId, Func<IntPtr> currentHandle, string outputDirectory)
+        : this(acknowledged =>
+        {
+            var handle = currentHandle();
+            var optIn = LocalFirstPartyMetadataOptIn.FromExplicitReview(sessionId, handle, acknowledged);
+            return WindowsConsentedMetadataSession.PrepareFirstParty(handle, sessionId, currentHandle, optIn);
+        }, outputDirectory, false) { }
+
+    internal static NativeMetadataReviewWindow CreateSyntheticQualification(Guid sessionId, Func<IntPtr> currentHandle,
+        Uri loopbackOrigin, string outputDirectory, TimeProvider clock) => new(acknowledged =>
+        {
+            if (!acknowledged) throw new NativeMetadataPreparationException(NativeMetadataPreparationReason.AcknowledgementRequired);
+            return WindowsConsentedMetadataSession.PrepareSynthetic(currentHandle(), sessionId, loopbackOrigin, currentHandle, clock);
+        }, outputDirectory, true);
+
+    private NativeMetadataReviewWindow(Func<bool, WindowsConsentedMetadataSession> prepareCapture, string outputDirectory, bool synthetic)
     {
-        Title = "Review ChatGPT metadata experiment"; Width = 690; Height = 650;
+        Title = synthetic ? "SupraChat synthetic metadata review qualification" : "Review ChatGPT metadata experiment"; Width = 690; Height = 650;
         AutomationProperties.SetAutomationId(this, "Native.Metadata.Window");
+        var summaryStore = new NativeMetadataSummaryStore(outputDirectory);
         var panel = new StackPanel { Margin = new Avalonia.Thickness(20), Spacing = 10 };
         panel.Children.Add(new TextBlock { Text = "Local metadata-only experiment", FontSize = 24 });
         panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text =
-            "Scope: this browser window at chatgpt.com, for at most two minutes. Only origin category, event timing, direction, " +
+            (synthetic ? "Scope: disposable synthetic loopback fixture only. " : "Scope: this browser window at chatgpt.com, for at most two minutes. ") +
+            "Only origin category, event timing, direction, " +
             "status, byte counts and pseudonymous correlation are retained in memory (up to 256 events). " +
             "CDP event JSON, including off-origin requests, reaches this process before origin filtering; headers, cookies, prompts, responses and frame payloads are not retained or exported. " +
             "Stop, navigation, view replacement or closing this window ends capture. Earlier metadata stays in memory until close. " +
             "No provider action, automatic upload, conversation binding or verified-human claim is enabled. " +
             "Use only after source review and your explicit opt-in for this test. Keep the ChatGPT tab open." });
-        foreach (var control in new Control[] { _ack, _phrase, _review, _confirm }) panel.Children.Add(control);
+        foreach (var control in new Control[] { _ack, _review, _confirm }) panel.Children.Add(control);
         var stop = Named(new Button { Content = "Stop capture" }, "Native.Metadata.Stop", "Stop first-party metadata capture");
-        panel.Children.Add(stop); panel.Children.Add(_save); panel.Children.Add(_message); panel.Children.Add(_status);
+        panel.Children.Add(stop); panel.Children.Add(_save); panel.Children.Add(_readiness); panel.Children.Add(_message); panel.Children.Add(_status);
         Content = new ScrollViewer { Content = panel };
         _review.Click += async (_, _) => await RunOperation(async generation =>
         {
@@ -50,9 +66,7 @@ internal sealed class NativeMetadataReviewWindow : Window
             var prior = _capture; _capture = null; _plan = null;
             if (prior is not null) await SafeDispose(prior);
             if (!_operations.Current(generation)) return;
-            var handle = currentHandle();
-            var optIn = LocalFirstPartyMetadataOptIn.FromExplicitReview(sessionId, handle, _ack.IsChecked == true, _phrase.Text ?? "");
-            var prepared = WindowsConsentedMetadataSession.PrepareFirstParty(handle, sessionId, currentHandle, optIn);
+            var prepared = prepareCapture(_ack.IsChecked == true);
             if (!_operations.Current(generation)) { await SafeDispose(prepared); return; }
             _capture = prepared; _plan = prepared.Preview();
             _message.Text = "Review ready for this local browser session. Confirm within one minute. Capture remains OFF.";
@@ -62,8 +76,8 @@ internal sealed class NativeMetadataReviewWindow : Window
             _confirm.IsEnabled = false;
             if (_capture is not { } capture || _plan is not { } plan) return;
             _plan = null;
-            var reviewed = _ack.IsChecked == true && _phrase.Text == "ALLOW METADATA";
-            _ack.IsChecked = false; _phrase.Text = "";
+            var reviewed = _ack.IsChecked == true;
+            _ack.IsChecked = false;
             var attached = await capture.ConfirmAsync(plan, reviewed);
             if (!_operations.Current(generation)) return;
             _message.Text = attached ? "Metadata capture active. Normal browser activity remains authoritative; no provider action was requested." :
@@ -71,7 +85,7 @@ internal sealed class NativeMetadataReviewWindow : Window
         });
         stop.Click += (_, _) =>
         {
-            _operations.Cancel(); _plan = null; SafeStop(_capture); _ack.IsChecked = false; _phrase.Text = "";
+            _operations.Cancel(); _plan = null; SafeStop(_capture); _ack.IsChecked = false;
             _message.Text = "Capture stopped. Earlier metadata remains until this review window closes."; Refresh();
         };
         _save.Click += async (_, _) => await RunOperation(async generation =>
@@ -79,13 +93,8 @@ internal sealed class NativeMetadataReviewWindow : Window
                 if (_capture is not { } capture) { _message.Text = "No experiment to summarize."; return; }
                 _plan = null; await capture.StopForSummaryAsync();
                 if (!_operations.Current(generation)) return;
-                var summary = BuildSummary(capture); // No event arrays/aliases survive the file-picker await.
-                var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-                { Title = "Save a new sanitized metadata summary", SuggestedFileName = "suprachat-metadata-summary-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".json" });
-                if (!_operations.Current(generation)) return;
-                if (file?.TryGetLocalPath() is not { } path) return;
-                using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                JsonSerializer.Serialize(output, summary, new JsonSerializerOptions { WriteIndented = true });
+                var summary = BuildSummary(capture);
+                summaryStore.Save((JsonElement)summary);
                 _message.Text = "Stopped and saved an aggregate summary. No event IDs, URLs, titles or payloads were exported.";
         });
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
@@ -99,12 +108,13 @@ internal sealed class NativeMetadataReviewWindow : Window
     {
         if (_operations.TryBegin() is not { } generation) return;
         _busy = true; _review.IsEnabled = false; _save.IsEnabled = false; _confirm.IsEnabled = false;
-        _ack.IsEnabled = false; _phrase.IsEnabled = false;
+        _ack.IsEnabled = false;
         try { await action(generation); }
-        catch { if (!_closed && _operations.Current(generation)) { _plan = null; SafeStop(_capture);
-            _message.Text = "Operation unavailable. Check the fresh review, exact phrase, loaded tab or new local summary filename. Capture remains stopped."; } }
+        catch (Exception error) { if (!_closed && _operations.Current(generation)) { _plan = null; SafeStop(_capture);
+            _message.Text = error is NativeMetadataPreparationException preparation ? PreparationMessage(preparation.Reason) :
+                "The native review or local save could not complete. Capture is stopped. Check the loaded ChatGPT tab and local output folder. [NATIVE_OPERATION_UNAVAILABLE]"; } }
         finally { _operations.End(); _busy = false; if (!_closed) { _review.IsEnabled = true; _save.IsEnabled = true;
-            _ack.IsEnabled = true; _phrase.IsEnabled = true; Refresh(); } }
+            _ack.IsEnabled = true; Refresh(); } }
     }
     private static void SafeStop(WindowsConsentedMetadataSession? capture) { try { capture?.Stop(); } catch { } }
     private static async Task SafeDispose(WindowsConsentedMetadataSession capture)
@@ -123,12 +133,31 @@ internal sealed class NativeMetadataReviewWindow : Window
         if (_closed) return;
         try
         {
-            _confirm.IsEnabled = !_busy && _capture is not null && _plan is not null && _capture.IsPending(_plan) &&
-                _ack.IsChecked == true && _phrase.Text == "ALLOW METADATA";
-            _status.Text = _capture is null ? "Capture OFF" : JsonSerializer.Serialize(_capture.Status(), TraceNormalizer.JsonOptions);
+            var status = _capture?.Status();
+            var pending = !_busy && _capture is not null && _plan is not null && _capture.IsPending(_plan);
+            _confirm.IsEnabled = pending && _ack.IsChecked == true;
+            _readiness.Text = _busy ? "Finishing the previous operation…" : status?.Consent.CaptureActive == true ? "Capture is active. Stop capture or save the summary when finished." :
+                status is not null && status.EndReason != NativeCaptureEndReason.None ? "Capture is off. Save summary writes directly to the local experiment folder." :
+                _ack.IsChecked != true ? "Check the scope acknowledgement to prepare or confirm." :
+                _capture is null ? "Prepare this window's review first." : _plan is null ? "Prepare a fresh review to start another capture." :
+                !pending ? "The review expired or the browser view changed. Prepare a fresh review." : "Ready. Click Confirm two-minute metadata capture within one minute.";
+            if (status is not null && status.EndReason != NativeCaptureEndReason.None && _message.Text?.StartsWith("Metadata capture active") == true)
+                _message.Text = status.EndReason == NativeCaptureEndReason.LeaseExpired ? "Capture expired after two minutes. Save the summary when ready." : "Capture is off. Save the summary when ready.";
+            _status.Text = status is null ? "Capture OFF" : JsonSerializer.Serialize(status, TraceNormalizer.JsonOptions);
         }
-        catch { _confirm.IsEnabled = false; _status.Text = "Capture unavailable"; }
+        catch { _confirm.IsEnabled = false; _status.Text = "Capture unavailable";
+            _readiness.Text = "The browser view is unavailable. Keep the ChatGPT tab selected and wait for it to load."; }
     }
+    private static string PreparationMessage(NativeMetadataPreparationReason reason) => reason switch
+    {
+        NativeMetadataPreparationReason.AcknowledgementRequired => "Check the scope acknowledgement, then prepare the review. [ACKNOWLEDGEMENT_REQUIRED]",
+        NativeMetadataPreparationReason.NativeViewUnavailable => "The native browser view is unavailable. Select the ChatGPT tab in the main window and wait for it to load. [NATIVE_VIEW_UNAVAILABLE]",
+        NativeMetadataPreparationReason.NativeViewChanged => "The native browser view changed during preparation. Prepare a fresh review with the ChatGPT tab kept open. [NATIVE_VIEW_CHANGED]",
+        NativeMetadataPreparationReason.OriginNotReady => "The loaded browser is not ready at the admitted origin. Finish loading ChatGPT in its tab, then prepare again. [ORIGIN_NOT_READY]",
+        NativeMetadataPreparationReason.EnvironmentOverride => "A WebView2 environment override prevents this experiment. Capture remains off. [ENVIRONMENT_OVERRIDE]",
+        NativeMetadataPreparationReason.ReviewNotReady => "The view changed or is still loading. Stop any active capture and prepare a fresh review. [REVIEW_NOT_READY]",
+        _ => "The native browser interface could not prepare. Capture remains off. [NATIVE_INTEROP_UNAVAILABLE]"
+    };
     private static T Named<T>(T control, string id, string name) where T : Control
     { AutomationProperties.SetAutomationId(control, id); AutomationProperties.SetName(control, name); return control; }
 }

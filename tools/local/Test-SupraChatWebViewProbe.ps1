@@ -48,6 +48,10 @@ try {
         !$probeReceipt.details.consented_native.stop_during_pending_enable_refused -or !$probeReceipt.details.consented_native.expiry_during_pending_enable_refused -or
         !$probeReceipt.details.consented_native.intentional_stop_not_loss -or !$probeReceipt.details.consented_native.first_end_reason_preserved -or
         !$probeReceipt.details.consented_native.cleanup_settled_before_summary -or
+        !$probeReceipt.details.native_review_ui.actual_review_controls -or !$probeReceipt.details.native_review_ui.acknowledgement_without_typing -or
+        !$probeReceipt.details.native_review_ui.expired_review_disabled -or !$probeReceipt.details.native_review_ui.repeated_platform_getter_ready -or
+        !$probeReceipt.details.native_review_ui.missing_native_view_explained -or !$probeReceipt.details.native_review_ui.reattached_view_ready -or
+        !$probeReceipt.details.native_review_ui.capture_end_explained -or $probeReceipt.details.native_review_ui.first_party_live_executed -or
         $probeReceipt.details.consented_native.first_party_live_executed) {
         throw 'Probe receipt scope/qualification contract failed.'
     }
