@@ -546,11 +546,11 @@ foreach (var control in new[] {
     "Sessions.SharedHostAutoFollowStop",
     "Sessions.SharedHostAutoFollowStatus"
 })
-    Require(sharedViewXaml.Contains($"AutomationProperties.AutomationId=\\"{control}\\"",
+    Require(sharedViewXaml.Contains($"AutomationProperties.AutomationId=\"{control}\"",
         StringComparison.Ordinal), "W16 missing accessible automatic follow control: " + control);
 Require(sharedViewCode.Contains("SharedSessionAutoFollow.RunAsync(",StringComparison.Ordinal) &&
         sharedViewCode.Contains("StopSharedHostAutoFollow(",StringComparison.Ordinal) &&
-        sharedViewCode.Contains("StopSharedHostAutoFollow(\\"Auto-follow stopped on window close.\\")",
+        sharedViewCode.Contains("StopSharedHostAutoFollow(\"Auto-follow stopped on window close.\")",
             StringComparison.Ordinal),
     "W16 desktop must use the shared bounded core, and cancel on close");
 var w16ReadCount = 0;
