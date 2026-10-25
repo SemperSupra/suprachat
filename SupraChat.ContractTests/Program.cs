@@ -622,6 +622,38 @@ Require(w16Cancelled.Status == "STOPPED_BY_USER_OR_WINDOW" &&
         w16Cancelled.DeliveredObservations == 0 && w16CancelledCalls == 1,
     "W16 stop must interrupt even during notification before another GET");
 
+// Independent backpressure/exception probes from a parallel W16 experiment.
+// They do not assume that a resolved GET implies its presentation was accepted.
+var w16BackpressureReads = 0;
+var w16ReleaseConsumer = new TaskCompletionSource<bool>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var w16BackpressureTask = SharedSessionAutoFollow.RunAsync(
+    observedA,w15EpochA,3,
+    _ => {
+        w16BackpressureReads++;
+        return Task.FromResult(w16Previous);
+    },
+    async (_,_,_) => await w16ReleaseConsumer.Task,
+    CancellationToken.None,_=>Task.CompletedTask,maxObservations:2);
+Require(w16BackpressureReads == 1,
+    "W16 must not issue a second GET before the consumer acknowledges the first");
+w16ReleaseConsumer.SetResult(true);
+var w16BackpressureDone = await w16BackpressureTask;
+Require(w16BackpressureDone.Status == "COMPLETED_BOUNDED_OBSERVATIONS" &&
+        w16BackpressureReads == 2,
+    "W16 must resume with one bounded read after consumer delivery is complete");
+
+var w16PrivatePresentationFailure = await SharedSessionAutoFollow.RunAsync(
+    observedA,w15EpochA,3,
+    _ => Task.FromResult(w16Previous),
+    (_,_,_) => throw new InvalidOperationException("PRIVATE_PAYLOAD_MUST_NOT_APPEAR"),
+    CancellationToken.None,_=>Task.CompletedTask,maxObservations:2);
+Require(w16PrivatePresentationFailure.Status == "STOPPED_OBSERVATION_ERROR" &&
+        w16PrivatePresentationFailure.DeliveredObservations == 0 &&
+        !w16PrivatePresentationFailure.ToString().Contains("PRIVATE_PAYLOAD_MUST_NOT_APPEAR",
+            StringComparison.Ordinal),
+    "W16 must fail closed and redact UI callback exception details");
+
 Require(sharedViewXaml.Contains("Sessions.AutoFollowStart",StringComparison.Ordinal) &&
         sharedViewXaml.Contains("Sessions.AutoFollowStop",StringComparison.Ordinal) &&
         sharedViewXaml.Contains("Sessions.AutoFollowStatus",StringComparison.Ordinal) &&
