@@ -36,6 +36,8 @@ public sealed class MetadataCaptureConsent : IDisposable
         public readonly bool NativeSyntheticEnabled = nativeSyntheticEnabled;
         public long Revision, Epoch, LeaseStarted, Refused;
         public bool Active;
+        public TaskCompletionSource<bool>? Revoked;
+        public ITimer? LeaseTimer;
         public string State = "OFF";
     }
     private sealed class PlanState(MetadataConsentBinding binding, long epoch, long started)
@@ -113,7 +115,13 @@ public sealed class MetadataCaptureConsent : IDisposable
             if (refusal is not null) return pending.Result = new(plan.Review.PlanId, plan.Review.SessionId, "REFUSED", refusal);
             try { _normalizer.SetCapture(state.Capability, TraceCaptureMode.Metadata); }
             catch { return pending.Result = new(plan.Review.PlanId, plan.Review.SessionId, "REFUSED", "RECORDER_UNAVAILABLE"); }
+            // Reaffirming an active lease is a new review: revoke the old native observer first.
+            if (state.Active) StopState(state, "REPLACED");
             state.Active = true; state.State = "ACTIVE"; state.LeaseStarted = _time.GetTimestamp();
+            state.Revoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (state.NativeSyntheticEnabled)
+                state.LeaseTimer = _time.CreateTimer(_ => ExpireNativeLease(binding, state), null,
+                    TimeSpan.FromSeconds(120), Timeout.InfiniteTimeSpan);
             return pending.Result = new(plan.Review.PlanId, binding.SessionId, "ALLOWED", "SYNTHETIC_METADATA_LEASE_STARTED", _time.GetUtcNow().AddSeconds(120));
         }
     }
@@ -139,9 +147,24 @@ public sealed class MetadataCaptureConsent : IDisposable
         }
     }
 
+    // Timer callback never touches the native COM object. It only signals the async lease.
+    private void ExpireNativeLease(MetadataConsentBinding binding, BindingState expected)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_bindings.TryGetValue(binding, out var current) ||
+                !ReferenceEquals(current, expected) || !current.Active) return;
+            StopState(current, "EXPIRED");
+        }
+    }
+
     private void StopState(BindingState state, string reason)
     {
         state.Active = false; state.State = reason; state.Epoch++;
+        state.LeaseTimer?.Dispose();
+        state.LeaseTimer = null;
+        state.Revoked?.TrySetResult(true);
+        state.Revoked = null;
         try { _normalizer.SetCapture(state.Capability, TraceCaptureMode.Off); } catch { state.State = "RECORDER_UNAVAILABLE"; }
     }
     private void Refresh(BindingState state)
@@ -165,6 +188,26 @@ public sealed class MetadataCaptureConsent : IDisposable
     }
 
     /// <summary>Read-only native attachment preflight. Never admits a first-party origin or payload.</summary>
+    /// <summary>
+    /// Provides the one-shot revocation signal for exactly this active view/lease.
+    /// The signal completes asynchronously on stop, view replacement, expiration,
+    /// recorder failure, reapproval, or disposal. No UI/COM callback runs under _gate.
+    /// </summary>
+    public Task GetNativeRevocationTask(MetadataConsentBinding binding, object view)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_bindings.TryGetValue(binding, out var state)) 
+                throw new UnauthorizedAccessException("CONSENT_BINDING_REFUSED");
+            Refresh(state);
+            if (!state.NativeSyntheticEnabled || !state.Active ||
+                !ReferenceEquals(state.View, view) || state.Revoked is null ||
+                !_normalizer.IsCapturing(state.Capability))
+                throw new UnauthorizedAccessException("NATIVE_CONSENT_NOT_ACTIVE");
+            return state.Revoked.Task;
+        }
+    }
+
     public bool IsNativeSyntheticAdmitted(MetadataConsentBinding binding, object view)
     {
         lock (_gate)
