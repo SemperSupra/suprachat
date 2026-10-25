@@ -19,6 +19,8 @@ internal static class NativeConsentIdleExpiryChecks
             return timer;
         }
 
+        public void FireStaleFirst() => _timers[0].FireEvenIfDisposed();
+
         public void Advance(TimeSpan elapsed)
         {
             Ticks += elapsed.Ticks;
@@ -53,6 +55,8 @@ internal static class NativeConsentIdleExpiryChecks
                 _callback(_state);
             }
 
+            // Simulates an already-queued callback racing disposal and renewal.
+            public void FireEvenIfDisposed() => _callback(_state);
             public void Dispose() => _disposed = true;
             public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
         }
