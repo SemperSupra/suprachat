@@ -113,3 +113,7 @@ with real HIL. Product integration must preserve ordinary signed-in
 ChatGPT entitlements and use only supported/approved integration surfaces.
 A browser/agent may not simply claim the W6 metadata log is authoritative
 for the ChatGPT product conversation.
+
+### Native UIA causal fixture qualification
+
+A disposable Windows UIA test candidate was staged on this correction branch. Its native interactive acceptance remains **unverified** until the script scope/runner boundary is corrected and an exact-head Windows job completes. No production or authenticated ChatGPT session is involved.
