@@ -8,6 +8,8 @@ on:
       - 'SupraChat/MainWindow.axaml'
       - 'SupraChat/MainWindow.axaml.cs'
       - 'SupraChat.ContractTests/Program.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'tools/qualify-w14-shared-follow.mjs'
       - '.github/workflows/qualify-w16-auto-follow.yml'
   workflow_dispatch:
 permissions:
