@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using Avalonia.Controls;
+using Avalonia.Platform;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
@@ -39,13 +41,16 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
 
     /// <summary>Only synthetic loopback frames may use this process-local consent bridge.</summary>
     public static Task<WindowsWebViewTraceAdapter> AttachConsentSyntheticAsync(
-        IntPtr nativeHandle, TraceNormalizer normalizer, LocalTraceSession session, Uri origin,
-        MetadataCaptureConsent consent, MetadataConsentBinding binding, object view)
+        NativeWebView view, TraceNormalizer normalizer, LocalTraceSession session, Uri origin,
+        MetadataCaptureConsent consent, MetadataConsentBinding binding)
     {
         if (consent is null || binding is null || session is null ||
             binding.SessionId != session.SessionId || !consent.IsNativeSyntheticAdmitted(binding, view))
             throw new UnauthorizedAccessException("Native synthetic consent is not active.");
-        return AttachCoreAsync(nativeHandle, normalizer, session, origin,
+        if (view.TryGetPlatformHandle() is not IWindowsWebView2PlatformHandle native ||
+            native.CoreWebView2 == IntPtr.Zero)
+            throw new UnauthorizedAccessException("Consent-bound native view unavailable.");
+        return AttachCoreAsync(native.CoreWebView2, normalizer, session, origin,
             new ConsentSink(consent, binding, view, session),
             () => consent.IsNativeSyntheticAdmitted(binding, view));
     }
