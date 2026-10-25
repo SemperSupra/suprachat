@@ -82,6 +82,8 @@ internal sealed class ProbeApp : Application
         var observers = new List<NativeObserver>();
         var sharedAdapters = new List<WindowsWebViewTraceAdapter>();
         using var sharedTrace = new TraceNormalizer();
+        using var nativeConsent = new MetadataCaptureConsent(sharedTrace);
+        MetadataConsentBinding? nativeBinding = null;
         var traceSessions = new List<LocalTraceSession>();
         var passed = false;
         object? details = null;
@@ -101,9 +103,30 @@ internal sealed class ProbeApp : Application
                 await observer.AttachAsync();
                 Require(observer.DevToolsDisabled);
                 var session = sharedTrace.CreateSession();
-                sharedTrace.SetCapture(session, TraceCaptureMode.Metadata);
                 traceSessions.Add(session);
-                sharedAdapters.Add(await WindowsWebViewTraceAdapter.AttachSyntheticAsync(handle.CoreWebView2, sharedTrace, session, server.Origin));
+                if (i == 1)
+                {
+                    nativeBinding = nativeConsent.RegisterNativeSynthetic(session, views[i]);
+                    var deniedBeforeReview = false;
+                    try
+                    {
+                        await WindowsWebViewTraceAdapter.AttachConsentSyntheticAsync(
+                            handle.CoreWebView2, sharedTrace, session, server.Origin, nativeConsent, nativeBinding, views[i]);
+                    }
+                    catch (UnauthorizedAccessException) { deniedBeforeReview = true; }
+                    Require(deniedBeforeReview);
+                    var preview = nativeConsent.Preview(nativeBinding);
+                    Require(preview.Review.Available);
+                    Require(nativeConsent.Confirm(nativeBinding, preview, reviewed: true).Outcome == "ALLOWED");
+                    sharedAdapters.Add(await WindowsWebViewTraceAdapter.AttachConsentSyntheticAsync(
+                        handle.CoreWebView2, sharedTrace, session, server.Origin, nativeConsent, nativeBinding, views[i]));
+                }
+                else
+                {
+                    sharedTrace.SetCapture(session, TraceCaptureMode.Metadata);
+                    sharedAdapters.Add(await WindowsWebViewTraceAdapter.AttachSyntheticAsync(
+                        handle.CoreWebView2, sharedTrace, session, server.Origin));
+                }
             }
 
             phase = "synthetic-network-observed";
