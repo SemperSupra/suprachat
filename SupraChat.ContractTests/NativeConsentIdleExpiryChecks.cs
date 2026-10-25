@@ -76,8 +76,16 @@ internal static class NativeConsentIdleExpiryChecks
         clock.Advance(TimeSpan.FromSeconds(119));
         if (revoked.IsCompleted || !trace.IsCapturing(session))
             throw new InvalidOperationException("Native lease expired before its deadline.");
-        clock.Advance(TimeSpan.FromSeconds(1));
+        if (consent.Confirm(binding, consent.Preview(binding), true).Outcome != "ALLOWED")
+            throw new InvalidOperationException("Lease renewal refused.");
         await revoked.WaitAsync(TimeSpan.FromSeconds(1));
+        var renewed = consent.GetNativeRevocationTask(binding, view);
+        clock.FireStaleFirst();
+        if (renewed.IsCompleted || !trace.IsCapturing(session))
+            throw new InvalidOperationException("Stale timer revoked replacement.");
+        clock.Advance(TimeSpan.FromSeconds(119));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await renewed.WaitAsync(TimeSpan.FromSeconds(1));
         if (trace.IsCapturing(session) || consent.IsNativeSyntheticAdmitted(binding, view) ||
             consent.TryObserve(binding, view,
                 new TraceObservation(TraceSurface.Synthetic, TraceAdapter.WebView2,
