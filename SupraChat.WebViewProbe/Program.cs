@@ -111,7 +111,7 @@ internal sealed class ProbeApp : Application
                     try
                     {
                         await WindowsWebViewTraceAdapter.AttachConsentSyntheticAsync(
-                            handle.CoreWebView2, sharedTrace, session, server.Origin, nativeConsent, nativeBinding, views[i]);
+                            views[i], sharedTrace, session, server.Origin, nativeConsent, nativeBinding);
                     }
                     catch (UnauthorizedAccessException) { deniedBeforeReview = true; }
                     Require(deniedBeforeReview);
@@ -119,7 +119,7 @@ internal sealed class ProbeApp : Application
                     Require(preview.Review.Available);
                     Require(nativeConsent.Confirm(nativeBinding, preview, reviewed: true).Outcome == "ALLOWED");
                     sharedAdapters.Add(await WindowsWebViewTraceAdapter.AttachConsentSyntheticAsync(
-                        handle.CoreWebView2, sharedTrace, session, server.Origin, nativeConsent, nativeBinding, views[i]));
+                        views[i], sharedTrace, session, server.Origin, nativeConsent, nativeBinding));
                 }
                 else
                 {
