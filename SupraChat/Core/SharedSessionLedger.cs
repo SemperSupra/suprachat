@@ -347,4 +347,6 @@ public sealed record SessionLedgerInventory(
     IReadOnlyList<SessionLedgerEvent> Events,
     bool DurableAcrossProcessRestart, bool AuthenticatedAudiences,
     bool ChatSubmissionAllowed, bool TerminalExecutionAllowed,
-    bool CrossProcessTransportAvailable);
+    bool CrossProcessTransportAvailable,
+    // W15 per-process observation epoch, never a signing key or OS identity.
+    string? HostInstanceId = null);

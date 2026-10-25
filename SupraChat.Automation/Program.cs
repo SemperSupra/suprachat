@@ -129,7 +129,7 @@ internal static class Program
             new { name = "session-ledger-host", description = "Explicitly start a token-protected loopback-only ephemeral W6 session coordinator. Uses SUPRACHAT_LEDGER_TOKEN process environment.", syntax = "session-ledger-host --port <1024-65535>" },
             new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
             new { name = "session-ledger-view", description = "Read the same bounded unbound host inventory core used by the desktop Sessions interface; no writes.", syntax = "session-ledger-view --port <host-port>" },
-            new { name = "session-ledger-follow", description = "Read a selected remote W6 host session's bounded metadata events with a caller-held cursor; never bind a local tab or send ChatGPT turns.", syntax = "session-ledger-follow --port <host-port> [--session-id <host-guid-N>] [--after <sequence>]" },
+            new { name = "session-ledger-follow", description = "Read a selected remote W6 host session's bounded metadata events with a caller-held cursor; never bind a local tab or send ChatGPT turns.", syntax = "session-ledger-follow --port <host-port> [--session-id <host-guid-N>] [--after <sequence>] [--host-instance-id <observed-guid-N>]" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
             new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
             new { name = "session-ledger-revoke-own", description = "W13 synthetic: explicitly revoke the currently signed actor grant, durably; cannot revoke another actor.", syntax = "session-ledger-revoke-own --port <host-port> < request.json" },
@@ -1543,7 +1543,8 @@ internal static class Program
         var observed = await SharedSessionInventoryReader.ObserveAsync(
             port, Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
         return SharedSessionFeedProjection.Project(observed,
-            Option(args, "--session-id"),cursor);
+            Option(args, "--session-id"),cursor,
+            Option(args, "--host-instance-id"));
     }
 
     private static async Task<SharedSessionFeedView> RpcLedgerFollowAsync(JsonElement? parameters)
@@ -1568,10 +1569,18 @@ internal static class Program
                 throw new MachineException(2, "INVALID_CURSOR", "Host cursor must be nonnegative.");
             cursor = parsed;
         }
+        string? previousHostInstanceId = null;
+        if (p.TryGetProperty("hostInstanceId", out var epoch))
+        {
+            if (epoch.ValueKind != JsonValueKind.String)
+                throw new MachineException(2, "INVALID_PARAMS", "Host epoch must be a string.");
+            previousHostInstanceId = epoch.GetString();
+        }
         var observed = await SharedSessionInventoryReader.ObserveAsync(
             ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)),
             Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"));
-        return SharedSessionFeedProjection.Project(observed,selected,cursor);
+        return SharedSessionFeedProjection.Project(observed,selected,cursor,
+            previousHostInstanceId);
     }
 
     private static async Task<object> RpcLedgerAsync(JsonElement? parameters, string operation)

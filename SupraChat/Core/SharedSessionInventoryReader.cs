@@ -66,6 +66,10 @@ public static class SharedSessionInventoryReader
                 inventory.Sessions.Count > SharedSessionLedger.MaxSessions ||
                 inventory.Events.Count > SharedSessionLedger.MaxEvents ||
                 inventory.Sequence < 0 ||
+                (inventory.HostInstanceId is not null &&
+                 (!Guid.TryParseExact(inventory.HostInstanceId, "N", out var parsedHost) ||
+                  !string.Equals(parsedHost.ToString("N"), inventory.HostInstanceId,
+                      StringComparison.Ordinal))) ||
                 inventory.AuthenticatedAudiences ||
                 inventory.ChatSubmissionAllowed || inventory.TerminalExecutionAllowed)
                 return Failure("LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED");
@@ -119,7 +123,8 @@ public static class SharedSessionInventoryReader
                 // independent storage qualification or deployment admission.
                 DurableAcrossRestart:inventory.DurableAcrossProcessRestart,
                 ChatSubmissionAllowed:false,TerminalExecutionAllowed:false,
-                Events:retainedEvents);
+                Events:retainedEvents,
+                HostInstanceId:inventory.HostInstanceId);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
             or IOException or JsonException or InvalidOperationException or NotSupportedException
@@ -160,7 +165,9 @@ public sealed record SharedSessionInventoryReceipt(
     bool ReadOnly,bool BoundToDesktopSessions,
     bool ActorIdentityAuthenticated,bool DurableAcrossRestart,
     bool ChatSubmissionAllowed,bool TerminalExecutionAllowed,
-    IReadOnlyList<SharedSessionEventRow>? Events = null)
+    IReadOnlyList<SharedSessionEventRow>? Events = null,
+    // Null for legacy W6 observations: no continuity assertion allowed.
+    string? HostInstanceId = null)
 {
     public IReadOnlyList<SharedSessionEventRow> RetainedEvents =>
         Events ?? Array.Empty<SharedSessionEventRow>();

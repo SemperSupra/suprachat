@@ -97,6 +97,14 @@ try {
  assert.equal(cli.ok,true);
  assert.equal(cli.value.selected_session_id,idA);
  assert.equal(cli.value.sequence,2);
+ assert.match(cli.value.host_instance_id,/^[0-9a-f]{32}$/);
+ assert.equal(cli.value.host_epoch_attested,false);
+ const originalHostInstanceId=cli.value.host_instance_id;
+ const health=await http('/v1/health');
+ assert.equal(health.status,200);
+ assert.equal(health.payload.host_instance_id,originalHostInstanceId);
+ assert.equal(health.payload.host_epoch_attested,false);
+ record('host-epoch-shared-between-health-and-inventory-unattested');
  assert.equal(cli.value.events.length,1);
  assert.equal(cli.value.events[0].operation,'open');
  assert.equal(cli.value.bound_to_desktop_workbench,false);
@@ -108,6 +116,7 @@ try {
  const agent=await invoke(['stdio'],p);
  assert.equal(agent.id,42);assert.equal(agent.result.selected_session_id,idB);
  assert.equal(agent.result.events.length,1);
+ assert.equal(agent.result.host_instance_id,originalHostInstanceId);
  assert.equal(agent.result.events[0].session_id,idB);
  assert.equal(agent.result.terminal_authority,false);
  record('separate-agent-process-selected-B-uses-identical-read-only-core');
@@ -145,6 +154,25 @@ try {
  assert.equal(restart.value.status,'SEQUENCE_REWIND_RESELECT_REQUIRED');
  assert.equal(restart.value.selected_session_id,null);
  record('ephemeral-host-restart-invalidates-old-event-cursor');
+ // Recreate exactly the same global sequence 3. Checking only the old
+ // cursor would misinterpret this as no new events; epoch changes must win.
+ assert.equal((await http('/v1/sessions/open',open('w15-restart-open-a-0001','new A','human'))).status,200);
+ assert.equal((await http('/v1/sessions/open',open('w15-restart-open-b-0002','new B','agent'))).status,200);
+ const replaced=await http('/v1/sessions');
+ assert.equal(replaced.payload.sequence,2);
+ assert.notEqual(replaced.payload.hostInstanceId,originalHostInstanceId);
+ const staleEpoch=await invoke(['session-ledger-follow','--port',String(port),
+  '--session-id',idA,'--after','2','--host-instance-id',originalHostInstanceId]);
+ assert.equal(staleEpoch.value.status,'HOST_INSTANCE_CHANGED_RESELECT_REQUIRED');
+ assert.equal(staleEpoch.value.event_gap_unverified,true);
+ assert.equal(staleEpoch.value.selected_session_id,null);
+ assert.equal(staleEpoch.value.sequence,2);
+ const staleAgent=await invoke(['stdio'],{jsonrpc:'2.0',id:44,
+  method:'session/ledger/follow',params:{port,sessionId:idB,
+    afterSequence:2,hostInstanceId:originalHostInstanceId}});
+ assert.equal(staleAgent.result.status,'HOST_INSTANCE_CHANGED_RESELECT_REQUIRED');
+ assert.equal(staleAgent.result.selected_session_id,null);
+ record('same-sequence-replacement-fenced-before-selecting-old-A-B');
  console.log(JSON.stringify({schema:'suprachat-w14-actual-host-observer/v1',
   result:'PASS',stages,independent_sessions:2,cli_and_agent_parity:true,
   browser_messages_submitted:0,terminal_actions:0,

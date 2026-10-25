@@ -200,6 +200,8 @@ try{
   });
   assert.notEqual(contestCode,0);
   record('exclusive-single-writer-W6-host');
+  const beforeRestart=(await request('/v1/sessions')).body;
+  assert.match(beforeRestart.hostInstanceId,/^[0-9a-f]{32}$/);
 
   await stop();
   await launch();
@@ -209,8 +211,12 @@ try{
   assert.equal(inventory.sessions.length,2);
   assert.equal(inventory.sessions.find(s=>s.id===sidA).version,1);
   assert.equal(inventory.sessions.find(s=>s.id===sidB).version,1);
+  assert.equal(inventory.sequence,beforeRestart.sequence);
+  assert.notEqual(inventory.hostInstanceId,beforeRestart.hostInstanceId,
+    'restored exact session ids and sequence must still yield fresh host epoch');
   const uiRecovered=await desktopCoreView();
   assert.deepEqual(new Set(uiRecovered.sessions.map(s=>s.id)),new Set([sidA,sidB]));
+  assert.equal(uiRecovered.host_instance_id,inventory.hostInstanceId);
   assert.equal(uiRecovered.sessions.find(s=>s.id===sidA).version,1);
   assert.equal(uiRecovered.sessions.find(s=>s.id===sidB).version,1);
   record('accessible-reader-observes-recovered-host-ids-and-revisions');
