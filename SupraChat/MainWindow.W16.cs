@@ -11,6 +11,7 @@ namespace SupraChat;
 /// </summary>
 public partial class MainWindow
 {
+    private bool _sharedAutoFollowTaskActive;
     private CancellationTokenSource? _sharedAutoFollowStop;
     private long _sharedAutoFollowGeneration;
 
@@ -30,7 +31,7 @@ public partial class MainWindow
     private async void WorkbenchAutoFollowStart_Click(object? sender, RoutedEventArgs e)
     {
         // Do not start from a port alone, a local W0 tab, or a guessed epoch.
-        if (_sharedAutoFollowStop is not null)
+        if (_sharedAutoFollowTaskActive)
         {
             WorkbenchAutoFollowStatus.Text = "A bounded observer is already active. Stop it before starting another.";
             return;
@@ -61,6 +62,7 @@ public partial class MainWindow
         var stop = new CancellationTokenSource();
         var generation = Interlocked.Increment(ref _sharedAutoFollowGeneration);
         _sharedAutoFollowStop = stop;
+        _sharedAutoFollowTaskActive = true;
         WorkbenchAutoFollowStatus.Text =
             "Automatic read-only observation ON: at most 20 sequential GETs, " +
             "minimum three seconds apart. No ChatGPT or terminal activity.";
@@ -145,6 +147,7 @@ public partial class MainWindow
         {
             if (ReferenceEquals(_sharedAutoFollowStop, stop))
                 _sharedAutoFollowStop = null;
+            _sharedAutoFollowTaskActive = false;
             stop.Dispose();
         }
     }
