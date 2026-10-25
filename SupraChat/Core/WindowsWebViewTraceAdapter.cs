@@ -18,6 +18,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private readonly ITraceSink _sink;
     private readonly LocalTraceSession _session;
     private readonly Uri _origin;
+    private readonly Func<bool>? _admissionStillActive;
     private readonly HashSet<string> _requests = new(StringComparer.Ordinal);
     private readonly List<(CoreWebView2DevToolsProtocolEventReceiver Receiver,
         EventHandler<CoreWebView2DevToolsProtocolEventReceivedEventArgs> Handler)> _subscriptions = new();
@@ -29,8 +30,8 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     public long ObservedEvents { get; private set; }
     public bool IsStopped => _stopped;
 
-    private WindowsWebViewTraceAdapter(CoreWebView2 core, ITraceSink sink, LocalTraceSession session, Uri origin)
-    { _core = core; _sink = sink; _session = session; _origin = origin; }
+    private WindowsWebViewTraceAdapter(CoreWebView2 core, ITraceSink sink, LocalTraceSession session, Uri origin, Func<bool>? admission)
+    { _core = core; _sink = sink; _session = session; _origin = origin; _admissionStillActive = admission; }
 
     public static async Task<WindowsWebViewTraceAdapter> AttachSyntheticAsync(IntPtr nativeHandle,
         TraceNormalizer sink, LocalTraceSession session, Uri origin)
