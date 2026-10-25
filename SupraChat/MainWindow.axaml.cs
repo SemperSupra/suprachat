@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private SharedSessionInventoryReceipt? _lastSharedHostObservation;
     private int? _sharedFollowHostPort;
     private long? _sharedFollowSequence;
+    private string? _sharedFollowHostInstanceId;
     private string? _sharedFollowSelectedId;
     private bool _updatingSharedFollowSelection;
     private bool _terminalShutdownInProgress;
@@ -419,6 +420,7 @@ public partial class MainWindow : Window
             // requires explicit re-selection; no auto-follow across hosts.
             _sharedFollowHostPort = port;
             _sharedFollowSequence = null;
+            _sharedFollowHostInstanceId = null;
             _sharedFollowSelectedId = null;
             _lastSharedHostObservation = null;
         }
@@ -448,11 +450,15 @@ public partial class MainWindow : Window
                 return;
             }
             var projected = SharedSessionFeedProjection.Project(
-                snapshot,_sharedFollowSelectedId,_sharedFollowSequence);
+                snapshot,_sharedFollowSelectedId,_sharedFollowSequence,
+                _sharedFollowHostInstanceId);
             if (projected.Status is "SEQUENCE_REWIND_RESELECT_REQUIRED" or
-                "SELECTED_SESSION_MISSING_RESELECT_REQUIRED")
+                "SELECTED_SESSION_MISSING_RESELECT_REQUIRED" or
+                "HOST_INSTANCE_CHANGED_RESELECT_REQUIRED" or
+                "INVALID_HOST_EPOCH")
                 _sharedFollowSelectedId = null;
             _sharedFollowSequence = snapshot.Sequence;
+            _sharedFollowHostInstanceId = snapshot.HostInstanceId;
             _lastSharedHostObservation = snapshot;
             _updatingSharedFollowSelection = true;
             try
@@ -471,7 +477,7 @@ public partial class MainWindow : Window
                 : string.Join(Environment.NewLine,
                     projected.Events.Select(row => row.DisplayLabel));
             WorkbenchHostFollowStatus.Text =
-                $"Host cursor {projected.Sequence}. {projected.Status}. " +
+                $"Host cursor {projected.Sequence}; host process epoch {snapshot.HostInstanceId?[..8] ?? "unknown"}. {projected.Status}. " +
                 (projected.EventGapUnverified
                     ? "Missing/truncated metadata event history: cannot claim continuous catch-up. "
                     : "No gap detected in this bounded observation; historical completeness unproven. ") +
