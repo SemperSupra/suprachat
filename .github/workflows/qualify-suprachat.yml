@@ -1116,13 +1116,13 @@ jobs:
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
                 $script:uiaTransientRetries = 0
-                function Require-SemanticControl([string]$automationId) {
+                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
                 Write-Host "UIA semantic lookup: $automationId"
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
                 $element = $null
-                $semanticDeadline = (Get-Date).AddSeconds(3)
+                $semanticDeadline = (Get-Date).AddSeconds($timeoutSeconds)
                 do {
                   try {
                     $element = $window.FindFirst(
@@ -1160,6 +1160,9 @@ jobs:
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
+                  # Selection is asynchronous across UIA providers; require the first child to
+                  # appear before inspecting the rest. Still fail if the tab never exposes it.
+                  $null = Require-SemanticControl $area.controls[0] -timeoutSeconds 15
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }
