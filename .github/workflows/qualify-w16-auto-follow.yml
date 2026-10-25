@@ -1,0 +1,53 @@
+name: Qualify W16 user-started bounded read-only host follower
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionAutoFollow.cs'
+      - 'SupraChat/Core/SharedSessionInventoryReader.cs'
+      - 'SupraChat/MainWindow.W16.cs'
+      - 'SupraChat/MainWindow.axaml'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'tools/qualify-w14-shared-follow.mjs'
+      - '.github/workflows/qualify-w16-auto-follow.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bounded-opt-in:
+    name: W16 opt-in observer ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Compile real GUI, host and machine reader
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Contract tests for bounded stop, gap, epoch, cancellation and accessibility controls
+        run: dotnet run --project SupraChat.ContractTests/SupraChat.ContractTests.csproj -c Release
+      - name: Real W15 cross-process host epoch and retained-event isolation
+        run: node tools/qualify-w14-shared-follow.mjs
+      - name: Hostile bounded read-only inventory and refusal or timeout
+        run: node tools/qualify-w6-hostile-inventory.mjs
+      - name: Preserve W13 same-ledger signed revocation
+        run: node tools/qualify-w12-scoped-writes.mjs
+      - name: Preserve W9 transactional restart
+        run: node tools/qualify-w9-durable-w6-host.mjs
+      - name: Explicit source read-only boundary
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw SupraChat/Core/SharedSessionAutoFollow.cs
+          foreach ($term in @('HttpMethod.Post', 'HttpMethod.Put', 'Process.Start', 'AccessToken', 'WebSocket')) {
+            if ($source.Contains($term)) { throw "W16 unauthorized observer operation: $term" }
+          }
+          Write-Host 'W16 bounded read-only source boundary PASS'
