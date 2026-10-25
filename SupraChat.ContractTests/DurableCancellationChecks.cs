@@ -48,6 +48,15 @@ internal static class DurableCancellationChecks
         {
             var plan = f.Preview().Entry!.Plan;
             Require(!f.Stream.Token.IsCancellationRequested && f.Saved!.CancellationJournal!.Single().Confirmed is null);
+            Require(f.Saved!.Schema == SharedSessionLedger.ControlCheckpointSchema);
+            var downgraded = f.Saved with { Schema = SharedSessionLedger.Schema };
+            var schemaRefused = false;
+            try { _ = new SharedSessionLedger(downgraded, _ => { }); } catch (InvalidDataException) { schemaRefused = true; }
+            Require(schemaRefused);
+            schemaRefused = false;
+            try { _ = new SharedSessionLedger(f.Saved with { CancellationJournal = null }, _ => { }); }
+            catch (InvalidDataException) { schemaRefused = true; }
+            Require(schemaRefused);
             var before = f.Saved;
             var results = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => f.Confirm(plan))));
             Require(results.All(r => r.Status == "VERIFIED_LOCAL_SIGNAL" && !r.ProviderStopVerified && !r.CallbackCompletionVerified));

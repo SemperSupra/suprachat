@@ -37,13 +37,15 @@ public sealed partial class SharedSessionLedger
         _persist = persist;
         _controlClock = controlClock ?? TimeProvider.System;
         if (checkpoint is null) return;
-        if (checkpoint.Schema != Schema || checkpoint.Sequence < 0 ||
+        if (checkpoint.Schema != Schema && checkpoint.Schema != ControlCheckpointSchema || checkpoint.Sequence < 0 ||
             checkpoint.Sessions is null || checkpoint.Operations is null ||
             checkpoint.Events is null || checkpoint.Sessions.Length > MaxSessions ||
             checkpoint.Operations.Length > MaxIdempotencyRecords ||
             checkpoint.Events.Length > MaxEvents ||
             (checkpoint.RevokedGrantIds?.Length ?? 0) > MaxIdempotencyRecords)
             throw new InvalidDataException("INVALID_LEDGER_CHECKPOINT");
+        if ((checkpoint.CancellationJournal?.Length > 0) != (checkpoint.Schema == ControlCheckpointSchema))
+            throw new InvalidDataException("CONTROL_CHECKPOINT_SCHEMA_REQUIRED");
         foreach (var state in checkpoint.Sessions)
         {
             if (!Guid.TryParseExact(state.Id, "N", out _) ||
@@ -253,7 +255,7 @@ public sealed partial class SharedSessionLedger
     }
 
     private SessionLedgerCheckpoint CaptureCheckpoint() =>
-        new(Schema, _sequence,
+        new(_cancellationJournal.Count > 0 ? ControlCheckpointSchema : Schema, _sequence,
             _sessions.Values.OrderBy(s => s.Id, StringComparer.Ordinal).ToArray(),
             _operations.OrderBy(x => x.Key, StringComparer.Ordinal)
                 .Select(x => new SessionLedgerCheckpointOperation(x.Key,

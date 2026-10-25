@@ -17,6 +17,7 @@ public sealed record DurableCancellationResult(string Status, bool IsReplay, Dur
 
 public sealed partial class SharedSessionLedger
 {
+    public const string ControlCheckpointSchema = "suprachat-shared-session-ledger-control/v2";
     private const int MaxCancellationRecords = 128, MaxCancellationTargets = 64;
     private readonly Guid _cancellationRun = Guid.NewGuid();
     private readonly TimeProvider _controlClock;

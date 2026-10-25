@@ -46,6 +46,9 @@ target. Approving a different target always requires a fresh plan and key.
 
 Old checkpoints load with no control journal. New checkpoints validate bounded records, unique plan
 IDs and stage sequences, legal stage prefixes, confirmation consistency and session versions.
+Once a control record exists, the checkpoint uses a distinct control/v2 schema. Older ledger hosts
+reject that schema rather than loading, silently discarding the journal and overwriting decisions.
+Relabeling a control-bearing checkpoint as legacy, or stripping its journal while retaining v2, is refused.
 Checkpoint writes must use the existing qualified fail-stop hook: storage uncertainty terminates the
 host before any later read can expose uncertain in-memory state. The core also refuses further control
 work after a thrown commit. It does not claim arbitrary caller-provided persistence is durable.
