@@ -127,6 +127,21 @@ internal static class MetadataConsentChecks
         Require(!nativeConsent.IsNativeSyntheticAdmitted(native, nativeView) &&
             !nativeConsent.TryObserve(native, nativeView, browserEvent));
         Require(nativeTrace.Read(nativeCap).Events.Count == 1);
+        // Native consent revocation is an idle signal, independent of future traffic.
+        using var revocationTrace = new TraceNormalizer();
+        var revocationClock = new Clock();
+        using var revocation = new MetadataCaptureConsent(revocationTrace, revocationClock);
+        var revocationView = new object();
+        var revocationBinding = revocation.RegisterNativeSynthetic(revocationTrace.CreateSession(), revocationView);
+        revocation.Confirm(revocationBinding, revocation.Preview(revocationBinding), true);
+        var firstRevocation = revocation.GetNativeRevocationTask(revocationBinding, revocationView);
+        Require(!firstRevocation.IsCompleted);
+        revocation.Confirm(revocationBinding, revocation.Preview(revocationBinding), true);
+        await firstRevocation.WaitAsync(TimeSpan.FromSeconds(1));
+        var secondRevocation = revocation.GetNativeRevocationTask(revocationBinding, revocationView);
+        revocationClock.Advance(121);
+        Require(revocation.Status(revocationBinding).State == "EXPIRED");
+        await secondRevocation.WaitAsync(TimeSpan.FromSeconds(1));
         Console.WriteLine("Metadata consent checks PASS (review, scope, session/view binding, expiry, stop, replay, bounded retention)");
     }
 }
