@@ -52,9 +52,10 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
         if (view.TryGetPlatformHandle() is not IWindowsWebView2PlatformHandle native ||
             native.CoreWebView2 == IntPtr.Zero)
             throw new UnauthorizedAccessException("Consent-bound native view unavailable.");
+        var revoked = consent.GetNativeRevocationTask(binding, view);
         return AttachCoreAsync(native.CoreWebView2, normalizer, session, origin,
             new ConsentSink(consent, binding, view, session),
-            () => consent.IsNativeSyntheticAdmitted(binding, view));
+            () => consent.IsNativeSyntheticAdmitted(binding, view), revoked);
     }
 
     private sealed class ConsentSink(
@@ -106,6 +107,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
             await adapter._enableTask.WaitAsync(TimeSpan.FromSeconds(5));
             if (admission is not null && !admission())
                 throw new UnauthorizedAccessException("Native synthetic consent expired during attach.");
+            if (revoked is not null) _ = adapter.DetachOnConsentRevocationAsync(revoked);
             return adapter;
         }
         catch
