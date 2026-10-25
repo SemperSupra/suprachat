@@ -380,6 +380,7 @@ public partial class MainWindow : Window
     {
         if (_updatingSharedFollowSelection || _lastSharedHostObservation is null)
             return;
+        StopSharedAutoFollow("Automatic observation stopped: user changed host selection.");
         if (WorkbenchHostSessionList.SelectedItem is not SharedSessionInventoryRow item)
         {
             _sharedFollowSelectedId = null;
@@ -405,6 +406,7 @@ public partial class MainWindow : Window
 
     private async void WorkbenchReadSharedLedger_Click(object? sender, RoutedEventArgs e)
     {
+        StopSharedAutoFollow("Automatic observation stopped for explicit manual read.");
         if (!int.TryParse(WorkbenchLedgerPort.Text, out var port) ||
             port is < 1024 or > 65535)
         {
@@ -2218,6 +2220,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        StopSharedAutoFollow("Automatic observation cancelled on window close.");
         // Normal GUI close must not hide an unverified child termination.
         // Cancellation precedes destruction of the accessible Sessions UI.
         if (!_verifiedTerminalShutdown &&
