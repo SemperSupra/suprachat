@@ -539,6 +539,101 @@ Require(sharedViewCode.Contains("_sharedFollowHostInstanceId",StringComparison.O
             StringComparison.Ordinal),
     "W15 native GUI must store and react to host process epoch changes");
 
+// W16: opt-in bounded read-only host auto-follow, no duplicate output,
+// background provider actuation or cursor advancement after an unverified gap.
+foreach (var control in new[] {
+    "Sessions.SharedHostAutoFollowStart",
+    "Sessions.SharedHostAutoFollowStop",
+    "Sessions.SharedHostAutoFollowStatus"
+})
+    Require(sharedViewXaml.Contains($"AutomationProperties.AutomationId=\\"{control}\\"",
+        StringComparison.Ordinal), "W16 missing accessible automatic follow control: " + control);
+Require(sharedViewCode.Contains("SharedSessionAutoFollow.RunAsync(",StringComparison.Ordinal) &&
+        sharedViewCode.Contains("StopSharedHostAutoFollow(",StringComparison.Ordinal) &&
+        sharedViewCode.Contains("StopSharedHostAutoFollow(\\"Auto-follow stopped on window close.\\")",
+            StringComparison.Ordinal),
+    "W16 desktop must use the shared bounded core, and cancel on close");
+var w16ReadCount = 0;
+var w16Published = new List<SharedSessionFeedView>();
+var w16NewEvent = epochSource with {
+    Sequence = 4,
+    Events = hostEvents.Append(
+        new SharedSessionEventRow(4,observedA,"automation","set-title",2)).ToArray()
+};
+var w16Completed = await SharedSessionAutoFollow.RunAsync(
+    _ => { w16ReadCount++; return Task.FromResult(w16NewEvent); },
+    (view,_) => { w16Published.Add(view); return Task.CompletedTask; },
+    observedA,3,w15EpochA,CancellationToken.None,
+    TimeSpan.FromMilliseconds(20),maximumObservations:2);
+Require(w16Completed.Status == "STOPPED_BOUNDED_OBSERVATION_LIMIT" &&
+        w16Completed.Observations == 2 &&
+        w16Completed.LastSequence == 4 && w16ReadCount == 2 &&
+        w16Published[0].Events.Count == 1 &&
+        w16Published[0].Events[0].Sequence == 4 &&
+        w16Published[1].Events.Count == 0 &&
+        w16Published[1].Status == "SELECTED_NO_NEW_EVENTS" &&
+        w16Published.All(x => x.ReadOnly && !x.RemoteChatAuthority &&
+                              !x.TerminalAuthority),
+    "W16 bounded cursor must never replay a delivered event or gain authority");
+var w16EpochCalls = 0;
+var w16EpochOutcome = await SharedSessionAutoFollow.RunAsync(
+    _ => {
+        w16EpochCalls++;
+        return Task.FromResult(w16EpochCalls == 1 ? epochSource :
+            epochSource with { HostInstanceId = w15EpochB });
+    },
+    (_,_) => Task.CompletedTask, observedA,3,w15EpochA,CancellationToken.None,
+    TimeSpan.FromMilliseconds(20),maximumObservations:4);
+Require(w16EpochOutcome.Status ==
+        "STOPPED_UNVERIFIED_HOST_INSTANCE_CHANGED_RESELECT_REQUIRED" &&
+        w16EpochOutcome.Observations == 2 && w16EpochCalls == 2,
+    "W16 must stop rather than follow a replaced host even at identical sequence");
+var w16GapCalls = 0;
+var w16GapOutcome = await SharedSessionAutoFollow.RunAsync(
+    _ => { w16GapCalls++; return Task.FromResult(
+        truncatedHost with { HostInstanceId = w15EpochA }); },
+    (_,_) => Task.CompletedTask, observedA,3,w15EpochA,CancellationToken.None,
+    TimeSpan.FromMilliseconds(20),maximumObservations:4);
+Require(w16GapOutcome.Status == "STOPPED_UNVERIFIED_EVENT_GAP_UNVERIFIED" &&
+        w16GapOutcome.LastSequence == 3 && w16GapCalls == 1,
+    "W16 must stop before advancing over a truncated metadata gap");
+using (var alreadyStopped = new CancellationTokenSource())
+{
+    alreadyStopped.Cancel();
+    var observerWasCalled = false;
+    var w16Stopped = await SharedSessionAutoFollow.RunAsync(
+        _ => { observerWasCalled=true; return Task.FromResult(epochSource); },
+        (_,_) => Task.CompletedTask, observedA,3,w15EpochA,alreadyStopped.Token,
+        TimeSpan.FromMilliseconds(20),maximumObservations:3);
+    Require(w16Stopped.Status == "STOPPED_BY_USER_OR_LIFECYCLE" &&
+            w16Stopped.Observations == 0 && !observerWasCalled,
+        "W16 canceled read must not poll or publish");
+}
+var w16BackpressureReadCount = 0;
+var unblockW16Consumer = new TaskCompletionSource<bool>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var w16WaitForUi = SharedSessionAutoFollow.RunAsync(
+    _ => { w16BackpressureReadCount++; return Task.FromResult(epochSource); },
+    async (_,_) => await unblockW16Consumer.Task,
+    observedA,3,w15EpochA,CancellationToken.None,
+    TimeSpan.FromMilliseconds(20),maximumObservations:2);
+await Task.Delay(75);
+Require(w16BackpressureReadCount == 1,
+    "W16 must not issue another read while consumer is backpressured");
+unblockW16Consumer.SetResult(true);
+var w16BackpressureResult = await w16WaitForUi;
+Require(w16BackpressureReadCount == 2 &&
+        w16BackpressureResult.Status == "STOPPED_BOUNDED_OBSERVATION_LIMIT",
+    "W16 resumed consumer must allow one bounded subsequent read");
+var w16PresentFailure = await SharedSessionAutoFollow.RunAsync(
+    _ => Task.FromResult(epochSource),
+    (_,_) => throw new InvalidOperationException("PRIVATE_SUPPRESSED_DETAIL"),
+    observedA,3,w15EpochA,CancellationToken.None,
+    TimeSpan.FromMilliseconds(20),maximumObservations:2);
+Require(w16PresentFailure.Status == "STOPPED_OBSERVER_OR_PRESENTATION_FAILURE" &&
+        !w16PresentFailure.ToString().Contains("PRIVATE_SUPPRESSED_DETAIL"),
+    "W16 must stop and redact publisher exceptions");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
