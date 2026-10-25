@@ -39,6 +39,19 @@ conversation/turn history synchronization implementation**.
    `ReadOnly`; users must re-read and reselect after a failure.
    Follow is not an always-on service, file-backed scheduler or DLE owner.
 
+## Explicit machine/agent initiation (real localhost qualification)
+
+The existing automation shell now exposes a **separately invoked**
+`session-ledger-follow-bounded --port N --session-id GUID-N
+--host-instance-id GUID-N --after SEQUENCE --max-observations 2`
+command. It calls the **same pure bounded observer** as the human desktop,
+with the same 3-second minimum cadence, max-20 cap, fixed localhost GET
+reader and epoch/gap refusal. It returns no actual ChatGPT turns and never
+starts or mutates a host. Each machine invocation is user/actor-initiated;
+there is no ambient daemon or credential signing/minting. An actual W6 host
+and independent machine process run two serial observations with a measured
+minimum cadence on each of Windows/Linux/macOS in public CI.
+
 ## Qualification required
 
 - Deterministic test-double reader: at most one awaited request; 3-read
