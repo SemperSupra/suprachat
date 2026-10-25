@@ -504,6 +504,41 @@ Require(hostRows[0].DisplayLabel.Contains(observedA[..8],StringComparison.Ordina
         hostEvents[0].DisplayLabel.Contains("Event 1",StringComparison.Ordinal),
     "W14 accessible labels must disambiguate sessions and event sequences");
 
+// W15: a fresh process epoch must reject SAME sequence and selected ID,
+// including a durable restart with retained IDs and unchanged event count.
+var w15EpochA = Guid.NewGuid().ToString("N");
+var w15EpochB = Guid.NewGuid().ToString("N");
+var epochSource = hostReceipt with { HostInstanceId = w15EpochA };
+var epochSame = SharedSessionFeedProjection.Project(epochSource,
+    observedA, 3, w15EpochA);
+Require(epochSame.Status == "SELECTED_NO_NEW_EVENTS" &&
+        epochSame.SelectedSessionId == observedA &&
+        epochSame.HostInstanceId == w15EpochA &&
+        !epochSame.HostEpochAttested,
+    "W15 same-process follow must not pretend remote identity attestation");
+var epochChanged = SharedSessionFeedProjection.Project(
+    epochSource with { HostInstanceId = w15EpochB },observedA,3,w15EpochA);
+Require(epochChanged.Status == "HOST_INSTANCE_CHANGED_RESELECT_REQUIRED" &&
+        epochChanged.SelectedSessionId is null &&
+        epochChanged.EventGapUnverified &&
+        epochChanged.Events.Count == 0 &&
+        epochChanged.Sequence == 3,
+    "W15 same-sequence host replacement must fence selection before replay");
+var epochMissing = SharedSessionFeedProjection.Project(hostReceipt,
+    observedA,3,w15EpochA);
+Require(epochMissing.Status == "HOST_INSTANCE_CHANGED_RESELECT_REQUIRED" &&
+        epochMissing.SelectedSessionId is null,
+    "W15 legacy host without epoch cannot inherit a prior bound cursor");
+var epochMalformed = SharedSessionFeedProjection.Project(epochSource,
+    observedA,3,"not-an-instance");
+Require(epochMalformed.Status == "INVALID_HOST_EPOCH" &&
+        epochMalformed.SelectedSessionId is null,
+    "W15 malformed previous epoch must not accept a host-follow cursor");
+Require(sharedViewCode.Contains("_sharedFollowHostInstanceId",StringComparison.Ordinal) &&
+        sharedViewCode.Contains("HOST_INSTANCE_CHANGED_RESELECT_REQUIRED",
+            StringComparison.Ordinal),
+    "W15 native GUI must store and react to host process epoch changes");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
