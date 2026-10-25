@@ -119,8 +119,10 @@ public sealed class MetadataCaptureConsent : IDisposable
             catch { return pending.Result = new(plan.Review.PlanId, plan.Review.SessionId, "REFUSED", "RECORDER_UNAVAILABLE"); }
             state.Active = true; state.State = "ACTIVE"; state.LeaseStarted = _time.GetTimestamp();
             state.Revoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Timer callback may already be queued when a lease is replaced; fence its epoch.
+            var leaseEpoch = state.Epoch;
             if (state.NativeSyntheticEnabled)
-                state.LeaseTimer = _time.CreateTimer(_ => ExpireNativeLease(binding, state), null,
+                state.LeaseTimer = _time.CreateTimer(_ => ExpireNativeLease(binding, state, leaseEpoch), null,
                     TimeSpan.FromSeconds(120), Timeout.InfiniteTimeSpan);
             return pending.Result = new(plan.Review.PlanId, binding.SessionId, "ALLOWED", "SYNTHETIC_METADATA_LEASE_STARTED", _time.GetUtcNow().AddSeconds(120));
         }
@@ -148,12 +150,12 @@ public sealed class MetadataCaptureConsent : IDisposable
     }
 
     // Timer callback never touches the native COM object. It only signals the async lease.
-    private void ExpireNativeLease(MetadataConsentBinding binding, BindingState expected)
+    private void ExpireNativeLease(MetadataConsentBinding binding, BindingState expected, long leaseEpoch)
     {
         lock (_gate)
         {
             if (_disposed || !_bindings.TryGetValue(binding, out var current) ||
-                !ReferenceEquals(current, expected) || !current.Active) return;
+                !ReferenceEquals(current, expected) || !current.Active || current.Epoch != leaseEpoch) return;
             StopState(current, "EXPIRED");
         }
     }
