@@ -35,6 +35,30 @@ does not add an authenticated human identity or production first-party
 entry point. It also does not make the temporary in-memory consent state
 durable across restart.
 
+## Corrective lifecycle gate (October 25, 2026)
+
+The gateway now issues a one-shot task for the exact active view/lease and
+completes it for explicit stop, renewed review, view replacement, recorder
+loss, expiry, and disposal. The native adapter observes that task separately
+from CDP callbacks and marshals its cleanup to Avalonia's UI dispatcher.
+This prevents an otherwise idle page from retaining an active CDP Network
+subscription until another browser event occurs. A per-native-lease
+`TimeProvider` timer enforces the 120-second expiry even without a gateway
+poll; the existing monotonic check remains defense in depth.
+
+Revocation never invokes WebView COM under the gateway's lock. The event
+ingestion gate still checks each callback; immediate refusal and eventual
+detachment are distinct assertions. Native domain disable and COM cleanup
+remain asynchronous and must be verified separately. No live first-party
+origin is admitted. The legacy direct synthetic fixture attachment is
+unchanged and is **not** protected by this consent feature.
+
+The Windows synthetic probe requires `IsStopped` during an idle interval
+after stop, with no further fixture requests. Cross-platform contract
+tests verify one-shot signal completion for stop, renewed approval,
+monotonic expiry, view change and disposal. CI success is still not a
+human screen-reader review or live product authorization.
+
 ## Qualification
 
 Cross-platform contract tests add native-source negative cases to the
