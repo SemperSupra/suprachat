@@ -1137,6 +1137,13 @@ jobs:
                   if (-not $element) { Start-Sleep -Milliseconds 100 }
                 } while (-not $element -and (Get-Date) -lt $semanticDeadline)
                 if (-not $element) {
+                  # Fixed declarative IDs only; do not export names, document text or web content.
+                  $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
+                    'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
+                  $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition) |
+                    ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                  Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
 
@@ -1160,6 +1167,7 @@ jobs:
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
+                  Write-Host ('UIA selected-state after Select for ' + $area.tab + ': ' + $selection.Current.IsSelected)
                   # Selection is asynchronous across UIA providers; require the first child to
                   # appear before inspecting the rest. Still fail if the tab never exposes it.
                   $null = Require-SemanticControl $area.controls[0] -timeoutSeconds 15
