@@ -1,0 +1,46 @@
+name: Qualify W15 host epoch fence against identical sequence restart
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/SharedSessionLedger.cs'
+      - 'SupraChat/Core/SharedSessionInventoryReader.cs'
+      - 'SupraChat/Core/SharedSessionFeedProjection.cs'
+      - 'SupraChat.Automation/SessionLedgerHost.cs'
+      - 'SupraChat.Automation/Program.cs'
+      - 'SupraChat/MainWindow.axaml.cs'
+      - 'SupraChat.ContractTests/Program.cs'
+      - 'tools/qualify-w14-shared-follow.mjs'
+      - 'tools/qualify-w6-hostile-inventory.mjs'
+      - '.github/workflows/qualify-w15-host-epoch.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-host-epoch:
+    name: W15 same-sequence replacement ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Compile actual desktop host and existing agent
+        run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+      - name: Contract assertion including identical-sequence different process
+        run: dotnet run --project SupraChat.ContractTests/SupraChat.ContractTests.csproj -c Release
+      - name: Actual W6 new instance denied by old same-sequence CLI and agent cursors
+        run: node tools/qualify-w14-shared-follow.mjs
+      - name: Hostile read-only response refuses malformed or forged epoch
+        run: node tools/qualify-w6-hostile-inventory.mjs
+      - name: Preserve W13 signed scope and durable self-revocation
+        run: node tools/qualify-w12-scoped-writes.mjs
+      - name: Preserve W9 persistence crash and recovery
+        run: node tools/qualify-w9-durable-w6-host.mjs
