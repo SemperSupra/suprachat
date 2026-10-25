@@ -16,7 +16,7 @@ public static class SharedSessionInventoryReader
     private static readonly TimeSpan CompleteReadDeadline = TimeSpan.FromSeconds(4);
 
     public static async Task<SharedSessionInventoryReceipt> ObserveAsync(
-        int port, string? token)
+        int port, string? token, CancellationToken cancellationToken = default)
     {
         if (port is < 1024 or > 65535)
             throw new ArgumentException("INVALID_LEDGER_LOOPBACK_PORT", nameof(port));
@@ -34,7 +34,8 @@ public static class SharedSessionInventoryReader
         // A separate deadline must cover the ENTIRE response body, otherwise
         // a stalled localhost server can retain the desktop indefinitely.
         using var client = new HttpClient(handler) {Timeout = CompleteReadDeadline};
-        using var deadline = new CancellationTokenSource(CompleteReadDeadline);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(CompleteReadDeadline);
         using var request = new HttpRequestMessage(
             HttpMethod.Get, new Uri($"http://127.0.0.1:{port}/v1/sessions"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -125,6 +126,10 @@ public static class SharedSessionInventoryReader
                 ChatSubmissionAllowed:false,TerminalExecutionAllowed:false,
                 Events:retainedEvents,
                 HostInstanceId:inventory.HostInstanceId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // User/lifecycle Stop must not become a misleading host failure.
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
             or IOException or JsonException or InvalidOperationException or NotSupportedException
