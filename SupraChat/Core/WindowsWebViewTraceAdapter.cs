@@ -118,6 +118,13 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
         }
     }
 
+    private async Task DetachOnConsentRevocationAsync(Task revoked)
+    {
+        var completed = await Task.WhenAny(revoked, _stopSignal.Task).ConfigureAwait(false);
+        if (ReferenceEquals(completed, revoked))
+            Dispatcher.UIThread.Post(Stop);
+    }
+
     private static bool SameOrigin(Uri value, Uri origin) => value.Scheme == origin.Scheme &&
         value.Host == origin.Host && value.Port == origin.Port && value.UserInfo.Length == 0;
 
