@@ -113,6 +113,8 @@ internal static class MetadataConsentChecks
         Require(!nativeConsent.TryObserve(ordinary, ordinaryView, browserEvent));
         Require(!nativeConsent.IsNativeSyntheticAdmitted(native, ordinaryView));
         Require(nativeConsent.IsNativeSyntheticAdmitted(native, nativeView));
+        var revokedOnStop = nativeConsent.GetNativeRevocationTask(native, nativeView);
+        Require(!revokedOnStop.IsCompleted);
         Require(nativeConsent.TryObserve(native, nativeView, browserEvent));
         Require(!nativeConsent.TryObserve(native, nativeView,
             browserEvent with { ProviderSurface = TraceSurface.ChatGptWebView }));
@@ -121,6 +123,7 @@ internal static class MetadataConsentChecks
         Require(nativeTrace.Read(nativeCap).Events.Count == 1 &&
             nativeTrace.Read(ordinaryCap).Events.Count == 0);
         nativeConsent.Stop(native);
+        await revokedOnStop.WaitAsync(TimeSpan.FromSeconds(1));
         Require(!nativeConsent.IsNativeSyntheticAdmitted(native, nativeView) &&
             !nativeConsent.TryObserve(native, nativeView, browserEvent));
         Require(nativeTrace.Read(nativeCap).Events.Count == 1);
