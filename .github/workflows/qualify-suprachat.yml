@@ -1184,7 +1184,7 @@ jobs:
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
                   @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') },
-                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput', 'Sessions.TerminalStart', 'Sessions.TerminalStop', 'Sessions.TerminalStatus', 'Sessions.SharedHostPort', 'Sessions.SharedHostRead', 'Sessions.SharedHostInventory', 'Sessions.SharedHostStatus', 'Sessions.SharedSelectionHeading', 'Sessions.SharedHostSelection', 'Sessions.SharedHostEvents', 'Sessions.SharedHostFollowStatus') }
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.List', 'Sessions.Status', 'Sessions.PreviewOutput', 'Sessions.TerminalStart', 'Sessions.TerminalStop', 'Sessions.TerminalStatus', 'Sessions.SharedHostPort', 'Sessions.SharedHostRead', 'Sessions.SharedHostInventory', 'Sessions.SharedHostStatus', 'Sessions.SharedSelectionHeading', 'Sessions.SharedHostSelection', 'Sessions.SharedHostEvents', 'Sessions.SharedHostFollowStatus', 'Sessions.AutoFollowStart', 'Sessions.AutoFollowStop', 'Sessions.AutoFollowStatus') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
