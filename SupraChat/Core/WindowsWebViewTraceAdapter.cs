@@ -219,6 +219,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     {
         if (_stopped) return;
         _stopped = true;
+        _stopSignal.TrySetResult();
         try { _core.NavigationStarting -= NavigationStarting; } catch { Gap(); }
         foreach (var subscription in _subscriptions)
             try { subscription.Receiver.DevToolsProtocolEventReceived -= subscription.Handler; } catch { Gap(); }
