@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using Avalonia.Controls;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
@@ -21,6 +22,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private readonly LocalTraceSession _session;
     private readonly Uri _origin;
     private readonly Func<bool>? _admissionStillActive;
+    private readonly TaskCompletionSource _stopSignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly HashSet<string> _requests = new(StringComparer.Ordinal);
     private readonly List<(CoreWebView2DevToolsProtocolEventReceiver Receiver,
         EventHandler<CoreWebView2DevToolsProtocolEventReceivedEventArgs> Handler)> _subscriptions = new();
@@ -37,7 +39,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
 
     public static Task<WindowsWebViewTraceAdapter> AttachSyntheticAsync(IntPtr nativeHandle,
         TraceNormalizer sink, LocalTraceSession session, Uri origin) =>
-        AttachCoreAsync(nativeHandle, sink, session, origin, sink, null);
+        AttachCoreAsync(nativeHandle, sink, session, origin, sink, null, null);
 
     /// <summary>Only synthetic loopback frames may use this process-local consent bridge.</summary>
     public static Task<WindowsWebViewTraceAdapter> AttachConsentSyntheticAsync(
@@ -63,7 +65,7 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     }
 
     private static async Task<WindowsWebViewTraceAdapter> AttachCoreAsync(IntPtr nativeHandle,
-        TraceNormalizer normalizer, LocalTraceSession session, Uri origin, ITraceSink sink, Func<bool>? admission)
+        TraceNormalizer normalizer, LocalTraceSession session, Uri origin, ITraceSink sink, Func<bool>? admission, Task? revoked)
     {
         if (!origin.IsAbsoluteUri || !origin.IsLoopback || origin.Scheme is not ("http" or "https") ||
             origin.UserInfo.Length != 0 || origin.AbsolutePath != "/" || origin.Query.Length != 0 || origin.Fragment.Length != 0)
