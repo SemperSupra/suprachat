@@ -539,6 +539,95 @@ Require(sharedViewCode.Contains("_sharedFollowHostInstanceId",StringComparison.O
             StringComparison.Ordinal),
     "W15 native GUI must store and react to host process epoch changes");
 
+// W16: controlled bounded user-started reader. No time-dependent CI sleeps:
+ // injected zero-cost cadence still exercises strictly awaited observation
+ // and cancellation/continuity/host-replacement rules.
+var w16Previous = epochSource with { HostInstanceId = w15EpochA };
+var w16Seen = 0;
+var w16InFlight = 0;
+var w16Peak = 0;
+var w16Delivery = 0;
+var w16Bounded = await SharedSessionAutoFollow.RunAsync(
+    observedA, w15EpochA, 3,
+    _ =>
+    {
+        w16InFlight++;
+        w16Peak = Math.Max(w16Peak, w16InFlight);
+        w16Seen++;
+        w16InFlight--;
+        return Task.FromResult(w16Previous);
+    },
+    (_, projection, _) =>
+    {
+        Require(projection.ReadOnly && !projection.RemoteChatAuthority &&
+                !projection.TerminalAuthority && !projection.ActorIdentityAuthenticated,
+            "W16 must never claim host/provider/terminal authority");
+        w16Delivery++;
+        return Task.CompletedTask;
+    },
+    CancellationToken.None, _ => Task.CompletedTask,
+    maxObservations:3);
+Require(w16Bounded.Status == "COMPLETED_BOUNDED_OBSERVATIONS" &&
+        w16Bounded.DeliveredObservations == 3 && w16Seen == 3 &&
+        w16Peak == 1 && w16Delivery == 3 &&
+        !w16Bounded.ContinuousHistoryProven && !w16Bounded.RealChatGptHistoryObserved,
+    "W16 finite explicit loop must use at most one GET and no history overclaim");
+
+var w16EpochCalls = 0;
+var w16EpochDelivered = 0;
+var w16EpochResult = await SharedSessionAutoFollow.RunAsync(
+    observedA,w15EpochA,3,
+    _ => Task.FromResult(++w16EpochCalls == 1
+        ? w16Previous
+        : w16Previous with {HostInstanceId=w15EpochB}),
+    (_,_,_) => { w16EpochDelivered++; return Task.CompletedTask; },
+    CancellationToken.None, _=>Task.CompletedTask,maxObservations:7);
+Require(w16EpochResult.Status ==
+        "STOPPED_CONTINUITY_UNVERIFIED_HOST_INSTANCE_CHANGED_RESELECT_REQUIRED" &&
+        w16EpochCalls == 2 && w16EpochDelivered == 1,
+    "W16 must stop before delivery when same-sequence host replacement occurs");
+
+var w16GapCalls = 0;
+var w16Gap = await SharedSessionAutoFollow.RunAsync(
+    observedA,w15EpochA,3,
+    _ => Task.FromResult(++w16GapCalls == 1
+        ? w16Previous
+        : w16Previous with { Sequence = 51, Events =
+            new [] {new SharedSessionEventRow(51, observedA, "agent", "set-title", 1)}}),
+    (_,_,_)=>Task.CompletedTask,CancellationToken.None,
+    _=>Task.CompletedTask, maxObservations:7);
+Require(w16Gap.Status == "STOPPED_CONTINUITY_UNVERIFIED_EVENT_GAP_UNVERIFIED" &&
+        w16GapCalls == 2, "W16 lost event window must stop without guessing history");
+
+var w16RefuseCalls = 0;
+var w16Refused = await SharedSessionAutoFollow.RunAsync(
+    observedA,w15EpochA,3,
+    _=>Task.FromResult(++w16RefuseCalls == 1
+        ? w16Previous
+        : w16Previous with {Connected=false,Status="LEDGER_READ_FAILED"}),
+    (_,_,_)=>Task.CompletedTask,CancellationToken.None,
+    _=>Task.CompletedTask,maxObservations:8);
+Require(w16Refused.Status == "STOPPED_HOST_READ_REFUSED" &&
+        w16RefuseCalls == 2 && w16Refused.DeliveredObservations == 1,
+    "W16 rejected host response must terminate, not retry indefinitely");
+
+using var w16Cancel = new CancellationTokenSource();
+var w16CancelledCalls = 0;
+var w16Cancelled = await SharedSessionAutoFollow.RunAsync(
+    observedA,w15EpochA,3,
+    _=>Task.FromResult(w16Previous),
+    (_,_,_)=>{ w16CancelledCalls++;w16Cancel.Cancel();return Task.CompletedTask; },
+    w16Cancel.Token,_=>Task.CompletedTask,maxObservations:8);
+Require(w16Cancelled.Status == "STOPPED_BY_USER_OR_WINDOW" &&
+        w16Cancelled.DeliveredObservations == 0 && w16CancelledCalls == 1,
+    "W16 stop must interrupt even during notification before another GET");
+
+Require(sharedViewXaml.Contains("Sessions.AutoFollowStart",StringComparison.Ordinal) &&
+        sharedViewXaml.Contains("Sessions.AutoFollowStop",StringComparison.Ordinal) &&
+        sharedViewXaml.Contains("Sessions.AutoFollowStatus",StringComparison.Ordinal) &&
+        sharedViewCode.Contains("StopSharedAutoFollow",StringComparison.Ordinal),
+    "W16 explicit control and cancellation hooks missing");
+
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
     "SupraChat");
