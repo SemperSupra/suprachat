@@ -37,6 +37,26 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
         TraceNormalizer sink, LocalTraceSession session, Uri origin) =>
         AttachCoreAsync(nativeHandle, sink, session, origin, sink, null);
 
+    /// <summary>Only synthetic loopback frames may use this process-local consent bridge.</summary>
+    public static Task<WindowsWebViewTraceAdapter> AttachConsentSyntheticAsync(
+        IntPtr nativeHandle, TraceNormalizer normalizer, LocalTraceSession session, Uri origin,
+        MetadataCaptureConsent consent, MetadataConsentBinding binding, object view)
+    {
+        if (consent is null || binding is null || session is null ||
+            binding.SessionId != session.SessionId || !consent.IsNativeSyntheticAdmitted(binding, view))
+            throw new UnauthorizedAccessException("Native synthetic consent is not active.");
+        return AttachCoreAsync(nativeHandle, normalizer, session, origin,
+            new ConsentSink(consent, binding, view, session),
+            () => consent.IsNativeSyntheticAdmitted(binding, view));
+    }
+
+    private sealed class ConsentSink(
+        MetadataCaptureConsent consent, MetadataConsentBinding binding, object view, LocalTraceSession capability) : ITraceSink
+    {
+        public bool TryObserve(LocalTraceSession session, TraceObservation observation) =>
+            ReferenceEquals(session, capability) && consent.TryObserve(binding, view, observation);
+    }
+
     private static async Task<WindowsWebViewTraceAdapter> AttachCoreAsync(IntPtr nativeHandle,
         TraceNormalizer normalizer, LocalTraceSession session, Uri origin, ITraceSink sink, Func<bool>? admission)
     {
