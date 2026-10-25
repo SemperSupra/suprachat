@@ -57,6 +57,7 @@ internal static class Program
                     ParseLedgerPort(Option(args[1..], "--port")),
                     Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"))),
                 "session-ledger-follow" => WriteSuccess(await ReadSharedHostFollowAsync(args[1..])),
+                "session-ledger-follow-bounded" => WriteSuccess(await ReadBoundedHostFollowAsync(args[1..])),
                 "session-ledger-open" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
                 "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
@@ -130,6 +131,7 @@ internal static class Program
             new { name = "session-ledger-list", description = "Read an already running loopback session ledger; requires environment token.", syntax = "session-ledger-list --port <host-port>" },
             new { name = "session-ledger-view", description = "Read the same bounded unbound host inventory core used by the desktop Sessions interface; no writes.", syntax = "session-ledger-view --port <host-port>" },
             new { name = "session-ledger-follow", description = "Read a selected remote W6 host session's bounded metadata events with a caller-held cursor; never bind a local tab or send ChatGPT turns.", syntax = "session-ledger-follow --port <host-port> [--session-id <host-guid-N>] [--after <sequence>] [--host-instance-id <observed-guid-N>]" },
+            new { name = "session-ledger-follow-bounded", description = "W16 explicit bounded read-only metadata watcher; at most 20 serial loopback GETs, 3-second cadence, no provider or terminal.", syntax = "session-ledger-follow-bounded --port <host-port> --session-id <guid-N> --host-instance-id <guid-N> --after <sequence> [--max-observations <1..20>]" },
             new { name = "session-ledger-open", description = "Open a metadata-only session in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-open --port <host-port> < request.json" },
             new { name = "session-ledger-change", description = "CAS metadata-only update in an existing local host using a JSON request supplied on stdin.", syntax = "session-ledger-change --port <host-port> < request.json" },
             new { name = "session-ledger-revoke-own", description = "W13 synthetic: explicitly revoke the currently signed actor grant, durably; cannot revoke another actor.", syntax = "session-ledger-revoke-own --port <host-port> < request.json" },
@@ -1545,6 +1547,45 @@ internal static class Program
         return SharedSessionFeedProjection.Project(observed,
             Option(args, "--session-id"),cursor,
             Option(args, "--host-instance-id"));
+    }
+
+    private static async Task<object> ReadBoundedHostFollowAsync(string[] args)
+    {
+        var port = ParseLedgerPort(Option(args, "--port"));
+        var selected = Option(args, "--session-id");
+        var priorEpoch = Option(args, "--host-instance-id");
+        var after = Option(args, "--after");
+        var count = Option(args, "--max-observations") ?? "2";
+        if (!long.TryParse(after, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var sequence) || sequence < 0 ||
+            !int.TryParse(count, NumberStyles.None, CultureInfo.InvariantCulture,
+                out var maximum) || maximum is < 1 or > SharedSessionAutoFollow.MaxObservations ||
+            !Guid.TryParseExact(selected, "N", out _) ||
+            !Guid.TryParseExact(priorEpoch, "N", out _))
+            throw new MachineException(2, "INVALID_BOUNDED_FOLLOW_ADMISSION",
+                "Previously observed session ID, host epoch, and cursor required.");
+
+        var frames = new List<SharedSessionFeedView>();
+        var result = await SharedSessionAutoFollow.RunAsync(
+            selected!, priorEpoch!, sequence,
+            ct => SharedSessionInventoryReader.ObserveAsync(
+                port, Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"), ct),
+            (_, projection, _) =>
+            {
+                frames.Add(projection);
+                return Task.CompletedTask;
+            },
+            CancellationToken.None, maxObservations: maximum);
+        return new
+        {
+            schema = SharedSessionAutoFollow.Schema,
+            result,
+            frames,
+            user_initiated = true,
+            read_only = true,
+            product_chatgpt_history_observed = false,
+            os_peer_identity_authenticated = false
+        };
     }
 
     private static async Task<SharedSessionFeedView> RpcLedgerFollowAsync(JsonElement? parameters)
