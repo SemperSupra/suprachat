@@ -28,6 +28,18 @@ public sealed partial class SharedSessionLedger
         LocalOwnedStreamControls.OwnedStreamLease Lease);
 
     /// <summary>Trusted local composition with an exact live lease; serialized IDs cannot enroll an executor.</summary>
+    public Guid RegisterCancellationTarget(string sessionId, LocalOwnedStreamControls owner, Guid streamId)
+    {
+        lock (_gate)
+        {
+            if (!Guid.TryParseExact(sessionId, "N", out var session) ||
+                owner.ResolveCancellationTarget(session, streamId) is not { } stream)
+                throw new UnauthorizedAccessException("LIVE_TARGET_REFUSED");
+            return RegisterCancellationTarget(sessionId, owner, stream);
+        }
+    }
+
+    /// <summary>The host must hold the live owner registry; a stream UUID alone supplies no authority.</summary>
     public Guid RegisterCancellationTarget(string sessionId, LocalOwnedStreamControls owner,
         LocalOwnedStreamControls.OwnedStreamLease stream)
     {

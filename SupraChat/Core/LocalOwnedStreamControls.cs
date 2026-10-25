@@ -121,6 +121,10 @@ public sealed class LocalOwnedStreamControls : IDisposable
     internal void Remove(OwnedStreamLease stream) { lock (_gate) _streams.Remove(stream.StreamId); }
 
     // Effect-only bridge for the ledger's write-ahead path. No second plan/outcome authority.
+    internal OwnedStreamLease? ResolveCancellationTarget(Guid session, Guid streamId)
+    {
+        lock (_gate) return !_disposed && session == _sessionId ? _streams.GetValueOrDefault(streamId) : null;
+    }
     internal bool IsCancellationTarget(Guid session, OwnedStreamLease stream, long revision, object? durableOwner = null)
     {
         lock (_gate) return !_disposed && session == _sessionId && !stream.IsDisposed &&

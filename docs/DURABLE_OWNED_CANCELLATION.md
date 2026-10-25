@@ -20,6 +20,9 @@ revocation is checked before historical reads as well as mutation. This callback
 boundary, not a new issuer or proof of actor authentication. No public caller-supplied JSON can enroll
 a live executor. Human, automation and agent audience labels use the same decision functions.
 
+For transport-created leases, the host can enroll by stream ID only while also holding the exact live
+owner registry. The ledger resolves and exclusively claims the lease under the same lock order.
+
 Preview binds actor, original grant, action key, authoritative session version, exact target revision,
 host-run ID and a two-minute monotonic review lifetime. Confirmation must match the stored plan.
 Admitted first confirmation refusals are persisted and immutable. Changed bindings conflict.
@@ -53,6 +56,9 @@ Headless synthetic checks cover concurrent duplicates, immutable replay, malform
 actor/session/scope/refusal/revocation, expiry/CAS, removed targets, grant renewal, legacy bypass,
 exclusive ownership, repeated target cleanup, bounded journal capacity and callback failure. In-memory
 fault hooks exercise request/applied commit windows; those checks alone are not SQLite durability proof.
+Additional fixtures route durable cancellation through injectable Responses HTTP, WebSocket receive
+and blocked-close handlers, and a real child JSON-RPC fixture's supported Codex turn/interrupt path.
+These prove local transport integration with synthetic peers, not remote provider termination.
 
 The actual W9 child-process fixture separately uses disposable SQLite databases. It proves successful
 signal/recovery, crash before request commit, crash after request commit, crash before applied commit,
