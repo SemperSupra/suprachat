@@ -70,6 +70,25 @@ minimum cadence on each of Windows/Linux/macOS in public CI.
   deterministic contract tests**. Production cadence is a fixed 3s;
   clients cannot configure a faster rate via UI.
 
+## Stacked cancellation hardening (independent review required)
+
+A narrowly scoped follow-on to W16 uses a cancel-aware UI dispatcher
+notification path. Cancel/Stop/window-close releases the observer even if
+a presentation callback is waiting behind a busy GUI dispatcher. The
+callback still checks cancellation and the existing view generation and
+selection guards **inside the UI thread before any mutation**; this is
+not a way to preempt a synchronous UI callback already running.
+The pure observer also cancels its wait for a delayed consumer without
+issuing another GET. The callback must honor its supplied cancellation
+token before side effects; an uncooperative third-party callback is
+not made safe solely by canceling its awaiter.
+
+A deterministic test holds the presentation callback, stops the observer,
+checks one GET/no late mutation, then releases the callback and checks
+the cancellation fence again. It does **not** replace the pending
+real Windows UIA keyboard Start/Stop/focus/announcement causal rep.
+The retained UIA control-presence check also does not qualify that rep.
+
 ## Security and product limitations
 
 This does not authenticate OS peers, bind local workbench tab identity to
