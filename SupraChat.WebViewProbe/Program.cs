@@ -175,6 +175,16 @@ internal sealed class ProbeApp : Application
                 foreach (var route in new[] { "page", "stream", "events", "cancel", "socket", "ack" })
                     Require(server.Count(session, "observed", route) == 1);
 
+            phase = "consent-stop-gate";
+            Require(nativeBinding is not null && nativeConsent.Status(nativeBinding).CaptureActive);
+            nativeConsent.Stop(nativeBinding);
+            Require(!nativeConsent.IsNativeSyntheticAdmitted(nativeBinding, views[1]));
+            var beforeStopCount = sharedTrace.Read(traceSessions[1]).Events.Count;
+            Require(!nativeConsent.TryObserve(nativeBinding, views[1],
+                new TraceObservation(TraceSurface.Synthetic, TraceAdapter.WebView2,
+                    TraceDirection.Ingress, TraceEventKind.Chunk, server.Origin.AbsoluteUri)));
+            Require(sharedTrace.Read(traceSessions[1]).Events.Count == beforeStopCount);
+
             phase = "detach-with-behavior-preserved";
             foreach (var adapter in sharedAdapters) await adapter.DisposeAsync();
             var typedEventsAtDetach = sharedAdapters.Select(a => a.ObservedEvents).ToArray();
@@ -259,6 +269,8 @@ internal sealed class ProbeApp : Application
                 fixture_behavior_preserved = true,
                 progressive_stream_acknowledged = true,
                 shared_trace_schema = "suprachat-trace/v1",
+                native_synthetic_consent = true,
+                native_consent_stopped = nativeBinding is not null && !nativeConsent.Status(nativeBinding).CaptureActive,
                 typed_events = sharedAdapters.Select(a => a.ObservedEvents).ToArray(),
                 typed_loss = sharedAdapters.Sum(a => a.DroppedObservations),
                 scope_exit_detached = replacement.IsStopped,
