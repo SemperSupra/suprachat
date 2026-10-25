@@ -97,6 +97,8 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
             adapter._enableTask = core.CallDevToolsProtocolMethodAsync("Network.enable",
                 "{\"maxTotalBufferSize\":65536,\"maxResourceBufferSize\":16384,\"maxPostDataSize\":0}");
             await adapter._enableTask.WaitAsync(TimeSpan.FromSeconds(5));
+            if (admission is not null && !admission())
+                throw new UnauthorizedAccessException("Native synthetic consent expired during attach.");
             return adapter;
         }
         catch
@@ -132,6 +134,12 @@ public sealed class WindowsWebViewTraceAdapter : IAsyncDisposable, ILocalTraceOb
     private void OnEvent(string name, string json)
     {
         if (_stopped) return;
+        if (_admissionStillActive is not null)
+        {
+            bool admitted;
+            try { admitted = _admissionStillActive(); } catch { admitted = false; }
+            if (!admitted) { Stop(); return; }
+        }
         if (json.Length > 1024 * 1024) { Gap(); return; }
         try
         {
