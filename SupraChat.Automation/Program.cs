@@ -1581,7 +1581,8 @@ internal static class Program
             schema = SharedSessionAutoFollow.Schema,
             result,
             frames,
-            user_initiated = true,
+            explicit_invocation = true,
+            authenticated_human_initiated = false,
             read_only = true,
             product_chatgpt_history_observed = false,
             os_peer_identity_authenticated = false
