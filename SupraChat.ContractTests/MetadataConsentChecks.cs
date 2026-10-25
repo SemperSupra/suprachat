@@ -94,6 +94,36 @@ internal static class MetadataConsentChecks
         brokenConsent.Confirm(brokenBinding, brokenConsent.Preview(brokenBinding), true);
         broken.Dispose();
         Require(!brokenConsent.TryObserve(brokenBinding, brokenView, Sample));
+        // The default fixture binding cannot impersonate a native WebView producer.
+        using var nativeTrace = new TraceNormalizer();
+        using var nativeConsent = new MetadataCaptureConsent(nativeTrace);
+        var ordinaryCap = nativeTrace.CreateSession();
+        var nativeCap = nativeTrace.CreateSession();
+        var ordinaryView = new object();
+        var nativeView = new object();
+        var ordinary = nativeConsent.Register(ordinaryCap, ordinaryView);
+        var native = nativeConsent.RegisterNativeSynthetic(nativeCap, nativeView);
+        var browserEvent = new TraceObservation(TraceSurface.Synthetic, TraceAdapter.WebView2,
+            TraceDirection.Ingress, TraceEventKind.Response, "http://127.0.0.1/fixture");
+        Require(!nativeConsent.IsNativeSyntheticAdmitted(native, nativeView));
+        Require(!nativeConsent.TryObserve(native, nativeView, browserEvent));
+        nativeConsent.Confirm(ordinary, nativeConsent.Preview(ordinary), true);
+        nativeConsent.Confirm(native, nativeConsent.Preview(native), true);
+        Require(!nativeConsent.IsNativeSyntheticAdmitted(ordinary, ordinaryView));
+        Require(!nativeConsent.TryObserve(ordinary, ordinaryView, browserEvent));
+        Require(!nativeConsent.IsNativeSyntheticAdmitted(native, ordinaryView));
+        Require(nativeConsent.IsNativeSyntheticAdmitted(native, nativeView));
+        Require(nativeConsent.TryObserve(native, nativeView, browserEvent));
+        Require(!nativeConsent.TryObserve(native, nativeView,
+            browserEvent with { ProviderSurface = TraceSurface.ChatGptWebView }));
+        Require(!nativeConsent.TryObserve(native, nativeView,
+            browserEvent with { ProviderSurface = TraceSurface.ResponsesSse }));
+        Require(nativeTrace.Read(nativeCap).Events.Count == 1 &&
+            nativeTrace.Read(ordinaryCap).Events.Count == 0);
+        nativeConsent.Stop(native);
+        Require(!nativeConsent.IsNativeSyntheticAdmitted(native, nativeView) &&
+            !nativeConsent.TryObserve(native, nativeView, browserEvent));
+        Require(nativeTrace.Read(nativeCap).Events.Count == 1);
         Console.WriteLine("Metadata consent checks PASS (review, scope, session/view binding, expiry, stop, replay, bounded retention)");
     }
 }
