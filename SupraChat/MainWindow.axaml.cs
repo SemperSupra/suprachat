@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private string? _sharedFollowHostInstanceId;
     private string? _sharedFollowSelectedId;
     private bool _updatingSharedFollowSelection;
+    private CancellationTokenSource? _sharedHostAutoFollowCts;
+    private long _sharedHostAutoFollowGeneration;
     private bool _terminalShutdownInProgress;
     private bool _verifiedTerminalShutdown;
     private string? _currentDraftReviewId;
@@ -380,6 +382,7 @@ public partial class MainWindow : Window
     {
         if (_updatingSharedFollowSelection || _lastSharedHostObservation is null)
             return;
+        StopSharedHostAutoFollow("Stopped by explicit host selection change.");
         if (WorkbenchHostSessionList.SelectedItem is not SharedSessionInventoryRow item)
         {
             _sharedFollowSelectedId = null;
@@ -405,6 +408,7 @@ public partial class MainWindow : Window
 
     private async void WorkbenchReadSharedLedger_Click(object? sender, RoutedEventArgs e)
     {
+        StopSharedHostAutoFollow("Stopped for an explicit manual host read.");
         if (!int.TryParse(WorkbenchLedgerPort.Text, out var port) ||
             port is < 1024 or > 65535)
         {
@@ -498,6 +502,102 @@ public partial class MainWindow : Window
                 WorkbenchHostFollowStatus.Text =
                     "Read failure; event continuity unverified until another successful observation.";
             }
+        }
+    }
+
+    private void StopSharedHostAutoFollow(string reason)
+    {
+        Interlocked.Increment(ref _sharedHostAutoFollowGeneration);
+        var old = _sharedHostAutoFollowCts;
+        _sharedHostAutoFollowCts = null;
+        old?.Cancel(); // Disposed by the owning async operation, not here.
+        WorkbenchHostAutoFollowStatus.Text = reason;
+    }
+
+    private void WorkbenchHostAutoFollowStop_Click(object? sender, RoutedEventArgs e) =>
+        StopSharedHostAutoFollow("Stopped by user. No host write, browser action or ChatGPT submission.");
+
+    private async void WorkbenchHostAutoFollowStart_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_sharedHostAutoFollowCts is not null)
+        {
+            WorkbenchHostAutoFollowStatus.Text = "Already following this host session; Stop first.";
+            return;
+        }
+        if (!int.TryParse(WorkbenchLedgerPort.Text, out var port) ||
+            port is < 1024 or > 65535 || _sharedFollowHostPort != port ||
+            _lastSharedHostObservation?.Connected != true ||
+            _sharedFollowSelectedId is null || _sharedFollowSequence is null ||
+            _sharedFollowHostInstanceId is null ||
+            !Guid.TryParseExact(_sharedFollowSelectedId, "N", out _) ||
+            !Guid.TryParseExact(_sharedFollowHostInstanceId, "N", out _))
+        {
+            WorkbenchHostAutoFollowStatus.Text =
+                "Refused: first read the existing host and explicitly select one host session. " +
+                "A prior sequence and process epoch are required; no request sent.";
+            return;
+        }
+
+        var selected = _sharedFollowSelectedId;
+        var expectedEpoch = _sharedFollowHostInstanceId;
+        var startSequence = _sharedFollowSequence.Value;
+        var generation = Interlocked.Increment(ref _sharedHostAutoFollowGeneration);
+        using var lifetime = new CancellationTokenSource();
+        _sharedHostAutoFollowCts = lifetime;
+        WorkbenchHostAutoFollowStatus.Text =
+            "Read-only auto-follow active: selected host metadata only, max 64 reads. " +
+            "Stop cancels pending reads; host replacement or gaps stop automatically.";
+        try
+        {
+            var outcome = await SharedSessionAutoFollow.RunAsync(
+                ct => SharedSessionInventoryReader.ObserveAsync(
+                    port, Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_TOKEN"), ct),
+                async (view, ct) =>
+                {
+                    // Await UI consumption before another observation: no
+                    // queued unbounded UI updates and no background writes.
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        if (generation != Interlocked.Read(ref _sharedHostAutoFollowGeneration) ||
+                            ct.IsCancellationRequested) return;
+                        WorkbenchHostEvents.Text = view.Events.Count == 0
+                            ? "No newly retained metadata events for the selected host session."
+                            : string.Join(Environment.NewLine,view.Events.Select(x => x.DisplayLabel));
+                        WorkbenchHostFollowStatus.Text =
+                            $"Auto-follow observed sequence {view.Sequence}; {view.Status}. " +
+                            (view.EventGapUnverified
+                                ? "Event continuity UNVERIFIED; auto-follow will stop. "
+                                : "No bounded-window gap detected; complete history NOT established. ") +
+                            "Read-only. No local tab, terminal or ChatGPT binding.";
+                        // The observer's cursor advances only after the bounded
+                        // core accepts the read and its projection is displayed.
+                        if (view.Status is "SELECTED_NEW_EVENTS" or "SELECTED_NO_NEW_EVENTS")
+                            _sharedFollowSequence = view.Sequence;
+                    });
+                },
+                selected, startSequence, expectedEpoch, lifetime.Token);
+            if (generation == Interlocked.Read(ref _sharedHostAutoFollowGeneration))
+            {
+                _sharedHostAutoFollowCts = null;
+                WorkbenchHostAutoFollowStatus.Text =
+                    $"Automatic observation ended: {outcome.Status} " +
+                    $"after {outcome.Observations} bounded reads. No external writes.";
+                if (outcome.Status != "STOPPED_BOUNDED_OBSERVATION_LIMIT" &&
+                    outcome.Status != "STOPPED_BY_USER_OR_LIFECYCLE")
+                {
+                    _sharedFollowSelectedId = null;
+                    _updatingSharedFollowSelection = true;
+                    try { WorkbenchHostSessionList.SelectedItem = null; }
+                    finally { _updatingSharedFollowSelection = false; }
+                    WorkbenchHostAutoFollowStatus.Text +=
+                        " Re-read and explicitly reselect the host session before restarting.";
+                }
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_sharedHostAutoFollowCts,lifetime))
+                _sharedHostAutoFollowCts = null;
         }
     }
 
@@ -2262,6 +2362,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        StopSharedHostAutoFollow("Auto-follow stopped on window close.");
         try
         {
             _windowsCompanionHotkey?.Dispose();
