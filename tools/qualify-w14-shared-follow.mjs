@@ -120,6 +120,30 @@ try {
  assert.equal(agent.result.events[0].session_id,idB);
  assert.equal(agent.result.terminal_authority,false);
  record('separate-agent-process-selected-B-uses-identical-read-only-core');
+
+ // W16: qualify the actual bounded auto-follow core through an independently
+ // started machine client, not just synthetic in-process delegate tests.
+ const boundedStart=Date.now();
+ const bounded=await invoke(['session-ledger-follow-bounded',
+   '--port',String(port),'--session-id',idA,
+   '--host-instance-id',originalHostInstanceId,
+   '--after','2','--max-observations','2']);
+ assert.equal(bounded.ok,true);
+ assert.equal(bounded.value.schema,'suprachat-w16-opt-in-metadata-follow/v1');
+ assert.equal(bounded.value.result.status,'COMPLETED_BOUNDED_OBSERVATIONS');
+ assert.equal(bounded.value.result.delivered_observations,2);
+ assert.equal(bounded.value.frames.length,2);
+ assert(bounded.value.frames.every(frame=>
+   frame.selected_session_id===idA &&
+   frame.host_instance_id===originalHostInstanceId &&
+   frame.read_only===true && frame.terminal_authority===false &&
+   frame.remote_chat_authority===false));
+ assert.equal(bounded.value.product_chatgpt_history_observed,false);
+ assert.equal(bounded.value.os_peer_identity_authenticated,false);
+ assert(Date.now()-boundedStart>=2700,
+   'Bounded production watch violated minimum observation cadence');
+ record('real-w6-cli-two-serial-get-automatic-bounded-cadence');
+
  const update=await http('/v1/sessions/change',{
    idempotencyKey:'w14-change-A-000000001',audience:'automation',
    sessionId:idA,expectedVersion:0,operation:'set-title',value:'A-new'});
