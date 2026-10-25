@@ -643,6 +643,45 @@ Require(w16BackpressureDone.Status == "COMPLETED_BOUNDED_OBSERVATIONS" &&
         w16BackpressureReads == 2,
     "W16 must resume with one bounded read after consumer delivery is complete");
 
+// A stalled UI dispatcher must not trap Stop/window-close in the observer,
+ // nor schedule a second GET; a late callback that honors its cancellation
+ // token cannot mutate an already closed or reselected view.
+using var w16StalledStop = new CancellationTokenSource();
+var w16StalledReadCount = 0;
+var w16StalledUiMutationCount = 0;
+var w16EnteredPresentation = new TaskCompletionSource<bool>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var w16ReleasePresentation = new TaskCompletionSource<bool>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var w16PresentationExited = new TaskCompletionSource<bool>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var w16StalledObserver = SharedSessionAutoFollow.RunAsync(
+    observedA, w15EpochA, 3,
+    _ => {
+        w16StalledReadCount++;
+        return Task.FromResult(w16Previous);
+    },
+    async (_, _, ct) => {
+        w16EnteredPresentation.TrySetResult(true);
+        try {
+            await w16ReleasePresentation.Task;
+            ct.ThrowIfCancellationRequested(); // Same fence as the native GUI.
+            w16StalledUiMutationCount++;
+        }
+        finally { w16PresentationExited.TrySetResult(true); }
+    },
+    w16StalledStop.Token, _ => Task.CompletedTask, maxObservations:2);
+await w16EnteredPresentation.Task.WaitAsync(TimeSpan.FromSeconds(3));
+w16StalledStop.Cancel();
+var w16StalledTerminal = await w16StalledObserver.WaitAsync(TimeSpan.FromSeconds(3));
+Require(w16StalledTerminal.Status == "STOPPED_BY_USER_OR_WINDOW" &&
+        w16StalledReadCount == 1 && w16StalledUiMutationCount == 0,
+    "W16 Stop must interrupt a queued presentation without further GET or UI mutation");
+w16ReleasePresentation.TrySetResult(true);
+await w16PresentationExited.Task.WaitAsync(TimeSpan.FromSeconds(3));
+Require(w16StalledUiMutationCount == 0 && w16StalledReadCount == 1,
+    "W16 late UI callback must honor cancellation and never mutate after Stop");
+
 var w16PrivatePresentationFailure = await SharedSessionAutoFollow.RunAsync(
     observedA,w15EpochA,3,
     _ => Task.FromResult(w16Previous),
