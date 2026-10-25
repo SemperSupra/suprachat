@@ -178,6 +178,10 @@ internal sealed class ProbeApp : Application
             phase = "consent-stop-gate";
             Require(nativeBinding is not null && nativeConsent.Status(nativeBinding).CaptureActive);
             nativeConsent.Stop(nativeBinding);
+            var stopDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (!sharedAdapters[1].IsStopped && DateTime.UtcNow < stopDeadline)
+                await Task.Delay(20);
+            Require(sharedAdapters[1].IsStopped);
             Require(!nativeConsent.IsNativeSyntheticAdmitted(nativeBinding, views[1]));
             var beforeStopCount = sharedTrace.Read(traceSessions[1]).Events.Count;
             Require(!nativeConsent.TryObserve(nativeBinding, views[1],
