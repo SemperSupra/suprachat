@@ -67,7 +67,9 @@ public static class SharedSessionInventoryReader
                 inventory.Events.Count > SharedSessionLedger.MaxEvents ||
                 inventory.Sequence < 0 ||
                 (inventory.HostInstanceId is not null &&
-                 !Guid.TryParseExact(inventory.HostInstanceId, "N", out _)) ||
+                 (!Guid.TryParseExact(inventory.HostInstanceId, "N", out var parsedHost) ||
+                  !string.Equals(parsedHost.ToString("N"), inventory.HostInstanceId,
+                      StringComparison.Ordinal))) ||
                 inventory.AuthenticatedAudiences ||
                 inventory.ChatSubmissionAllowed || inventory.TerminalExecutionAllowed)
                 return Failure("LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED");
