@@ -91,6 +91,16 @@ async function caseCheck(name,kind,payload,connected,code){
 try {
   await caseCheck('wellformed-metadata-only-inventory','json',good,true,
     'UNVERIFIED_LOOPBACK_HOST_SELF_REPORT');
+  const epoch=await caseCheck('wellformed-unattested-host-epoch','json',
+    {...good,hostInstanceId:'123e4567e89b42d3a456426614174000'},true,
+    'UNVERIFIED_LOOPBACK_HOST_SELF_REPORT');
+  assert.equal(epoch.receipt.host_instance_id,'123e4567e89b42d3a456426614174000');
+  await caseCheck('malformed-host-instance-refused','json',
+    {...good,hostInstanceId:'not-a-host'},false,
+    'LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED');
+  await caseCheck('wrong-case-host-instance-refused','json',
+    {...good,hostInstanceId:'123E4567E89B42D3A456426614174000'},false,
+    'LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED');
   await caseCheck('null-sessions-refused','json',{...good,sessions:null},false,
     'LEDGER_SCOPE_OR_SCHEMA_UNVERIFIED');
   await caseCheck('duplicate-session-ids-refused','json',
