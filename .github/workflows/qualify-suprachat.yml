@@ -1127,12 +1127,21 @@ jobs:
                   try {
                     # Detaching the native WebView on tab selection can replace the UIA root.
                     # Query the current top-level provider instead of polling a stale subtree.
-                    $freshWindow = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-                      [System.Windows.Automation.TreeScope]::Children, $processCondition)
-                    if ($freshWindow) { $script:window = $freshWindow }
-                    $element = $window.FindFirst(
-                      [System.Windows.Automation.TreeScope]::Descendants,
-                      $idCondition)
+                    # A process can expose additional native top-level providers. Bind the
+                    # current HWND to the declared main window; never keep a stale fallback.
+                    $p.Refresh()
+                    $freshWindow = $null
+                    if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+                      $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                      if ($candidate.Current.ProcessId -eq $p.Id -and
+                          $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') { $freshWindow = $candidate }
+                    }
+                    $script:window = $freshWindow
+                    if ($freshWindow) {
+                      $element = $freshWindow.FindFirst(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        $idCondition)
+                    }
                   }
                   catch {
                     if ($_.Exception.InnerException -and $_.Exception.InnerException.HResult -eq -2147418113) {
@@ -1145,9 +1154,12 @@ jobs:
                   # Fixed declarative IDs only; do not export names, document text or web content.
                   $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
                     'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
-                  $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                    [System.Windows.Automation.Condition]::TrueCondition) |
-                    ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                  $visibleIds = @()
+                  if ($window) {
+                    $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                      [System.Windows.Automation.Condition]::TrueCondition) |
+                      ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                  }
                   Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
