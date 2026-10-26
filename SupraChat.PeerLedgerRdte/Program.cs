@@ -27,6 +27,11 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) return 64;
+        if (args.Length == 2 && args[0] == "--shared-cancellation-receipt") return SharedCancellationLab.Run(args[1]);
+        if (args.Length == 4 && args[0] == "--cancellation-client")
+        {
+            try { return await SharedCancellationHost.ClientAsync(args[1], args[2], args[3]); } catch { return 71; }
+        }
         if (args.Length == 2 && args[0] == "--control-receipt") return await DurableControlStoreChecks.RunAsync(args[1]);
         if (args.Length == 3 && args[0] == "--control-crash") return DurableControlStoreChecks.Child(args[1], args[2]);
         if (args.Length == 2 && args[0] == "--metadata-consent-receipt") return SharedDesktopLab.Run(args[1], requireConsent: true);

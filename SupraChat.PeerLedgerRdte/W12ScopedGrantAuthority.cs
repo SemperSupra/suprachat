@@ -14,7 +14,7 @@ public sealed class W12ScopedGrantAuthority : IDisposable
     public const string Schema = "suprachat-w12-host-metadata-grant-rdte/v1";
     private static readonly HashSet<string> AllowedScopes =
         new(StringComparer.Ordinal) { "session.read", "session.propose",
-            "session.mutate", "session.approve", "session.create" };
+            "session.mutate", "session.approve", "session.create", "stream.cancel.synthetic" };
     private readonly byte[] _key;
     private readonly Func<DateTimeOffset> _clock;
     private readonly HashSet<string> _revokedIds = new(StringComparer.Ordinal);
