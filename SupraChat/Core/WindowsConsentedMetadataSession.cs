@@ -251,6 +251,21 @@ public sealed class WindowsConsentedMetadataSession : IAsyncDisposable
     }
     public TracePage Read(long after = 0, int limit = 100) { ThreadCheck(); Status(); return _trace.Read(_session, after, limit); }
 
+    // Isolate synthetic timer qualification from both UI polling and status-triggered expiry.
+    // These internal observations cannot be used on the first-party route and never refresh consent.
+    internal void PauseSyntheticWatchdogForQualification()
+    {
+        ThreadCheck();
+        if (_surface != TraceSurface.Synthetic) throw new UnauthorizedAccessException("Synthetic qualification only.");
+        _watchdog.Stop();
+    }
+    internal (bool RecorderCapturing, bool ObserverAttached, long NetworkEvents) PeekSyntheticLifecycleWithoutRefresh()
+    {
+        ThreadCheck();
+        if (_surface != TraceSurface.Synthetic) throw new UnauthorizedAccessException("Synthetic qualification only.");
+        return (_trace.IsCapturing(_session), _adapter is { IsStopped: false }, _events + (_adapter?.ObservedNetworkEvents ?? 0));
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;

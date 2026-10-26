@@ -46,13 +46,36 @@ internal static class ConsentedNativeChecks
         await a.StopForSummaryAsync();
         Require(a.Status().EndReason == NativeCaptureEndReason.OperatorStop && a.Status().CleanupComplete && a.Status().DisableCompleted);
         Require(a.Status().Diagnostics!.TotalIncidents == 0 && a.Read().CaptureGap);
-        // Idle expiry: advancing the test timer revokes ingestion before any status polling or traffic.
-        clock.Advance(TimeSpan.FromSeconds(121));
+        // No Status/Read, UI watchdog, or new fixture requests may cause the following expiry.
+        b.PauseSyntheticWatchdogForQualification();
+        var retiredTimer = clock.TimerCount - 1;
+        clock.Advance(TimeSpan.FromSeconds(119));
+        Require(b.PeekSyntheticLifecycleWithoutRefresh() is { RecorderCapturing: true, ObserverAttached: true });
+        b.Stop();
+        var renewedB = b.Preview(); Require(await b.ConfirmAsync(renewedB, true));
+        var idleNetworkEvents = b.PeekSyntheticLifecycleWithoutRefresh().NetworkEvents;
+        clock.FireQueuedTimerEvenIfDisposed(retiredTimer);
         await Task.Delay(100);
-        Require(!b.Status().ObserverAttached && !b.Status().Consent.CaptureActive);
+        Require(b.PeekSyntheticLifecycleWithoutRefresh() is { RecorderCapturing: true, ObserverAttached: true });
+        // An early callback reschedules its own timer instead of ending the current lease.
+        var timerChanges = clock.TimerChanges;
+        clock.FireQueuedTimerEvenIfDisposed(clock.TimerCount - 1);
+        Require(clock.TimerChanges == timerChanges + 1 && b.PeekSyntheticLifecycleWithoutRefresh().RecorderCapturing);
+        clock.Advance(TimeSpan.FromSeconds(119));
+        Require(b.PeekSyntheticLifecycleWithoutRefresh() is { RecorderCapturing: true, ObserverAttached: true });
+        // Also deliver the retired callback long after its old deadline, just before the new one.
+        clock.FireQueuedTimerEvenIfDisposed(retiredTimer);
+        await Task.Delay(100);
+        Require(b.PeekSyntheticLifecycleWithoutRefresh() is { RecorderCapturing: true, ObserverAttached: true });
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Require(!b.PeekSyntheticLifecycleWithoutRefresh().RecorderCapturing); // Timer, before yielding to any UI/SDK callback.
+        await Task.Delay(100);
+        var expiredWithoutPolling = b.PeekSyntheticLifecycleWithoutRefresh();
+        Require(!expiredWithoutPolling.ObserverAttached && expiredWithoutPolling.NetworkEvents == idleNetworkEvents);
+        // Ordinary status/summary APIs are allowed only after independent expiry observations pass.
         await b.StopForSummaryAsync();
         Require(b.Status().EndReason == NativeCaptureEndReason.LeaseExpired && b.Status().CleanupComplete);
-        Require(!await b.ConfirmAsync(planB, true));
+        Require(!await b.ConfirmAsync(planB, true) && !await b.ConfirmAsync(renewedB, true));
         Require(a.Read().Events.Count == before);
         await b.DisposeAsync();
         await using var race = WindowsConsentedMetadataSession.PrepareSynthetic(handles[1], idB, fixture.Origin, () => handles[1], clock);
@@ -83,6 +106,8 @@ internal static class ConsentedNativeChecks
             stop_during_pending_enable_refused = true, expiry_during_pending_enable_refused = true,
             native_view_replacement_revoked = true, blank_navigation_revoked = true, sentinel_excluded = true,
             intentional_stop_not_loss = true, first_end_reason_preserved = true, cleanup_settled_before_summary = true,
+            idle_expiry_without_polling = true, retired_timer_preserved_replacement = true,
+            early_timer_rescheduled = true, renewed_lease_deadline_respected = true,
             first_party_live_executed = false };
     }
 
@@ -97,6 +122,9 @@ internal static class ConsentedNativeChecks
     {
         private long _ticks;
         private readonly List<ManualTimer> _timers = new();
+        internal int TimerCount => _timers.Count;
+        internal int TimerChanges;
+        internal void FireQueuedTimerEvenIfDisposed(int index) => _timers[index].FireEvenIfDisposed();
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => _ticks;
         public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch.AddTicks(_ticks);
@@ -108,8 +136,9 @@ internal static class ConsentedNativeChecks
         {
             private long _due; private bool _disposed;
             public bool Change(TimeSpan dueTime, TimeSpan period)
-            { _due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock._ticks + dueTime.Ticks; return !_disposed; }
+            { if (_disposed) return false; clock.TimerChanges++; _due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock._ticks + dueTime.Ticks; return true; }
             public void Fire() { if (!_disposed && clock._ticks >= _due) { _due = long.MaxValue; callback(state); } }
+            public void FireEvenIfDisposed() => callback(state);
             public void Dispose() => _disposed = true;
             public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
         }
