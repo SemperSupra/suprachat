@@ -11,6 +11,7 @@ namespace SupraChat.WebViewProbe;
 
 internal static class NativeReviewUiChecks
 {
+    internal static string Phase { get; private set; } = "not-started";
     private sealed class Clock : TimeProvider
     {
         internal long Seconds;
@@ -22,6 +23,7 @@ internal static class NativeReviewUiChecks
         window.GetLogicalDescendants().OfType<T>().Single(c => AutomationProperties.GetAutomationId(c) == id);
     internal static async Task<object> RunAsync(NativeWebView view)
     {
+        Phase = "initial-review";
         await using var fixture = new FixtureServer();
         view.Source = fixture.ManualPage("a");
         IntPtr CurrentHandle() => view.TryGetPlatformHandle() is IWindowsWebView2PlatformHandle handle ? handle.CoreWebView2 : IntPtr.Zero;
@@ -83,6 +85,14 @@ internal static class NativeReviewUiChecks
             await CloseCase("prepared", NativeCaptureEndReason.None);
             await CloseCase("off", null);
             await CloseCase("failure", NativeCaptureEndReason.ReviewClosed);
+            await OwnerCloseCase(false);
+            await OwnerCloseCase(true);
+            var emptyOwner = new Window { Title = "SupraChat synthetic owner without review" };
+            var emptyClosed = false;
+            NativeReviewOwnerLifetime.Attach(emptyOwner, () => null);
+            emptyOwner.Closed += (_, _) => emptyClosed = true;
+            emptyOwner.Show((Window)TopLevel.GetTopLevel(view)!); emptyOwner.Close();
+            Require(emptyClosed);
             return new { actual_review_controls = true, acknowledgement_without_typing = true, expired_review_disabled = true,
                 repeated_platform_getter_ready = true, missing_native_view_explained = true, reattached_view_ready = true,
                 capture_end_explained = true,
@@ -90,10 +100,12 @@ internal static class NativeReviewUiChecks
                 close_during_save = true, close_prepared_or_off = true, close_save_failure_reported = true,
                 close_during_enable = true, close_during_prepare = true,
                 synthetic_summary_distinct = true,
+                owner_waits_for_review_close = true, owner_close_default_off = true, owner_without_review_unblocked = true,
                 first_party_live_executed = false };
 
             async Task CloseCase(string mode, NativeCaptureEndReason? expected)
             {
+                Phase = "review-close-" + mode;
                 var folder = Path.Combine(Path.GetTempPath(), "suprachat-review-close-" + Guid.NewGuid().ToString("N"));
                 if (mode == "failure") File.WriteAllText(folder, "synthetic-output-unavailable");
                 var window = NativeMetadataReviewWindow.CreateSyntheticQualification(Guid.NewGuid(), CurrentHandle, fixture.Origin, folder, clock);
@@ -127,6 +139,43 @@ internal static class NativeReviewUiChecks
                     if (mode == "failure") Require(!closed.AggregateSaved && closed.Failure == "SUMMARY_SAVE_FAILED");
                     else { Require(closed.AggregateSaved && closed.Failure == "NONE"); CheckSummary(folder, expected.Value); }
                 }
+            }
+            async Task OwnerCloseCase(bool captureActive)
+            {
+                Phase = captureActive ? "owner-close-active" : "owner-close-off";
+                var folder = Path.Combine(Path.GetTempPath(), "suprachat-owner-close-" + Guid.NewGuid().ToString("N"));
+                var owner = new Window { Title = "SupraChat synthetic metadata owner close qualification" };
+                var window = NativeMetadataReviewWindow.CreateSyntheticQualification(Guid.NewGuid(), CurrentHandle, fixture.Origin, folder, clock);
+                var ownerClosed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var lifetime = NativeReviewOwnerLifetime.Attach(owner, () => window);
+                lifetime.TrackReview(window);
+                var replacementRefused = false;
+                window.Closed += (_, _) => replacementRefused = lifetime.IsClosing;
+                owner.Closed += (_, _) => ownerClosed.TrySetResult(window.CloseCompletion.IsCompletedSuccessfully);
+                owner.Show((Window)TopLevel.GetTopLevel(view)!); window.Show(owner);
+                if (captureActive)
+                {
+                    Phase = "owner-active-prepare";
+                    Control<CheckBox>(window, "Native.Metadata.Acknowledge").IsChecked = true;
+                    Control<Button>(window, "Native.Metadata.Prepare").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitAsync(() => Control<Button>(window, "Native.Metadata.Confirm").IsEnabled);
+                    Phase = "owner-active-confirm";
+                    Control<Button>(window, "Native.Metadata.Confirm").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitAsync(() => Control<TextBlock>(window, "Native.Metadata.Message").Text!.StartsWith("Metadata capture active"));
+                }
+                Phase = captureActive ? "owner-active-close-request" : "owner-off-close-request";
+                owner.Close(); owner.Close();
+                Require(await ownerClosed.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+                Phase = captureActive ? "owner-active-close-result" : "owner-off-close-result";
+                var closed = await window.CloseCompletion;
+                Require(closed.ClosedObserved && closed.Failure == "NONE" && replacementRefused);
+                if (captureActive)
+                {
+                    Phase = "owner-active-summary-result";
+                    Require(closed.AggregateSaved && closed.Status is { EndReason: NativeCaptureEndReason.ReviewClosed, CleanupComplete: true });
+                    CheckSummary(folder, NativeCaptureEndReason.ReviewClosed);
+                }
+                else Require(!closed.AggregateSaved && closed.Status is null && !Directory.Exists(folder));
             }
         }
         finally { review.Close(); }

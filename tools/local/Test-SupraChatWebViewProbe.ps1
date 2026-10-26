@@ -59,6 +59,8 @@ try {
         !$probeReceipt.details.native_review_ui.close_prepared_or_off -or !$probeReceipt.details.native_review_ui.close_save_failure_reported -or
         !$probeReceipt.details.native_review_ui.synthetic_summary_distinct -or
         !$probeReceipt.details.native_review_ui.close_during_enable -or !$probeReceipt.details.native_review_ui.close_during_prepare -or
+        !$probeReceipt.details.native_review_ui.owner_waits_for_review_close -or !$probeReceipt.details.native_review_ui.owner_close_default_off -or
+        !$probeReceipt.details.native_review_ui.owner_without_review_unblocked -or
         $probeReceipt.details.consented_native.first_party_live_executed) {
         throw 'Probe receipt scope/qualification contract failed.'
     }

@@ -25,6 +25,12 @@ one file and absence of private sentinel, URL, header or authority content. Cont
 exercise store separation. These are in-process own-window handler tests, not independent UIA of a
 signed-in window. The public receipt contains fixed qualification flags, not the aggregate files.
 
-Review-window closure is distinct from main-window/process exit. The main host still does not await
-review finalization before dispatcher shutdown; no whole-app shutdown qualification is claimed.
+Review-window closure is distinct from main-window/process exit. The follow-up owner lifetime
+barrier intercepts main-window Closing, requests review closure synchronously and defers final owner
+Close until actual review Closed has published its aggregate/save result. Duplicate owner requests
+share the barrier; an owner without a review closes normally. Both final closes are dispatched,
+avoiding reentrancy for already-completed/default-OFF review finalization. Disposable owner-window
+tests require review completion before owner Closed for active and default-OFF capture, and no
+barrier for an absent review. MainWindow uses this same helper. These ordered own-window tests do
+not prove forced termination, OS shutdown/logoff, every application-exit path or signed-in UI state.
 Real signed-in expiry/navigation/Stop/close must still be exercised through the supported UI tool.

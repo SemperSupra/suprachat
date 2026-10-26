@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private BrowserSession? _browserSession;
     private AccessibilityPreferences _accessibilityPreferences = AccessibilityPreferences.Default;
     private Window? _nativeMetadataWindow;
+    private NativeReviewOwnerLifetime? _nativeMetadataOwnerLifetime;
     private SharedSessionLedger? _nativeMetadataLedger;
     private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
 
@@ -40,6 +41,8 @@ public partial class MainWindow : Window
         _responses = new ResponsesClient(_trace.Binding, _trace.Controls);
         _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
+        if (OperatingSystem.IsWindows())
+            _nativeMetadataOwnerLifetime = NativeReviewOwnerLifetime.Attach(this, () => _nativeMetadataWindow as NativeMetadataReviewWindow);
         ShowTrace("status");
         LoadCapabilityCatalog();
         Opened += async (_, _) =>
@@ -1717,12 +1720,14 @@ public partial class MainWindow : Window
     private void NativeMetadataReview_Click(object? sender, RoutedEventArgs e)
     {
         if (!OperatingSystem.IsWindows() || !NativeMetadataReview.IsVisible) return;
+        if (_nativeMetadataOwnerLifetime?.IsClosing == true) return;
         if (_nativeMetadataWindow is { } existing) { existing.Activate(); return; }
         _nativeMetadataLedger ??= new SharedSessionLedger();
         var session = _nativeMetadataLedger.Open("native-hil-window-session", "automation", "ChatGPT browser window").Session!;
         IntPtr CurrentHandle() => ChatView.TryGetPlatformHandle() is Avalonia.Platform.IWindowsWebView2PlatformHandle handle
             ? handle.CoreWebView2 : IntPtr.Zero;
         var review = new NativeMetadataReviewWindow(Guid.ParseExact(session.Id, "N"), CurrentHandle, _nativeMetadataOutputDirectory);
+        _nativeMetadataOwnerLifetime?.TrackReview(review);
         _nativeMetadataWindow = review;
         review.Closed += async (_, _) =>
         {

@@ -267,6 +267,7 @@ internal sealed class ProbeApp : Application
             {
                 schema = "suprachat-webview-probe/v1", evidence = "WEBVIEW_NATIVE_OBSERVED",
                 fixture = "SYNTHETIC_LOOPBACK_ONLY", passed, phase, failed_check = failedCheck, details,
+                native_review_phase = NativeReviewUiChecks.Phase,
                 qualification_scope = "NATIVE_SHARED_TRACE_SYNTHETIC_ONLY",
                 completeness = "UNKNOWN", production_admitted = false,
                 stream_lifecycle_disagreement = observers.Any(o => o.Counts.GetValueOrDefault("loadingFailed:stream") > 0),
