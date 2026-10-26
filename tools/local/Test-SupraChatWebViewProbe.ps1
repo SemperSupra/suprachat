@@ -54,6 +54,11 @@ try {
         !$probeReceipt.details.native_review_ui.expired_review_disabled -or !$probeReceipt.details.native_review_ui.repeated_platform_getter_ready -or
         !$probeReceipt.details.native_review_ui.missing_native_view_explained -or !$probeReceipt.details.native_review_ui.reattached_view_ready -or
         !$probeReceipt.details.native_review_ui.capture_end_explained -or $probeReceipt.details.native_review_ui.first_party_live_executed -or
+        !$probeReceipt.details.native_review_ui.settled_review_close -or !$probeReceipt.details.native_review_ui.duplicate_close_one_summary -or
+        !$probeReceipt.details.native_review_ui.close_preserves_first_reason -or !$probeReceipt.details.native_review_ui.close_during_save -or
+        !$probeReceipt.details.native_review_ui.close_prepared_or_off -or !$probeReceipt.details.native_review_ui.close_save_failure_reported -or
+        !$probeReceipt.details.native_review_ui.synthetic_summary_distinct -or
+        !$probeReceipt.details.native_review_ui.close_during_enable -or !$probeReceipt.details.native_review_ui.close_during_prepare -or
         $probeReceipt.details.consented_native.first_party_live_executed) {
         throw 'Probe receipt scope/qualification contract failed.'
     }

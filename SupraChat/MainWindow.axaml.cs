@@ -1724,7 +1724,16 @@ public partial class MainWindow : Window
             ? handle.CoreWebView2 : IntPtr.Zero;
         var review = new NativeMetadataReviewWindow(Guid.ParseExact(session.Id, "N"), CurrentHandle, _nativeMetadataOutputDirectory);
         _nativeMetadataWindow = review;
-        review.Closed += (_, _) => _nativeMetadataWindow = null;
+        review.Closed += async (_, _) =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            _nativeMetadataWindow = null;
+            var result = await review.CloseCompletion;
+            TraceStatus.Text = result.Failure != "NONE"
+                ? "Metadata review closed. The aggregate summary could not be saved or prepared; check the local experiment folder. [METADATA_CLOSE_EVIDENCE_UNAVAILABLE]"
+                : result.AggregateSaved ? "Metadata review closed. Aggregate summary saved in the local experiment folder."
+                : "Metadata review closed with capture off. No experiment summary was needed.";
+        };
         review.Show(this);
     }
     private void TraceStop_Click(object? sender, RoutedEventArgs e) => ShowTrace("stop");

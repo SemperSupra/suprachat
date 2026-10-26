@@ -5,6 +5,7 @@ using Avalonia.LogicalTree;
 using Avalonia.Platform;
 using Microsoft.Web.WebView2.Core;
 using SupraChat.Core;
+using System.Text.Json;
 
 namespace SupraChat.WebViewProbe;
 
@@ -68,12 +69,78 @@ internal static class NativeReviewUiChecks
             await WaitAsync(() => message.Text!.StartsWith("Metadata capture active"));
             clock.Seconds += 121;
             await WaitAsync(() => message.Text!.StartsWith("Capture expired"));
+            review.Close(); review.Close();
+            var expiredClose = await review.CloseCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+            Require(expiredClose.ClosedObserved && expiredClose.AggregateSaved && expiredClose.Failure == "NONE" &&
+                expiredClose.Status is { EndReason: NativeCaptureEndReason.LeaseExpired, CleanupComplete: true, ObserverAttached: false });
+            CheckSummary(output, NativeCaptureEndReason.LeaseExpired);
+
+            // Exercise the actual own-window handlers; never enroll a signed-in profile.
+            await CloseCase("active", NativeCaptureEndReason.ReviewClosed);
+            await CloseCase("pending", NativeCaptureEndReason.ReviewClosed);
+            await CloseCase("prepare-race", NativeCaptureEndReason.OperatorStop);
+            await CloseCase("save", NativeCaptureEndReason.SummarySave);
+            await CloseCase("prepared", NativeCaptureEndReason.None);
+            await CloseCase("off", null);
+            await CloseCase("failure", NativeCaptureEndReason.ReviewClosed);
             return new { actual_review_controls = true, acknowledgement_without_typing = true, expired_review_disabled = true,
                 repeated_platform_getter_ready = true, missing_native_view_explained = true, reattached_view_ready = true,
                 capture_end_explained = true,
+                settled_review_close = true, duplicate_close_one_summary = true, close_preserves_first_reason = true,
+                close_during_save = true, close_prepared_or_off = true, close_save_failure_reported = true,
+                close_during_enable = true, close_during_prepare = true,
+                synthetic_summary_distinct = true,
                 first_party_live_executed = false };
+
+            async Task CloseCase(string mode, NativeCaptureEndReason? expected)
+            {
+                var folder = Path.Combine(Path.GetTempPath(), "suprachat-review-close-" + Guid.NewGuid().ToString("N"));
+                if (mode == "failure") File.WriteAllText(folder, "synthetic-output-unavailable");
+                var window = NativeMetadataReviewWindow.CreateSyntheticQualification(Guid.NewGuid(), CurrentHandle, fixture.Origin, folder, clock);
+                window.Show((Window)TopLevel.GetTopLevel(view)!);
+                if (mode != "off")
+                {
+                    Control<CheckBox>(window, "Native.Metadata.Acknowledge").IsChecked = true;
+                    Control<Button>(window, "Native.Metadata.Prepare").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitAsync(() => Control<Button>(window, "Native.Metadata.Confirm").IsEnabled);
+                    if (mode != "prepared")
+                    {
+                        Control<Button>(window, "Native.Metadata.Confirm").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        if (mode == "pending") Require(!Control<Button>(window, "Native.Metadata.Prepare").IsEnabled);
+                        else await WaitAsync(() => Control<TextBlock>(window, "Native.Metadata.Message").Text!.StartsWith("Metadata capture active"));
+                    }
+                }
+                if (mode == "save") Control<Button>(window, "Native.Metadata.Save").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (mode == "prepare-race")
+                {
+                    Control<CheckBox>(window, "Native.Metadata.Acknowledge").IsChecked = true;
+                    Control<Button>(window, "Native.Metadata.Prepare").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Require(!Control<Button>(window, "Native.Metadata.Prepare").IsEnabled);
+                }
+                window.Close(); window.Close();
+                var closed = await window.CloseCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+                Require(closed.ClosedObserved);
+                if (expected is null) Require(closed.Status is null && !closed.AggregateSaved && !Directory.Exists(folder));
+                else
+                {
+                    Require(closed.Status is { CleanupComplete: true, ObserverAttached: false, Attaching: false } && closed.Status.EndReason == expected);
+                    if (mode == "failure") Require(!closed.AggregateSaved && closed.Failure == "SUMMARY_SAVE_FAILED");
+                    else { Require(closed.AggregateSaved && closed.Failure == "NONE"); CheckSummary(folder, expected.Value); }
+                }
+            }
         }
         finally { review.Close(); }
+    }
+    private static void CheckSummary(string directory, NativeCaptureEndReason expected)
+    {
+        var files = Directory.GetFiles(directory, "*.json"); Require(files.Length == 1);
+        var json = File.ReadAllText(files[0]);
+        using var document = JsonDocument.Parse(json); var root = document.RootElement;
+        Require(root.GetProperty("schema").GetString() == "suprachat-synthetic-native-metadata-summary/v1" &&
+            root.GetProperty("evidence").GetString() == "SYNTHETIC_LOOPBACK_ONLY" &&
+            root.GetProperty("first_lease_end_reason").GetString() == expected.ToString() &&
+            root.GetProperty("cleanup_complete").GetBoolean() && !root.GetProperty("capture_active").GetBoolean());
+        foreach (var forbidden in new[] { FixtureServer.Sentinel, "http://", "https://", "Bearer ", "Cookie:", "Authorization:" }) Require(!json.Contains(forbidden));
     }
     private static async Task WaitAsync(Func<bool> condition)
     {

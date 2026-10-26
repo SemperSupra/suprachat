@@ -26,7 +26,10 @@ Counts accumulate across the local review session; the ending reason describes i
 Save revokes consent immediately, then waits for bounded cleanup before taking its aggregate snapshot.
 Cleanup timeout remains explicitly pending and is counted once per adapter. A pending previous owner
 cannot be discarded or replaced; canonical ownership remains reserved until its cleanup settles.
-Closing the review revokes capture; no receipt claims an independently observed window close.
+Closing the review revokes capture. The close-evidence correction waits for bounded cleanup,
+prepares the aggregate before recorder disposal and saves it after actual Closed. Its own-window
+fixture separately asserts closure, first reason, cleanup and output results. This is not independent
+observation of signed-in runtime state or proof of main-window/process shutdown.
 
 Completeness is always UNKNOWN. Neither zero incidents nor successful cleanup proves all upstream
 events were delivered. Local disable completion does not prove that provider work stopped. Sign-in,
@@ -42,5 +45,6 @@ reasons. It continues to test default OFF, concurrent views, pending enable race
 After exact-head source review and public CI, use a fresh local review confirmation for another
 signed-in metadata observation. The prior capture's permit cannot restart it. Save a v2 aggregate
 after each intended ending (Stop, expiry or navigation); inspect reason counters and OFF/cleanup flags.
-The operator must report the window-close result separately if computer-use is unavailable. No
+Review-window closure now saves aggregate evidence automatically; signed-in closure still needs
+supported Computer Use or operator observation. Main-window/process shutdown remains separate. No
 automatic capture, automatic evidence upload, live traffic modification, merge or release is added.

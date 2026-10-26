@@ -14,7 +14,15 @@ namespace SupraChat;
 [SupportedOSPlatform("windows")]
 internal sealed class NativeMetadataReviewWindow : Window
 {
+    internal sealed record CloseResult(bool ClosedObserved, bool AggregateSaved, string Failure, NativeMetadataStatus? Status);
+    private readonly TaskCompletionSource<CloseResult> _closeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal Task<CloseResult> CloseCompletion => _closeCompletion.Task;
+    private TaskCompletionSource<bool>? _operationCompletion;
+    private bool _allowClose;
     private WindowsConsentedMetadataSession? _capture;
+    private WindowsConsentedMetadataSession? _savedCapture;
+    private WindowsConsentedMetadataSession? _retiringCapture;
+    private (WindowsConsentedMetadataSession Capture, NativeMetadataStatus Status, JsonElement Summary)? _retiringSnapshot;
     private MetadataConsentPlan? _plan;
     private readonly ReviewOperationFence _operations = new();
     private bool _closed, _busy;
@@ -45,7 +53,7 @@ internal sealed class NativeMetadataReviewWindow : Window
     {
         Title = synthetic ? "SupraChat synthetic metadata review qualification" : "Review ChatGPT metadata experiment"; Width = 690; Height = 650;
         AutomationProperties.SetAutomationId(this, "Native.Metadata.Window");
-        var summaryStore = new NativeMetadataSummaryStore(outputDirectory);
+        var summaryStore = new NativeMetadataSummaryStore(outputDirectory, synthetic);
         var panel = new StackPanel { Margin = new Avalonia.Thickness(20), Spacing = 10 };
         panel.Children.Add(new TextBlock { Text = "Local metadata-only experiment", FontSize = 24 });
         panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text =
@@ -53,7 +61,7 @@ internal sealed class NativeMetadataReviewWindow : Window
             "Only origin category, event timing, direction, " +
             "status, byte counts and pseudonymous correlation are retained in memory (up to 256 events). " +
             "CDP event JSON, including off-origin requests, reaches this process before origin filtering; headers, cookies, prompts, responses and frame payloads are not retained or exported. " +
-            "Stop, navigation, view replacement or closing this window ends capture. Earlier metadata stays in memory until close. " +
+            "Stop, navigation, view replacement or closing this window ends capture. Closing this review saves an aggregate summary automatically in the local experiment folder after cleanup; no raw events are saved. " +
             "No provider action, automatic upload, conversation binding or verified-human claim is enabled. " +
             "Use only after source review and your explicit opt-in for this test. Keep the ChatGPT tab open." });
         foreach (var control in new Control[] { _ack, _review, _confirm }) panel.Children.Add(control);
@@ -64,8 +72,19 @@ internal sealed class NativeMetadataReviewWindow : Window
         {
             _confirm.IsEnabled = false;
             var prior = _capture; _capture = null; _plan = null;
-            if (prior is not null) await SafeDispose(prior);
+            _retiringCapture = prior;
+            if (prior is not null)
+            {
+                try
+                {
+                    SafeStop(prior);
+                    await prior.StopForSummaryAsync();
+                    _retiringSnapshot = (prior, prior.Status(), (JsonElement)BuildSummary(prior, synthetic));
+                }
+                finally { await SafeDispose(prior); }
+            }
             if (!_operations.Current(generation)) return;
+            _retiringCapture = null; _retiringSnapshot = null;
             var prepared = prepareCapture(_ack.IsChecked == true);
             if (!_operations.Current(generation)) { await SafeDispose(prepared); return; }
             _capture = prepared; _plan = prepared.Preview();
@@ -93,39 +112,102 @@ internal sealed class NativeMetadataReviewWindow : Window
                 if (_capture is not { } capture) { _message.Text = "No experiment to summarize."; return; }
                 _plan = null; await capture.StopForSummaryAsync();
                 if (!_operations.Current(generation)) return;
-                var summary = BuildSummary(capture);
+                var summary = BuildSummary(capture, synthetic);
                 summaryStore.Save((JsonElement)summary);
+                _savedCapture = capture;
                 _message.Text = "Stopped and saved an aggregate summary. No event IDs, URLs, titles or payloads were exported.";
         });
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         timer.Tick += (_, _) => Refresh();
         Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { _closed = true; _operations.Close(); timer.Stop(); _plan = null;
-            var capture = _capture; _capture = null; if (capture is not null) { try { capture.StopForReviewClose(); } catch { } _ = SafeDispose(capture); } };
+        JsonElement? closeSummary = null;
+        NativeMetadataStatus? closeStatus = null;
+        var closeFailure = "NONE";
+        var alreadySaved = false;
+        Closing += (_, args) =>
+        {
+            if (_allowClose) return;
+            args.Cancel = true;
+            if (_closed) return; // Duplicate requests share this finalization.
+            _closed = true; _operations.Close(); timer.Stop(); _plan = null;
+            _review.IsEnabled = _confirm.IsEnabled = _save.IsEnabled = _ack.IsEnabled = stop.IsEnabled = false;
+            var capture = _capture ?? _retiringCapture;
+            var pending = _operationCompletion?.Task;
+            try { capture?.StopForReviewClose(); }
+            catch { if (_retiringSnapshot is not { } snapshot || !ReferenceEquals(snapshot.Capture, capture)) closeFailure = "STOP_FAILED"; }
+            _ = FinalizeClose();
+
+            async Task FinalizeClose()
+            {
+                try
+                {
+                    // Preparation or Save may already own the capture. Fence it, then await it.
+                    if (pending is not null)
+                    {
+                        try { await pending.WaitAsync(TimeSpan.FromSeconds(5)); }
+                        catch (TimeoutException) { closeFailure = "OPERATION_CLEANUP_PENDING"; }
+                    }
+                    if (capture is not null)
+                    {
+                        alreadySaved = ReferenceEquals(_savedCapture, capture);
+                        if (_retiringSnapshot is { } retired && ReferenceEquals(retired.Capture, capture))
+                        {
+                            closeStatus = retired.Status;
+                            if (!alreadySaved) closeSummary = retired.Summary;
+                        }
+                        else
+                        {
+                            await capture.StopForSummaryAsync();
+                            closeStatus = capture.Status();
+                            if (!alreadySaved) closeSummary = (JsonElement)BuildSummary(capture, synthetic);
+                        }
+                    }
+                }
+                catch { closeFailure = "SUMMARY_PREPARATION_FAILED"; }
+                finally
+                {
+                    if (capture is not null) await SafeDispose(capture);
+                    _capture = null; _retiringCapture = null; _retiringSnapshot = null;
+                    _allowClose = true; Dispatcher.UIThread.Post(Close);
+                }
+            }
+        };
+        Closed += (_, _) =>
+        {
+            // Persist only after actual closure, never merely because Closing was requested.
+            var saved = alreadySaved;
+            if (closeSummary is { } summary)
+            {
+                try { summaryStore.Save(summary); saved = true; }
+                catch { closeFailure = "SUMMARY_SAVE_FAILED"; }
+            }
+            _closeCompletion.TrySetResult(new(true, saved, closeFailure, closeStatus));
+        };
     }
 
     private async Task RunOperation(Func<long, Task> action)
     {
         if (_operations.TryBegin() is not { } generation) return;
+        var completion = _operationCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _busy = true; _review.IsEnabled = false; _save.IsEnabled = false; _confirm.IsEnabled = false;
         _ack.IsEnabled = false;
         try { await action(generation); }
         catch (Exception error) { if (!_closed && _operations.Current(generation)) { _plan = null; SafeStop(_capture);
             _message.Text = error is NativeMetadataPreparationException preparation ? PreparationMessage(preparation.Reason) :
                 "The native review or local save could not complete. Capture is stopped. Check the loaded ChatGPT tab and local output folder. [NATIVE_OPERATION_UNAVAILABLE]"; } }
-        finally { _operations.End(); _busy = false; if (!_closed) { _review.IsEnabled = true; _save.IsEnabled = true;
+        finally { _operations.End(); completion.TrySetResult(true); _busy = false; if (!_closed) { _review.IsEnabled = true; _save.IsEnabled = true;
             _ack.IsEnabled = true; Refresh(); } }
     }
     private static void SafeStop(WindowsConsentedMetadataSession? capture) { try { capture?.Stop(); } catch { } }
     private static async Task SafeDispose(WindowsConsentedMetadataSession capture)
     { SafeStop(capture); try { await capture.DisposeAsync(); } catch { } }
-    private static object BuildSummary(WindowsConsentedMetadataSession capture)
+    private static object BuildSummary(WindowsConsentedMetadataSession capture, bool synthetic)
     {
         var status = capture.Status(); var page = capture.Read(limit: 1000);
         var location = typeof(WindowsConsentedMetadataSession).Assembly.Location;
         string hash = "UNAVAILABLE";
         if (!string.IsNullOrEmpty(location)) { using var assembly = File.OpenRead(location); hash = Convert.ToHexString(SHA256.HashData(assembly)); }
-        return NativeMetadataSummary.Create(status, page, hash);
+        return synthetic ? NativeMetadataSummary.CreateSynthetic(status, page, hash) : NativeMetadataSummary.Create(status, page, hash);
     }
 
     private void Refresh()

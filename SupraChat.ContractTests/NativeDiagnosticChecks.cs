@@ -47,6 +47,13 @@ internal static class NativeDiagnosticChecks
         var firstPath = store.Save(summary); var secondPath = store.Save(summary);
         Require(firstPath != secondPath && File.Exists(firstPath) && File.Exists(secondPath));
         Require(!File.ReadAllText(firstPath).Contains("private-diagnostic-sentinel"));
+        var syntheticSummary = NativeMetadataSummary.CreateSynthetic(status with { Scope = "SYNTHETIC_LOOPBACK_NATIVE" }, trace.Read(session), "synthetic-hash");
+        var syntheticStore = new NativeMetadataSummaryStore(outputDirectory, synthetic: true);
+        Require(Path.GetFileName(syntheticStore.Save(syntheticSummary)).StartsWith("suprachat-synthetic-metadata-summary-"));
+        var mixed = false; try { store.Save(syntheticSummary); } catch (InvalidDataException) { mixed = true; } Require(mixed);
+        mixed = false; try { syntheticStore.Save(summary); } catch (InvalidDataException) { mixed = true; } Require(mixed);
+        mixed = false; try { NativeMetadataSummary.CreateSynthetic(status, trace.Read(session), "synthetic-hash"); }
+        catch (UnauthorizedAccessException) { mixed = true; } Require(mixed);
         var optIn = LocalFirstPartyMetadataOptIn.FromExplicitReview(session.SessionId, new IntPtr(1), true);
         optIn.Consume(session.SessionId, new IntPtr(1));
         var reused = false; try { optIn.Consume(session.SessionId, new IntPtr(1)); } catch (UnauthorizedAccessException) { reused = true; }
