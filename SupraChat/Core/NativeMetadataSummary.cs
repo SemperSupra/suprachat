@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace SupraChat.Core;
 
@@ -14,6 +15,28 @@ internal static class NativeMetadataSummary
         if (status.Scope != "SYNTHETIC_LOOPBACK_NATIVE") throw new UnauthorizedAccessException("Synthetic summary scope refused.");
         return Project(status, page, assemblyHash, true);
     }
+    /// <summary>
+    /// Upgrade one existing owner-local aggregate atomically, not a second ledger.
+    /// The older v2/v1 summaries remain readable; the only added data is the
+    /// bounded, sanitized app-authored lifecycle projection.
+    /// </summary>
+    internal static JsonElement AttachLifecycle(JsonElement original, NativeMetadataLifecycleReadback lifecycle)
+    {
+        if (original.ValueKind != JsonValueKind.Object) throw new InvalidDataException("Metadata aggregate required.");
+        var schema = original.GetProperty("schema").GetString();
+        var upgraded = schema switch
+        {
+            "suprachat-first-party-metadata-hil-summary/v2" => "suprachat-first-party-metadata-hil-summary/v3",
+            "suprachat-synthetic-native-metadata-summary/v1" => "suprachat-synthetic-native-metadata-summary/v2",
+            _ => throw new InvalidDataException("Unknown metadata aggregate version.")
+        };
+        if (lifecycle.Entries.Count is < 1 or > 24) throw new InvalidDataException("Lifecycle history bound refused.");
+        var node = JsonNode.Parse(original.GetRawText())!.AsObject();
+        node["schema"] = upgraded;
+        node["lifecycle_readback"] = JsonNode.Parse(lifecycle.ToUiValue());
+        return JsonSerializer.SerializeToElement(node);
+    }
+
     private static JsonElement Project(NativeMetadataStatus status, TracePage page, string assemblyHash, bool synthetic)
     {
         return JsonSerializer.SerializeToElement(new
