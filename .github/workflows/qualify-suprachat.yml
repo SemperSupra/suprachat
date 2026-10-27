@@ -1111,17 +1111,41 @@ jobs:
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
-                function Require-SemanticControl([string]$automationId) {
+                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
-                $element = $window.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $idCondition)
+                $element = $null
+                $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+                do {
+                  try {
+                    # Native WebView remounts can recreate the provider tree on
+                    # tab selection. Reacquire the current, declared main HWND
+                    # on every attempt; never reuse a stale identity as fallback.
+                    $p.Refresh()
+                    if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+                      $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                      if ($candidate.Current.ProcessId -eq $p.Id -and
+                          $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                        $element = $candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                          $idCondition)
+                      }
+                    }
+                  }
+                  catch [System.Windows.Automation.ElementNotAvailableException] {
+                    $element = $null
+                  }
+                  catch [System.Runtime.InteropServices.COMException] {
+                    # Transient cross-process RPC rejection while a UIA peer is
+                    # being remounted; preserve every other error.
+                    if ($_.Exception.HResult -ne -2147418113) { throw }
+                    $element = $null
+                  }
+                  if (-not $element) { Start-Sleep -Milliseconds 100 }
+                } while (-not $element -and (Get-Date) -lt $deadline)
                 if (-not $element) {
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
-
                 $name = $element.Current.Name
                 if ([string]::IsNullOrWhiteSpace($name)) {
                   throw "UI Automation accessible name missing: $automationId"
@@ -1145,6 +1169,9 @@ jobs:
                   if (-not $selection.Current.IsSelected) {
                     throw "UI Automation tab SelectionItem did not select: $($area.tab)"
                   }
+                  # A successful SelectionItem.Select is not proof that the
+                  # newly selected tab's child provider has finished attaching.
+                  $null = Require-SemanticControl $area.controls[0] -timeoutSeconds 15
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }
