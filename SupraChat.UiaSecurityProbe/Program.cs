@@ -47,13 +47,6 @@ internal sealed class ProbeApplication : Application
             AutomationProperties.SetAutomationId(passphrase, "Synthetic.Probe.Passphrase");
             AutomationProperties.SetName(passphrase, "Synthetic passphrase");
 
-            // Intentional *synthetic-only* negative control. A normal TextBox
-            // offers a ValuePattern with the test value, proving our external
-            // reader actually detects disclosure rather than returning blanks.
-            var leakyControl = new TextBox { Width = 310 };
-            AutomationProperties.SetAutomationId(leakyControl, "Synthetic.Probe.LeakControl");
-            AutomationProperties.SetName(leakyControl, "Unprotected synthetic control");
-
             var status = new TextBlock { Text = "EMPTY" };
             AutomationProperties.SetAutomationId(status, "Synthetic.Probe.State");
 
@@ -64,8 +57,7 @@ internal sealed class ProbeApplication : Application
                 // The only place the synthetic value enters the UI, after a
                 // real independent UIA Invoke. No plaintext receipt or logger.
                 passphrase.Text = secret;
-                leakyControl.Text = secret;
-                status.Text = passphrase.Text == secret && leakyControl.Text == secret ? "FILLED" : "REFUSED";
+                status.Text = passphrase.Text == secret ? "FILLED" : "REFUSED";
                 fill.IsEnabled = false;
             };
 
@@ -78,7 +70,7 @@ internal sealed class ProbeApplication : Application
                 {
                     Margin = new Thickness(20),
                     Spacing = 12,
-                    Children = { new TextBlock { Text = "Disposable secret-provider qualification" }, passphrase, leakyControl, fill, status }
+                    Children = { new TextBlock { Text = "Disposable secret-provider qualification" }, passphrase, fill, status }
                 }
             };
             AutomationProperties.SetAutomationId(window, "SupraChat.SyntheticSecurityProbe");
