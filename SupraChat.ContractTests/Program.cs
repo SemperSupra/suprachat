@@ -411,7 +411,7 @@ var mainWindowXaml = File.ReadAllText(mainWindowXamlPath);
 // interactive UIA patterns require separate live Windows qualification.
 static bool HasUniqueDeclaredAutomationIds(string xaml)
 {
-    var ids = XDocument.Parse(xaml).Descendants()
+    var ids = XDocument.Parse(xaml).Root!.DescendantsAndSelf()
         .Attributes()
         .Where(attribute => attribute.Name.LocalName == "AutomationProperties.AutomationId")
         .Select(attribute => attribute.Value)
