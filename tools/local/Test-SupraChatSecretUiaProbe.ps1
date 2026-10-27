@@ -95,8 +95,19 @@ try {
         # availability (30090) and scalars (30092/30093/30094).
         $root = Get-Window
         $nativeRoot = $script:nativeUia.ElementFromHandle($process.MainWindowHandle)
-        if ($nativeRoot.CurrentProcessId -ne $process.Id -or
-            $nativeRoot.CurrentAutomationId -cne 'SupraChat.SyntheticSecurityProbe') {
+        $comPidBound = $nativeRoot.CurrentProcessId -eq $process.Id
+        $comHwndBound = [long]$nativeRoot.CurrentNativeWindowHandle -eq $process.MainWindowHandle.ToInt64()
+        $comId = $nativeRoot.CurrentAutomationId
+        $comIdBound = $comId -ceq 'SupraChat.SyntheticSecurityProbe'
+        # Independently bind exact HWND + PID to the managed UIA root already
+        # checked above. Some UIA3 proxy roots omit the declared app root ID;
+        # an alternate nonblank identity is still a hard refusal.
+        if (!$comPidBound -or !$comHwndBound -or
+            (!$comIdBound -and ![string]::IsNullOrEmpty($comId))) {
+            Write-Host ('Synthetic COM root binding diagnostics: ' + (@{
+                pid_match = $comPidBound; hwnd_match = $comHwndBound
+                id_match = $comIdBound; id_blank = [string]::IsNullOrEmpty($comId)
+            } | ConvertTo-Json -Compress))
             throw 'SYNTHETIC_COM_WINDOW_BINDING_REFUSED'
         }
         $nativeCondition = $script:nativeUia.CreatePropertyCondition(30011, 'Synthetic.Probe.Passphrase')
