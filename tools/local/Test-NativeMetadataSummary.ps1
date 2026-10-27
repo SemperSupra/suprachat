@@ -132,7 +132,37 @@ if ($SelfTest) {
         provider_operation_verified=$false;conversation_binding_verified=$false;human_identity_verified=$false;
         prompts_responses_headers_cookies_exported=$false;automatic_upload=$false}
     $base = $sample | ConvertTo-Json -Depth 8 -Compress
-    $null = Test-MetadataDocument $base $hash 'OperatorStop'
+    $legacyResult = Test-MetadataDocument $base $hash 'OperatorStop'
+    if ($legacyResult.lifecycle_history_validated) { throw 'LEGACY_HISTORY_FABRICATED' }
+    $versioned = [ordered]@{}
+    foreach ($name in $sample.Keys) { $versioned[$name] = $sample[$name] }
+    $versioned.schema = 'suprachat-first-party-metadata-hil-summary/v3'
+    $versioned.lifecycle_readback = [ordered]@{
+        schema='suprachat-native-lifecycle-readback/v1';build_version='1.0.0.0';
+        completeness='UNKNOWN';is_authoritative_for_consent=$false;
+        events=@([ordered]@{ElapsedMs=0;Action='Opened';State='UNKNOWN';EndReason='None';
+            Active=$false;ObserverAttached=$false;CleanupComplete=$false;EnableCompleted=$false;DisableCompleted=$false},
+            [ordered]@{ElapsedMs=200;Action='Observed';State='STOPPED';EndReason='OperatorStop';
+                Active=$false;ObserverAttached=$false;CleanupComplete=$true;EnableCompleted=$true;DisableCompleted=$true})
+    }
+    $v3json = $versioned | ConvertTo-Json -Depth 12 -Compress
+    $v3Result = Test-MetadataDocument $v3json $hash 'OperatorStop'
+    if (!$v3Result.lifecycle_history_validated -or $v3Result.lifecycle_history_entries -ne 2) {
+        throw 'VERSIONED_HISTORY_NOT_VERIFIED'
+    }
+    $badV3 = @(
+        $v3json.Replace('"lifecycle_readback":','"injected_secret":"synthetic-private","lifecycle_readback":'),
+        $v3json.Replace('"EndReason":"OperatorStop"','"EndReason":"Navigation"'),
+        $v3json.Replace('"is_authoritative_for_consent":false','"is_authoritative_for_consent":true'),
+        $v3json.Replace('"lifecycle_readback":','"unknown_property":true,"lifecycle_readback":'),
+        $v3json.Replace('"ElapsedMs":200','"ElapsedMs":-1')
+    )
+    foreach ($mutated in $badV3) {
+        if ($mutated -ceq $v3json) { throw 'VERSIONED_NEGATIVE_MUTATION_NOOP' }
+        $refused = $false
+        try { $null = Test-MetadataDocument $mutated $hash 'OperatorStop' } catch { $refused = $true }
+        if (!$refused) { throw 'VERSIONED_HISTORY_NEGATIVE_ACCEPTED' }
+    }
     foreach ($ending in @('LeaseExpired', 'Navigation', 'SummarySave', 'ReviewClosed')) {
         $case = $base.Replace('"OperatorStop"', ('"' + $ending + '"'))
         $result = Test-MetadataDocument $case $hash $ending
@@ -164,7 +194,7 @@ if ($SelfTest) {
         try { $null = Test-MetadataDocument $json $hash 'OperatorStop' } catch { $refused = $true }
         if (!$refused) { throw 'SYNTHETIC_VALIDATOR_NEGATIVE_CASE_FAILED' }
     }
-    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=20;live_capture=$false} | ConvertTo-Json
+    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=27;live_capture=$false} | ConvertTo-Json
     return
 }
 if (!$SummaryPath -or !$ReceiptPath -or !$ExpectedAssemblyHash) { throw 'SUMMARY_HASH_AND_FRESH_RECEIPT_PATH_REQUIRED' }
