@@ -1,0 +1,30 @@
+name: Qualify independent synthetic browser comparison
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-browser-comparison:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build independent synthetic oracle
+        shell: pwsh
+        run: dotnet build SupraChat.WebViewOracle -c Release
+      - name: Install pinned Playwright Chromium
+        shell: pwsh
+        run: |
+          ./SupraChat.WebViewOracle/bin/Release/net10.0-windows/playwright.ps1 install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Oracle browser installation failed.' }
+      - name: Compare independent clients on the same loopback fixture
+        shell: pwsh
+        run: ./tools/local/Compare-SupraChatWebViewOracle.ps1 -OutputDirectory (Join-Path $PWD 'out/independent-browser-comparison')
+      # No real profiles, first-party traffic, raw event arrays, or artifact uploads.
