@@ -7,6 +7,7 @@ param(
     [switch]$SelfTest
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Read-NativeMetadataLifecycleReadback.ps1')
 
 function Assert-MetadataFields($Element, [string[]]$Allowed, [bool]$RequireAll = $true) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) { throw 'METADATA_OBJECT_REQUIRED' }
@@ -29,19 +30,31 @@ function Test-MetadataDocument([string]$Json, [string]$Hash, [string]$Ending) {
     $document = [System.Text.Json.JsonDocument]::Parse($Json)
     try {
         $root = $document.RootElement
-        Assert-MetadataFields $root @('schema','evidence','scope','completeness','assembly_sha256',
+        $sourceSchema = $root.GetProperty('schema').GetString()
+        $hasHistory = $sourceSchema -ceq 'suprachat-first-party-metadata-hil-summary/v3'
+        if (!$hasHistory -and $sourceSchema -cne 'suprachat-first-party-metadata-hil-summary/v2') { throw 'METADATA_SCHEMA_REFUSED' }
+        $fields = @('schema','evidence','scope','completeness','assembly_sha256',
             'observed_network_events','native_loss','capture_gap','native_loss_semantics','diagnostics',
             'capture_active','observer_attached','attaching','first_lease_end_reason','cleanup_complete',
             'enable_completed','disable_completed','stopped_interval_disclosed','total_evicted_events',
             'retained_events','lifecycle','signed_in_state','provider_operation_verified',
             'conversation_binding_verified','human_identity_verified','prompts_responses_headers_cookies_exported','automatic_upload')
+        if ($hasHistory) { $fields += 'lifecycle_readback' }
+        Assert-MetadataFields $root $fields
         foreach ($pair in @(
-            @('schema','suprachat-first-party-metadata-hil-summary/v2'),
+            @('schema',$sourceSchema),
             @('scope','SINGLE_OPERATOR_CHATGPT_EXACT_ORIGIN'),
             @('completeness','UNKNOWN'), @('native_loss_semantics','DIAGNOSTIC_INCIDENTS_NOT_LOST_EVENT_COUNT'),
             @('signed_in_state','OPERATOR_CHECK_REQUIRED'), @('first_lease_end_reason',$Ending))) {
             if ($root.GetProperty($pair[0]).ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
                 $root.GetProperty($pair[0]).GetString() -cne $pair[1]) { throw 'METADATA_SCOPE_OR_ENDING_REFUSED' }
+        }
+        $history = $null
+        if ($hasHistory) {
+            $history = Convert-NativeLifecycleReadback ($root.GetProperty('lifecycle_readback').GetRawText())
+            if ($history.latest.end_reason -cne $Ending -or $history.latest.active -or $history.latest.observer_attached) {
+                throw 'METADATA_HISTORY_ENDING_MISMATCH'
+            }
         }
         $recordedHash = $root.GetProperty('assembly_sha256').GetString()
         if (![string]::Equals($recordedHash, $Hash, [StringComparison]::OrdinalIgnoreCase)) { throw 'METADATA_BUILD_MISMATCH' }
@@ -91,6 +104,8 @@ function Test-MetadataDocument([string]$Json, [string]$Hash, [string]$Ending) {
             $observationIncidents + $lifecycleIncidents -ne $incidents -or
             $incidents -ne (Read-MetadataCount ($diagnostics.GetProperty('TotalIncidents')))) { throw 'METADATA_DIAGNOSTIC_TOTAL_MISMATCH' }
         return [ordered]@{ schema='suprachat-native-metadata-summary-validation/v2'; aggregate_contract_valid=$true;
+            aggregate_schema=$sourceSchema; lifecycle_history_validated=$hasHistory;
+            lifecycle_history_entries=$(if($hasHistory){$history.entries}else{0});
             source_evidence=$expectedEvidence; first_party_network_metadata_observed=($observed -gt 0);
             lifecycle_case=$Ending; assembly_sha256=$Hash.ToLowerInvariant(); observed_network_events=$observed;
             retained_events=$retained; total_evicted_events=$evicted; diagnostic_incidents=$incidents;
