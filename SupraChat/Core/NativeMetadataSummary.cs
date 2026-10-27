@@ -31,6 +31,19 @@ internal static class NativeMetadataSummary
             _ => throw new InvalidDataException("Unknown metadata aggregate version.")
         };
         if (lifecycle.Entries.Count is < 1 or > 24) throw new InvalidDataException("Lifecycle history bound refused.");
+        // Reject stale or contradictory projections *before* creating the one
+        // locally persisted aggregate. Independent consumer validation remains
+        // separate; an internally generated record is not automatically proof.
+        var ending = original.GetProperty("first_lease_end_reason").GetString();
+        var last = lifecycle.Entries[^1];
+        if (!string.Equals(last.EndReason, ending, StringComparison.Ordinal) ||
+            last.Active != original.GetProperty("capture_active").GetBoolean() ||
+            last.ObserverAttached != original.GetProperty("observer_attached").GetBoolean() ||
+            last.CleanupComplete != original.GetProperty("cleanup_complete").GetBoolean() ||
+            last.EnableCompleted != original.GetProperty("enable_completed").GetBoolean() ||
+            last.DisableCompleted != original.GetProperty("disable_completed").GetBoolean() ||
+            original.GetProperty("attaching").GetBoolean())
+            throw new InvalidDataException("Lifecycle aggregate and final observation disagree.");
         var node = JsonNode.Parse(original.GetRawText())!.AsObject();
         node["schema"] = upgraded;
         node["lifecycle_readback"] = JsonNode.Parse(lifecycle.ToUiValue());
