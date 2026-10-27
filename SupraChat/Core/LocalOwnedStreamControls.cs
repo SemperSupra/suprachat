@@ -61,6 +61,7 @@ public sealed class LocalOwnedStreamControls : IDisposable
             foreach (var key in _plans.Where(p => p.Value.ExpiresAt <= now).Select(p => p.Key).ToArray()) _plans.Remove(key);
             var reason = !Enum.IsDefined(action) || action is OwnedControlAction.ModifyFirstParty or OwnedControlAction.CapturePayload ? "OPERATION_UNAVAILABLE" :
                 !_streams.TryGetValue(streamId, out var stream) ? "STREAM_UNAVAILABLE" :
+                stream.DurableOwner is not null ? "DURABLE_CONTROL_REQUIRED" :
                 stream.Revision != expectedRevision ? "STALE_REVISION" :
                 action != OwnedControlAction.Cancel && stream.Surface != TraceSurface.Synthetic ? "SYNTHETIC_ONLY" :
                 actionKey == Guid.Empty ? "ACTION_KEY_REQUIRED" : _plans.Count >= 64 ? "PLAN_CAPACITY" : "CONFIRMATION_REQUIRED";
@@ -91,6 +92,7 @@ public sealed class LocalOwnedStreamControls : IDisposable
             if (!confirmed) receipt = Refused(plan.StreamId, actionKey, "CONFIRMATION_REQUIRED");
             else if (plan.ExpiresAt <= _clock.GetUtcNow()) receipt = Refused(plan.StreamId, actionKey, "PLAN_EXPIRED");
             else if (!_streams.TryGetValue(plan.StreamId, out var stream) || stream.IsDisposed) receipt = Refused(plan.StreamId, actionKey, "STREAM_UNAVAILABLE");
+            else if (stream.DurableOwner is not null) receipt = Refused(plan.StreamId, actionKey, "DURABLE_CONTROL_REQUIRED", stream.Revision);
             else if (plan.ExpectedRevision != expectedRevision || stream.Revision != expectedRevision)
                 receipt = Refused(plan.StreamId, actionKey, "STALE_REVISION", stream.Revision);
             else if (stream.Token.IsCancellationRequested) receipt = Refused(plan.StreamId, actionKey, "ALREADY_CANCELLED", stream.Revision);
@@ -118,6 +120,35 @@ public sealed class LocalOwnedStreamControls : IDisposable
     }
     internal void Remove(OwnedStreamLease stream) { lock (_gate) _streams.Remove(stream.StreamId); }
 
+    // Effect-only bridge for the ledger's write-ahead path. No second plan/outcome authority.
+    internal OwnedStreamLease? ResolveCancellationTarget(Guid session, Guid streamId)
+    {
+        lock (_gate) return !_disposed && session == _sessionId ? _streams.GetValueOrDefault(streamId) : null;
+    }
+    internal bool IsCancellationTarget(Guid session, OwnedStreamLease stream, long revision, object? durableOwner = null)
+    {
+        lock (_gate) return !_disposed && session == _sessionId && !stream.IsDisposed &&
+            _streams.TryGetValue(stream.StreamId, out var live) && ReferenceEquals(live, stream) &&
+            stream.Revision == revision && !stream.Token.IsCancellationRequested && ReferenceEquals(stream.DurableOwner, durableOwner);
+    }
+    internal bool TryClaimCancellation(Guid session, OwnedStreamLease stream, object durableOwner)
+    {
+        lock (_gate)
+        {
+            if (!IsCancellationTarget(session, stream, stream.Revision)) return false;
+            stream.DurableOwner = durableOwner; return true;
+        }
+    }
+    internal bool TrySignalCancellation(Guid session, OwnedStreamLease stream, long revision, object durableOwner)
+    {
+        lock (_gate)
+        {
+            if (!IsCancellationTarget(session, stream, revision, durableOwner)) return false;
+            stream.Apply(OwnedControlAction.Cancel); stream.Revision++;
+            return stream.Token.IsCancellationRequested;
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -144,6 +175,7 @@ public sealed class LocalOwnedStreamControls : IDisposable
         public long Revision { get; internal set; }
         public CancellationToken Token => _cancellation.Token;
         internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+        internal object? DurableOwner { get; set; }
         internal OwnedStreamLease(LocalOwnedStreamControls owner, TraceSurface surface) { _owner = owner; Surface = surface; }
         internal void Apply(OwnedControlAction action)
         {

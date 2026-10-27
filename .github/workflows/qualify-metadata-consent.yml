@@ -1,0 +1,35 @@
+name: Qualify per-session metadata consent prototype
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/MetadataCaptureConsent.cs'
+      - 'SupraChat/Core/TrafficTrace.cs'
+      - 'SupraChat.PeerLedgerRdte/**'
+      - 'tools/local/Test-SharedDesktopLab.ps1'
+      - '.github/workflows/qualify-metadata-consent.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  metadata-consent-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build isolated consent workbench
+        run: dotnet build SupraChat.PeerLedgerRdte -c Release
+      - name: Qualify review, confirmation, stop, expiry and view invalidation through UIA
+        shell: pwsh
+        run: ./tools/local/Test-SharedDesktopLab.ps1 -Consent -ReceiptPath "$env:RUNNER_TEMP/metadata-consent-receipt.json"
+      - name: Preserve sanitized host and UIA receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitized-metadata-consent-receipts
+          path: |
+            ${{ runner.temp }}/metadata-consent-receipt.json
+            ${{ runner.temp }}/metadata-consent-receipt.json.uia.json
+          if-no-files-found: ignore
