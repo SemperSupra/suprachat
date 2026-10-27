@@ -94,7 +94,18 @@ try {
         # The native request asks the actual provider for its legacy fallback
         # availability (30090) and scalars (30092/30093/30094).
         $root = Get-Window
-        $nativeRoot = $script:nativeUia.ElementFromHandle($process.MainWindowHandle)
+        # Interop.UIAutomationClient imports UIA_HWND as a 32-bit integer
+        # in some target frameworks. Marshal the actual signature rather
+        # than handing an IntPtr to a mismatched interop parameter.
+        $hwndParameter = $uiaInterface[0].GetMethod('ElementFromHandle').GetParameters()[0].ParameterType
+        if ($hwndParameter -eq [int]) {
+            $nativeHandle = $process.MainWindowHandle.ToInt32()
+        } elseif ($hwndParameter -eq [IntPtr]) {
+            $nativeHandle = $process.MainWindowHandle
+        } else {
+            throw 'SYNTHETIC_COM_HWND_SIGNATURE_UNQUALIFIED'
+        }
+        $nativeRoot = $script:nativeUia.ElementFromHandle($nativeHandle)
         $comPidBound = $nativeRoot.CurrentProcessId -eq $process.Id
         $comHwndBound = [long]$nativeRoot.CurrentNativeWindowHandle -eq $process.MainWindowHandle.ToInt64()
         $comId = $nativeRoot.CurrentAutomationId
