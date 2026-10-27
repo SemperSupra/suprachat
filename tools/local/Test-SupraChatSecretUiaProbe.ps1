@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory)][string]$Executable
+    [Parameter(Mandatory)][string]$Executable,
+    [Parameter(Mandatory)][string]$ObserverExecutable
 )
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'WINDOWS_REQUIRED' }
@@ -7,33 +8,8 @@ $exe = [IO.Path]::GetFullPath($Executable)
 if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'QUALIFIED_EXECUTABLE_REQUIRED' }
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-# Strictly test-only assembly, never added to the real application package.
-$interop = Join-Path ([IO.Path]::GetDirectoryName($exe)) 'Interop.UIAutomationClient.dll'
-if (!(Test-Path -LiteralPath $interop -PathType Leaf)) { throw 'UIA3_COM_INTEROP_REQUIRED' }
-$interopAssembly = [Reflection.Assembly]::LoadFrom($interop)
-$types = @($interopAssembly.GetExportedTypes())
-$uiaInterface = @($types | Where-Object { $_.Name -eq 'IUIAutomation' -and $_.IsInterface })
-$scopeTypes = @($types | Where-Object { $_.Name -eq 'TreeScope' -and $_.IsEnum })
-if ($uiaInterface.Count -ne 1 -or $scopeTypes.Count -ne 1) {
-    # Log only public library type names, never UI tree content or sentinel.
-    Write-Host ('UIA3 qualified metadata types: ' + (($types | Where-Object {
-        $_.Name -match 'Automation|TreeScope|CUIA'
-    } | Select-Object -ExpandProperty FullName | Select-Object -First 20) -join ','))
-    throw 'UIA3_REQUIRED_INTERFACE_NOT_FOUND'
-}
-$script:nativeTreeScope = [Enum]::Parse($scopeTypes[0], 'TreeScope_Descendants')
-# UIA3 COM interop documents CUIAutomation8Class as its recommended
-# modern typed entrypoint; qualify that coclass before the old base factory.
-$factory = @($types | Where-Object { $_.Name -eq 'CUIAutomation8Class' -and $_.IsClass })
-if ($factory.Count -eq 0) {
-    $factory = @($types | Where-Object { $_.Name -eq 'CUIAutomationClass' -and $_.IsClass })
-}
-if ($factory.Count -eq 1) {
-    $script:nativeUia = [Activator]::CreateInstance($factory[0])
-} else {
-    throw 'UIA3_COM_COCLASS_UNAVAILABLE'
-}
-if ($null -eq $script:nativeUia) { throw 'UIA3_COM_ACTIVATION_REFUSED' }
+$observer = [IO.Path]::GetFullPath($ObserverExecutable)
+if (!(Test-Path -LiteralPath $observer -PathType Leaf)) { throw 'UIA3_OBSERVER_EXECUTABLE_REQUIRED' }
 
 # A fresh value exists only in this disposable test process and this script's
 # memory. Never print it, capture desktop screenshots or upload a UIA tree.
@@ -106,59 +82,35 @@ try {
     }
 
     function Check-LegacyNativeUIA {
-        # The stock .NET 10 managed client does not expose the Legacy pattern
-        # or register property 30090. Use the independent Windows UIA3 COM
-        # interface from pinned test-only Interop.UIAutomationClient instead.
-        # The native request asks the actual provider for its legacy fallback
-        # availability (30090) and scalars (30092/30093/30094).
-        $root = Get-Window
-        # Interop.UIAutomationClient imports UIA_HWND as a 32-bit integer
-        # in some target frameworks. Marshal the actual signature rather
-        # than handing an IntPtr to a mismatched interop parameter.
-        $hwndParameter = $uiaInterface[0].GetMethod('ElementFromHandle').GetParameters()[0].ParameterType
-        if ($hwndParameter -eq [int]) {
-            $nativeHandle = $process.MainWindowHandle.ToInt32()
-        } elseif ($hwndParameter -eq [IntPtr]) {
-            $nativeHandle = $process.MainWindowHandle
-        } else {
-            throw 'SYNTHETIC_COM_HWND_SIGNATURE_UNQUALIFIED'
+        # A *second process* reads the same synthetic HWND with the well-tested
+        # FlaUI.UIA3 native COM client, not a hand-rolled PowerShell RCW.
+        # The synthetic value stays in transient process environment only.
+        $env:SUPRACHAT_SYNTHETIC_UIA_SECRET = $synthetic
+        try {
+            $safeOutput = @(& $observer ([string]$process.Id) ([string]$process.MainWindowHandle.ToInt64()))
+            $nativeExit = $LASTEXITCODE
         }
-        $nativeRoot = $script:nativeUia.ElementFromHandle($nativeHandle)
-        $comPidBound = $nativeRoot.CurrentProcessId -eq $process.Id
-        $comHwndBound = [long]$nativeRoot.CurrentNativeWindowHandle -eq $process.MainWindowHandle.ToInt64()
-        $comId = $nativeRoot.CurrentAutomationId
-        $comIdBound = $comId -ceq 'SupraChat.SyntheticSecurityProbe'
-        # Independently bind exact HWND + PID to the managed UIA root already
-        # checked above. Some UIA3 proxy roots omit the declared app root ID;
-        # an alternate nonblank identity is still a hard refusal.
-        if (!$comPidBound -or !$comHwndBound -or
-            (!$comIdBound -and ![string]::IsNullOrEmpty($comId))) {
-            Write-Host ('Synthetic COM root binding diagnostics: ' + (@{
-                pid_match = $comPidBound; hwnd_match = $comHwndBound
-                id_match = $comIdBound; id_blank = [string]::IsNullOrEmpty($comId)
-            } | ConvertTo-Json -Compress))
-            throw 'SYNTHETIC_COM_WINDOW_BINDING_REFUSED'
+        finally {
+            Remove-Item Env:SUPRACHAT_SYNTHETIC_UIA_SECRET -ErrorAction SilentlyContinue
         }
-        $nativeCondition = $script:nativeUia.CreatePropertyCondition(30011, 'Synthetic.Probe.Passphrase')
-        $nativeSecret = $nativeRoot.FindFirst(
-            $script:nativeTreeScope, $nativeCondition)
-        if ($null -eq $nativeSecret -or $nativeSecret.CurrentProcessId -ne $process.Id) {
-            throw 'SYNTHETIC_COM_CONTROL_BINDING_REFUSED'
+        if ($nativeExit -ne 0) {
+            # The C# observer emits only allowlisted fixed-status codes.
+            $known = @('ARGUMENTS_REFUSED','SYNTHETIC_SCOPE_REFUSED',
+                'OWNER_HWND_REFUSED','NATIVE_ROOT_IDENTITY_REFUSED',
+                'NATIVE_CONTROL_IDENTITY_REFUSED','LEGACY_AVAILABILITY_UNQUALIFIED',
+                'LEGACY_PROPERTY_TYPE_UNQUALIFIED','LEGACY_SYNTHETIC_VALUE_EXPOSED',
+                'UIA3_OBSERVER_FAILED')
+            $status = if ($safeOutput.Count -eq 1 -and $safeOutput[0] -cin $known) {
+                $safeOutput[0] } else { 'UIA3_UNRECOGNIZED_FAILURE' }
+            Write-Host "Native UIA3 audit status: $status"
+            throw 'UIA3_LEGACY_QUALIFICATION_REFUSED'
         }
-        $legacyPresent = $nativeSecret.GetCurrentPropertyValue(30090)
-        if ($legacyPresent -isnot [bool]) { throw 'SYNTHETIC_LEGACY_AVAILABILITY_UNQUALIFIED' }
-        foreach ($entry in @(
-            @{ id=30092; failure='SYNTHETIC_UIA_LEGACY_NAME_EXPOSED' },
-            @{ id=30093; failure='SYNTHETIC_UIA_LEGACY_VALUE_EXPOSED' },
-            @{ id=30094; failure='SYNTHETIC_UIA_LEGACY_DESCRIPTION_EXPOSED' }
-        )) {
-            $readback = $nativeSecret.GetCurrentPropertyValue($entry.id)
-            if ($legacyPresent -and $null -eq $readback) {
-                throw 'SYNTHETIC_LEGACY_READBACK_UNQUALIFIED'
-            }
-            if ($readback -is [string]) { Check-Not-Synthetic $readback $entry.failure }
+        if ($safeOutput.Count -ne 1 -or $safeOutput[0] -cnotin @(
+            'LEGACY_PRESENT_NONDISCLOSURE_PASS',
+            'LEGACY_PATTERN_ABSENT_ON_NATIVE_UIA_PEER')) {
+            throw 'UIA3_LEGACY_RESULT_REFUSED'
         }
-
+        Write-Host ('Native UIA3 audit status: ' + $safeOutput[0])
     }
 
     $passphrase = Require-Element 'Synthetic.Probe.Passphrase'
