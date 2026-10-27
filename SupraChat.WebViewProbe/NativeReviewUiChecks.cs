@@ -33,6 +33,30 @@ internal static class NativeReviewUiChecks
         Require(historyContract.Entries.Count == 24);
         Require(!historyContract.ToUiValue().Contains("session_id", StringComparison.OrdinalIgnoreCase));
 
+        // A failed or interrupted write must not be visible as a completed
+        // *.json aggregate. Successful saves are create-only and retain their
+        // original bytes across subsequent independent saves.
+        var storageFixture = Path.Combine(Path.GetTempPath(), "suprachat-aggregate-storage-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new NativeMetadataSummaryStore(storageFixture, synthetic: true);
+            var fixtureSummary = JsonSerializer.SerializeToElement(new
+            {
+                schema = "suprachat-synthetic-native-metadata-summary/v1"
+            });
+            var first = store.Save(fixtureSummary);
+            var firstBytes = File.ReadAllBytes(first);
+            var second = store.Save(fixtureSummary);
+            Require(first != second && File.Exists(first) && File.Exists(second) &&
+                firstBytes.SequenceEqual(File.ReadAllBytes(first)) &&
+                Directory.GetFiles(storageFixture, "*.json").Length == 2 &&
+                Directory.GetFiles(storageFixture, "*.pending").Length == 0);
+        }
+        finally
+        {
+            if (Directory.Exists(storageFixture)) Directory.Delete(storageFixture, recursive: true);
+        }
+
         // App-side admission must refuse an internally produced history that
         // disagrees with the durable aggregate, not rely solely on a later
         // independent PowerShell validator finding the contradiction.
@@ -232,7 +256,8 @@ internal static class NativeReviewUiChecks
     }
     private static void CheckSummary(string directory, NativeCaptureEndReason expected)
     {
-        var files = Directory.GetFiles(directory, "*.json"); Require(files.Length == 1);
+        var files = Directory.GetFiles(directory, "*.json");
+        Require(files.Length == 1 && Directory.GetFiles(directory, "*.pending").Length == 0);
         var json = File.ReadAllText(files[0]);
         using var document = JsonDocument.Parse(json); var root = document.RootElement;
         Require(root.GetProperty("schema").GetString() == "suprachat-synthetic-native-metadata-summary/v2" &&
