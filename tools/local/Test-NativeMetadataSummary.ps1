@@ -55,7 +55,8 @@ function Test-MetadataDocument([string]$Json, [string]$Hash, [string]$Ending) {
         $history = $null
         if ($hasHistory) {
             $history = Convert-NativeLifecycleReadback ($root.GetProperty('lifecycle_readback').GetRawText())
-            if ($history.latest.end_reason -cne $Ending -or $history.latest.active -or $history.latest.observer_attached) {
+            if ($history.latest.end_reason -cne $Ending -or $history.latest.active -or $history.latest.observer_attached -or
+                !$history.latest.cleanup_complete -or !$history.latest.enable_completed -or !$history.latest.disable_completed) {
                 throw 'METADATA_HISTORY_ENDING_MISMATCH'
             }
         }
@@ -158,7 +159,10 @@ if ($metadataSummarySelfTest) {
         $v3json.Replace('"EndReason":"OperatorStop"','"EndReason":"Navigation"'),
         $v3json.Replace('"is_authoritative_for_consent":false','"is_authoritative_for_consent":true'),
         $v3json.Replace('"lifecycle_readback":','"unknown_property":true,"lifecycle_readback":'),
-        $v3json.Replace('"ElapsedMs":200','"ElapsedMs":-1')
+        $v3json.Replace('"ElapsedMs":200','"ElapsedMs":-1'),
+        $v3json.Replace('"CleanupComplete":true','"CleanupComplete":false'),
+        $v3json.Replace('"EnableCompleted":true','"EnableCompleted":false'),
+        $v3json.Replace('"DisableCompleted":true','"DisableCompleted":false')
     )
     foreach ($mutated in $badV3) {
         if ($mutated -ceq $v3json) { throw 'VERSIONED_NEGATIVE_MUTATION_NOOP' }
@@ -197,7 +201,7 @@ if ($metadataSummarySelfTest) {
         try { $null = Test-MetadataDocument $json $hash 'OperatorStop' } catch { $refused = $true }
         if (!$refused) { throw 'SYNTHETIC_VALIDATOR_NEGATIVE_CASE_FAILED' }
     }
-    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=27;live_capture=$false} | ConvertTo-Json
+    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=30;live_capture=$false} | ConvertTo-Json
     return
 }
 if (!$SummaryPath -or !$ReceiptPath -or !$ExpectedAssemblyHash) { throw 'SUMMARY_HASH_AND_FRESH_RECEIPT_PATH_REQUIRED' }
