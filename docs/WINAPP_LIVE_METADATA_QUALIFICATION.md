@@ -60,7 +60,7 @@ settings, widen custody or authorize merges/releases.
 The aggregate validator checks network/retained/evicted count consistency, including the exact
 network-event count without eviction and the distinction from local CaptureGap events. Its hash
 describes the same bounded byte buffer that was parsed, rather than reopening a potentially changed
-pathname. Synthetic CI covers18 aggregate cases and10 UI-status projection cases, plus refusal of
+pathname. Synthetic CI covers20 aggregate cases and10 UI-status projection cases, plus refusal of
 live execution without opt-in. It does not run the live harness or upload operator artifacts.
 
 References: [Microsoft WinApp UI automation](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md),

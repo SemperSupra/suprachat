@@ -70,7 +70,7 @@ function Test-MetadataDocument([string]$Json, [string]$Hash, [string]$Ending) {
         $gapEvents = 0L
         foreach ($field in $lifecycle.EnumerateObject()) { if ($field.Name -ceq 'CaptureGap') { $gapEvents = Read-MetadataCount $field.Value } }
         [decimal]$retainedNetwork = [decimal]$retained - $gapEvents
-        if ([decimal]$observed -lt $retainedNetwork -or [decimal]$observed -gt ([decimal]$retained + $evicted) -or
+        if ([decimal]$observed -lt $retainedNetwork -or [decimal]$observed -gt ($retainedNetwork + $evicted) -or
             ($evicted -eq 0 -and [decimal]$observed -ne $retainedNetwork)) { throw 'METADATA_NETWORK_COUNT_MISMATCH' }
         $diagnostics = $root.GetProperty('diagnostics')
         Assert-MetadataFields $diagnostics @('ObservationIncidents','LifecycleIncidents','Reasons','TotalIncidents')
@@ -130,6 +130,8 @@ if ($SelfTest) {
     $null = Test-MetadataDocument $localGap $hash 'OperatorStop'
     $evicted = $base.Replace('"observed_network_events":1','"observed_network_events":500').Replace('"retained_events":1','"retained_events":256').Replace('"Request":1','"Request":256').Replace('"total_evicted_events":0','"total_evicted_events":244')
     $null = Test-MetadataDocument $evicted $hash 'OperatorStop'
+    $evictedGap = $base.Replace('"Request":1','"CaptureGap":1').Replace('"total_evicted_events":0','"total_evicted_events":1')
+    $null = Test-MetadataDocument $evictedGap $hash 'OperatorStop'
     $negative = @(
         $base.Replace('"capture_active":false','"capture_active":true'),
         $base.Replace('"cleanup_complete":true','"cleanup_complete":false'),
@@ -140,13 +142,14 @@ if ($SelfTest) {
         $base.Replace('"retained_events":1','"retained_events":0').Replace('"Request":1','"Request":0'),
         $base.Replace('"observed_network_events":1','"observed_network_events":2'),
         $base.Replace('"observed_network_events":1','"observed_network_events":0').Replace('FIRST_PARTY_LIVE_REDACTED','NO_FIRST_PARTY_OBSERVATIONS'),
-        $base.Replace('"Request":1','"CaptureGap":1'))
+        $base.Replace('"Request":1','"CaptureGap":1'),
+        $evictedGap.Replace('"observed_network_events":1','"observed_network_events":2'))
     foreach ($json in $negative) {
         $refused = $false
         try { $null = Test-MetadataDocument $json $hash 'OperatorStop' } catch { $refused = $true }
         if (!$refused) { throw 'SYNTHETIC_VALIDATOR_NEGATIVE_CASE_FAILED' }
     }
-    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=18;live_capture=$false} | ConvertTo-Json
+    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=20;live_capture=$false} | ConvertTo-Json
     return
 }
 if (!$SummaryPath -or !$ReceiptPath -or !$ExpectedAssemblyHash) { throw 'SUMMARY_HASH_AND_FRESH_RECEIPT_PATH_REQUIRED' }
