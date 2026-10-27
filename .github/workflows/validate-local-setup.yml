@@ -17,6 +17,28 @@ permissions:
   contents: read
 
 jobs:
+  metadata-summary-contract:
+    name: Synthetic metadata summary contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate aggregate schema and fail-closed live-test guard without a desktop
+        shell: pwsh
+        run: |
+          ./tools/local/Test-NativeMetadataSummary.ps1 -SelfTest
+          $tokens = $null; $errors = $null
+          $null = [Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'tools/local/Test-SupraChatWinAppLifecycle.ps1'), [ref]$tokens, [ref]$errors)
+          if ($errors.Count) { throw 'LIVE_HARNESS_PARSE_FAILED' }
+          $refused = $false
+          try {
+            ./tools/local/Test-SupraChatWinAppLifecycle.ps1 -WinApp NOT_A_TOOL -SummaryDirectory $env:RUNNER_TEMP -Case Stop -TargetProcessId 1 -MainWindow 1 -AssemblyHash ('a' * 64)
+          } catch {
+            if ($_.Exception.Message -ne 'EXPLICIT_FIRST_PARTY_HIL_OPT_IN_REQUIRED') { throw }
+            $refused = $true
+          }
+          if (!$refused) { throw 'LIVE_HIL_OPT_IN_GUARD_FAILED' }
+
   compatibility:
     uses: SupraShellScripts/github-ops-lab/.github/workflows/powershell-compatibility.yml@main
     with:
