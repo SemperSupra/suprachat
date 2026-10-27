@@ -1148,6 +1148,23 @@ jobs:
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }
+                  if ($area.tab -eq 'Tab.AgentLab') {
+                    # A masked glyph is not a confidentiality guarantee. Inspect
+                    # the actual native Windows provider, not merely Avalonia's
+                    # source-level IValueProvider override. No credential or
+                    # passphrase is entered, read, logged, or exported here.
+                    $secret = Require-SemanticControl 'Auth.BundlePassphrase'
+                    $exposed = $null
+                    if ($secret.TryGetCurrentPattern(
+                        [System.Windows.Automation.ValuePattern]::Pattern, [ref]$exposed)) {
+                      throw 'SECRET_UIA_VALUE_PATTERN_EXPOSED'
+                    }
+                    $exposed = $null
+                    if ($secret.TryGetCurrentPattern(
+                        [System.Windows.Automation.TextPattern]::Pattern, [ref]$exposed)) {
+                      throw 'SECRET_UIA_TEXT_PATTERN_EXPOSED'
+                    }
+                  }
                 }
 
                 # Check actual provider action + independent UIA state readback,
