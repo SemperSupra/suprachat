@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 if (!$FirstPartyMetadataHil) { throw 'EXPLICIT_FIRST_PARTY_HIL_OPT_IN_REQUIRED' }
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'POWERSHELL_7_REQUIRED' }
 . (Join-Path $PSScriptRoot 'Read-NativeMetadataUiState.ps1')
+. (Join-Path $PSScriptRoot 'Read-NativeMetadataLifecycleReadback.ps1')
 if (![IO.Path]::IsPathFullyQualified($SummaryDirectory)) { throw 'ABSOLUTE_SUMMARY_DIRECTORY_REQUIRED' }
 if (!$ReceiptDirectory) { $ReceiptDirectory = $SummaryDirectory }
 if (![IO.Path]::IsPathFullyQualified($ReceiptDirectory)) { throw 'ABSOLUTE_RECEIPT_DIRECTORY_REQUIRED' }
@@ -39,6 +40,20 @@ function Read-State {
     $reply = Invoke-WinApp @('ui','get-value','Native.Metadata.Status','-w',"$ReviewWindow",'--json')
     if ($reply.text -isnot [string]) { throw 'UI_STATUS_CONTRACT_REFUSED' }
     return Convert-NativeMetadataUiState $reply.text
+}
+function Read-Lifecycle {
+    $reply = Invoke-WinApp @('ui','get-value','Native.Metadata.LifecycleReadback','-w',"$ReviewWindow",'--json')
+    if ($reply.text -isnot [string]) { throw 'LIFECYCLE_READBACK_REFUSED' }
+    return Convert-NativeLifecycleReadback $reply.text
+}
+function Assert-LifecycleState([bool]$Active, [string]$EndReason) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(6)
+    do {
+        $status = Read-Lifecycle
+        if ($status.latest.active -eq $Active -and $status.latest.end_reason -ceq $EndReason) { return }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'LIFECYCLE_READBACK_MISMATCH'
 }
 function Assert-ReviewBinding {
     $current = Get-Process -Id $TargetProcessId -ErrorAction Stop
@@ -100,6 +115,7 @@ try {
     while ((!$state.consent.capture_active -or $state.attaching) -and [DateTime]::UtcNow -lt $deadline)
     if (!$state.consent.capture_active -or !$state.observer_attached -or $state.attaching) { throw 'CAPTURE_DID_NOT_START' }
     Record-State 'ACTIVE_BEFORE_ACTION' $state
+    Assert-LifecycleState $true 'None'
     $expected = switch ($Case) { Expiry {'LeaseExpired'} Stop {'OperatorStop'} Navigation {'Navigation'} default {'ReviewClosed'} }
     if ($Case -eq 'Stop') { Action 'Native.Metadata.Stop' }
     elseif ($Case -eq 'Navigation') {
@@ -139,6 +155,7 @@ try {
         $expectedUiReason = switch ($Case) { Expiry {'LEASE_EXPIRED'} Stop {'OPERATOR_STOP'} Navigation {'NAVIGATION'} }
         if ($state.end_reason -ne $expectedUiReason) { throw 'FIRST_END_REASON_MISMATCH' }
         Record-State 'OFF_AFTER_ACTION' $state
+        Assert-LifecycleState $false $expected
         if ($Case -eq 'Expiry') { $stages.Add([ordered]@{stage='POST_DEADLINE_MONOTONIC_CHECK';elapsed_seconds=$elapsed.Elapsed.TotalSeconds}) }
         Action 'Native.Metadata.Save'
     }
@@ -173,7 +190,8 @@ catch {
         'MAIN_WINDOW_BINDING_REFUSED','REVIEW_WINDOW_BINDING_REFUSED','REVIEW_CONTROL_UNAVAILABLE','ONE_REVIEW_WINDOW_REQUIRED',
         'FRESH_REVIEW_NOT_READY','CAPTURE_DID_NOT_START','RELOAD_UNAVAILABLE','FIRST_END_REASON_MISMATCH',
         'OWNER_PROCESS_DID_NOT_EXIT','REVIEW_CLOSE_NOT_INDEPENDENTLY_OBSERVED','ONE_FRESH_AUTOMATIC_SUMMARY_REQUIRED','CLOSE_CONTROL_BINDING_REFUSED',
-        'PRE_DEADLINE_OBSERVATION_TOO_LATE','PRE_DEADLINE_CAPTURE_NOT_ACTIVE','UI_STATUS_CONTRACT_REFUSED')
+        'PRE_DEADLINE_OBSERVATION_TOO_LATE','PRE_DEADLINE_CAPTURE_NOT_ACTIVE','UI_STATUS_CONTRACT_REFUSED',
+        'LIFECYCLE_READBACK_REFUSED','LIFECYCLE_READBACK_MISMATCH')
     $failure = if ($_.Exception.Message -in $known) { $_.Exception.Message } else { 'VALIDATION_OR_AUTOMATION_INCOMPLETE' }
     throw "Native lifecycle qualification incomplete: $failure"
 }
@@ -187,7 +205,8 @@ finally {
         first_party_network_metadata_observed=($passed -and $validation.first_party_network_metadata_observed);
         observed_network_events=$(if($passed){$validation.observed_network_events}else{$null});completeness='UNKNOWN';
         signed_in_evidence='SEPARATE_UI_INDICATORS_ONLY';provider_operation_verified=$false;human_identity_verified=$false;
-        credentials_read=$false;raw_browser_content_exported=$false;automatic_upload=$false;failure_stop_requested=$failureStopRequested}
+        credentials_read=$false;raw_browser_content_exported=$false;automatic_upload=$false;failure_stop_requested=$failureStopRequested;
+        app_owned_lifecycle_readback_verified=$passed}
     $receiptPath = Join-Path $receipts "winapp-$Case-lifecycle-$run.json"
     Save-Receipt $receiptPath $receipt
     $receipt | ConvertTo-Json -Depth 8
