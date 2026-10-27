@@ -27,6 +27,7 @@ jobs:
         run: |
           ./tools/local/Test-NativeMetadataSummary.ps1 -SelfTest
           ./tools/local/Read-NativeMetadataUiState.ps1 -SelfTest
+          ./tools/local/Read-NativeMetadataLifecycleReadback.ps1 -SelfTest
           $tokens = $null; $errors = $null
           $null = [Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $PWD 'tools/local/Test-SupraChatWinAppLifecycle.ps1'), [ref]$tokens, [ref]$errors)
