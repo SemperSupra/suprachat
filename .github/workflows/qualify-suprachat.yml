@@ -62,6 +62,10 @@ jobs:
       - name: Build automation and agent shell
         run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
 
+      - name: Qualify metadata trace automation and agent controls
+        shell: pwsh
+        run: ./tools/local/Test-OwnedTraceMachineControls.ps1
+
       - name: Smoke automation JSON surface
         shell: pwsh
         run: |
@@ -1111,6 +1115,7 @@ jobs:
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
+                $script:uiaTransientRetries = 0
                 function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
@@ -1133,6 +1138,7 @@ jobs:
                     }
                   }
                   catch [System.Windows.Automation.ElementNotAvailableException] {
+                    $script:uiaTransientRetries++
                     $element = $null
                   }
                   catch [System.Runtime.InteropServices.COMException] {
@@ -1141,6 +1147,7 @@ jobs:
                     # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
                     # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
                     if ($_.Exception.HResult -notin @(-2147418111, -2147417846)) { throw }
+                    $script:uiaTransientRetries++
                     $element = $null
                   }
                   if (-not $element) { Start-Sleep -Milliseconds 100 }
@@ -1163,7 +1170,7 @@ jobs:
                 }
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
@@ -1192,6 +1199,32 @@ jobs:
                     if ($secret.TryGetCurrentPattern(
                         [System.Windows.Automation.TextPattern]::Pattern, [ref]$exposed)) {
                       throw 'SECRET_UIA_TEXT_PATTERN_EXPOSED'
+                    }
+                  }
+                  if ($area.tab -eq 'Tab.AutomationAgents') {
+                    $ownedRefresh = Require-SemanticControl 'Control.Refresh'
+                    $ownedRefresh.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $ownedPreview = Require-SemanticControl 'Control.Preview'
+                    $ownedPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $ownedConfirm = Require-SemanticControl 'Control.Confirm'
+                    if ($ownedConfirm.Current.IsEnabled) { throw 'Owned cancellation was enabled without a selected, reviewed target.' }
+                    foreach ($traceControl in @(
+                      @{ id = 'Trace.Start'; mode = 'METADATA' },
+                      @{ id = 'Trace.Stop'; mode = 'OFF' }
+                    )) {
+                      $traceButton = Require-SemanticControl $traceControl.id
+                      $traceInvoke = $traceButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                      $traceInvoke.Invoke()
+                      $traceModeObserved = $false
+                      $traceDeadline = (Get-Date).AddSeconds(5)
+                      while ((Get-Date) -lt $traceDeadline) {
+                        $traceOutput = Require-SemanticControl 'Trace.Output'
+                        $traceValue = $traceOutput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                        $traceDocument = $traceValue.Current.Value | ConvertFrom-Json
+                        if ($traceDocument.mode -eq $traceControl.mode) { $traceModeObserved = $true; break }
+                        Start-Sleep -Milliseconds 100
+                      }
+                      if (-not $traceModeObserved) { throw 'Accessible trace control did not change semantic capture state.' }
                     }
                   }
                 }
@@ -1226,6 +1259,7 @@ jobs:
                   root_class = $window.Current.ClassName
                   descendant_count = $allDescendants.Count
                   semantic_peer_count = $semanticPeers.Count
+                  transient_lookup_retries = $script:uiaTransientRetries
                   static_accessibility_contract = 'PASS'
                   gui_launch_smoke = 'PASS'
                 }

@@ -9,19 +9,49 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
 {
     public static readonly Uri Endpoint = new("wss://api.openai.com/v1/responses");
 
-    private readonly ClientWebSocket _socket = new();
+    private readonly WebSocket _socket;
+    private readonly OwnedTransportTrace? _trace;
+    private readonly string _traceId;
+    private readonly LocalOwnedStreamControls.OwnedStreamLease? _controlled;
     private readonly SemaphoreSlim _sendGate = new(1, 1);
 
     public bool IsConnected => _socket.State == WebSocketState.Open;
 
+    internal ResponsesWebSocketClient(WebSocket socket, OwnedTransportTrace? trace = null, LocalOwnedStreamControls? controls = null)
+    {
+        _socket = socket;
+        _trace = trace;
+        _controlled = controls?.Register(TraceSurface.ResponsesWebSocket);
+        _traceId = _controlled?.StreamId.ToString("N") ?? Guid.NewGuid().ToString("N");
+    }
+
     public static async Task<ResponsesWebSocketClient> ConnectAsync(
         string accessToken,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        OwnedTransportTrace? trace = null,
+        LocalOwnedStreamControls? controls = null)
     {
-        var client = new ResponsesWebSocketClient();
-        client._socket.Options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
-        await client._socket.ConnectAsync(Endpoint, cancellationToken).ConfigureAwait(false);
-        return client;
+        var socket = new ClientWebSocket();
+        var client = new ResponsesWebSocketClient(socket, trace, controls);
+        using var linked = client._controlled is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, client._controlled.Token);
+        cancellationToken = linked?.Token ?? cancellationToken;
+        try
+        {
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+            await socket.ConnectAsync(Endpoint, cancellationToken).ConfigureAwait(false);
+            trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                TraceEventKind.Response, client._traceId);
+            return client;
+        }
+        catch
+        {
+            socket.Dispose();
+            client._sendGate.Dispose();
+            if (client._controlled is not null) await client._controlled.DisposeAsync();
+            trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, client._traceId);
+            throw;
+        }
     }
 
     public async Task SendRawAsync(
@@ -29,6 +59,8 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
         string defaultModel,
         CancellationToken cancellationToken = default)
     {
+        using var linked = _controlled is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _controlled.Token);
+        cancellationToken = linked?.Token ?? cancellationToken;
         var json = NormalizeClientEvent(rawJson, defaultModel);
         var bytes = Encoding.UTF8.GetBytes(json);
 
@@ -43,6 +75,13 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
                 WebSocketMessageType.Text,
                 endOfMessage: true,
                 cancellationToken).ConfigureAwait(false);
+            _trace?.RecordJson(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Egress, _traceId, json);
+        }
+        catch
+        {
+            _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+            throw;
         }
         finally
         {
@@ -53,6 +92,8 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
     public async IAsyncEnumerable<string> ReadEventsAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        using var linked = _controlled is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _controlled.Token);
+        cancellationToken = linked?.Token ?? cancellationToken;
         var buffer = new byte[64 * 1024];
 
         while (_socket.State is WebSocketState.Open or WebSocketState.CloseSent)
@@ -62,29 +103,52 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
 
             do
             {
-                result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+                try { result = await _socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false); }
+                catch
+                {
+                    _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                        cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+                    throw;
+                }
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
                     if (_socket.State == WebSocketState.CloseReceived)
                     {
-                        await _socket.CloseOutputAsync(
-                            WebSocketCloseStatus.NormalClosure,
-                            "SupraChat acknowledged server close.",
-                            CancellationToken.None).ConfigureAwait(false);
+                        try
+                        {
+                            await _socket.CloseOutputAsync(
+                                WebSocketCloseStatus.NormalClosure,
+                                "SupraChat acknowledged server close.",
+                                cancellationToken).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                                cancellationToken.IsCancellationRequested ? TraceEventKind.Cancelled : TraceEventKind.Error, _traceId);
+                            throw;
+                        }
                     }
+                    _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                        TraceEventKind.Completed, _traceId);
                     yield break;
                 }
 
                 if (result.MessageType != WebSocketMessageType.Text)
+                {
+                    _trace?.Record(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Local,
+                        TraceEventKind.Error, _traceId);
                     throw new InvalidOperationException(
                         $"Unexpected Responses WebSocket message type: {result.MessageType}.");
+                }
 
                 message.Write(buffer, 0, result.Count);
             }
             while (!result.EndOfMessage);
 
-            yield return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+            var json = Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+            _trace?.RecordJson(TraceSurface.ResponsesWebSocket, TraceAdapter.WebSocket, TraceDirection.Ingress, _traceId, json);
+            yield return json;
         }
     }
 
@@ -136,6 +200,7 @@ public sealed class ResponsesWebSocketClient : IAsyncDisposable
         {
             _socket.Dispose();
             _sendGate.Dispose();
+            if (_controlled is not null) await _controlled.DisposeAsync();
         }
     }
 }

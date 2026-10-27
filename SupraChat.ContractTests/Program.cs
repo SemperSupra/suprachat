@@ -5,6 +5,23 @@ using Avalonia.Automation.Provider;
 using SupraChat;
 using SupraChat.Core;
 
+if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-control-fixture")
+{
+    await GovernedControlChecks.RunRpcFixtureAsync();
+    return;
+}
+if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-control-exit-fixture")
+{
+    await GovernedControlChecks.RunRpcFixtureAsync(abrupt: true);
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--synthetic-jsonrpc-fixture")
+{
+    await OwnedTransportTraceChecks.RunRpcFixtureAsync();
+    return;
+}
+
 static void Require(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException(message);
@@ -625,4 +642,7 @@ var appXamlPath = Path.Combine("SupraChat", "App.axaml");
 Require(File.ReadAllText(appXamlPath).Contains("RequestedThemeVariant=\"Default\"", StringComparison.Ordinal),
     "application must follow the platform theme/high-contrast preference");
 
+await TrafficTraceChecks.RunAsync();
+await OwnedTransportTraceChecks.RunAsync();
+await GovernedControlChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");
