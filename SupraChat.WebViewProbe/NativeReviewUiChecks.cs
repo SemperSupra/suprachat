@@ -32,6 +32,40 @@ internal static class NativeReviewUiChecks
         for (var i = 0; i < 40; i++) historyContract.Record(NativeMetadataLifecycleReadback.Action.Opened, null);
         Require(historyContract.Entries.Count == 24);
         Require(!historyContract.ToUiValue().Contains("session_id", StringComparison.OrdinalIgnoreCase));
+
+        // App-side admission must refuse an internally produced history that
+        // disagrees with the durable aggregate, not rely solely on a later
+        // independent PowerShell validator finding the contradiction.
+        var settled = new NativeMetadataStatus(
+            new MetadataConsentStatus(Guid.Empty, 0, "STOPPED", false, 0, 0),
+            ObserverAttached: false, Attaching: false, NativeEvents: 0, NativeLoss: 0,
+            Scope: "SYNTHETIC_LOOPBACK_NATIVE", EndReason: NativeCaptureEndReason.OperatorStop,
+            CleanupComplete: true);
+        var historyForSave = new NativeMetadataLifecycleReadback();
+        historyForSave.Record(NativeMetadataLifecycleReadback.Action.Observed, settled);
+        var agreement = new Dictionary<string, object>
+        {
+            ["schema"] = "suprachat-synthetic-native-metadata-summary/v1",
+            ["first_lease_end_reason"] = "OperatorStop",
+            ["capture_active"] = false, ["observer_attached"] = false, ["attaching"] = false,
+            ["cleanup_complete"] = true, ["enable_completed"] = false, ["disable_completed"] = false
+        };
+        var upgraded = NativeMetadataSummary.AttachLifecycle(JsonSerializer.SerializeToElement(agreement), historyForSave);
+        Require(upgraded.GetProperty("schema").GetString() == "suprachat-synthetic-native-metadata-summary/v2");
+        foreach (var (field, contradiction) in new (string Field, object Contradiction)[]
+        {
+            ("first_lease_end_reason", "Navigation"), ("capture_active", true),
+            ("observer_attached", true), ("attaching", true),
+            ("cleanup_complete", false), ("enable_completed", true),
+            ("disable_completed", true), ("schema", "unsupported/v99")
+        })
+        {
+            var invalid = new Dictionary<string, object>(agreement) { [field] = contradiction };
+            var rejected = false;
+            try { _ = NativeMetadataSummary.AttachLifecycle(JsonSerializer.SerializeToElement(invalid), historyForSave); }
+            catch (InvalidDataException) { rejected = true; }
+            Require(rejected);
+        }
         await using var fixture = new FixtureServer();
         view.Source = fixture.ManualPage("a");
         IntPtr CurrentHandle() => view.TryGetPlatformHandle() is IWindowsWebView2PlatformHandle handle ? handle.CoreWebView2 : IntPtr.Zero;
