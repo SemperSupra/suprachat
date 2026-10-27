@@ -41,7 +41,7 @@ function Convert-NativeLifecycleReadback([string]$Json) {
             Require-Fields $entry @('ElapsedMs','Action','State','EndReason','Active','ObserverAttached','CleanupComplete','EnableCompleted','DisableCompleted')
             $offset = 0L
             if ($entry.GetProperty('ElapsedMs').ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
-                !$entry.GetProperty('ElapsedMs').TryGetInt64([ref]$offset) -or $offset -lt $prior) {
+                !$entry.GetProperty('ElapsedMs').TryGetInt64([ref]$offset) -or $offset -lt 0 -or $offset -lt $prior) {
                 throw 'LIFECYCLE_OFFSET_REFUSED'
             }
             $prior = $offset
@@ -79,6 +79,7 @@ if ($SelfTest) {
         $good.Replace('"events":','"unexpected_private_session":"synthetic-secret","events":'),
         $good.Replace('"Active":false','"Active":true'),
         $good.Replace('"ElapsedMs":200','"ElapsedMs":-1'),
+        $good.Replace('"ElapsedMs":0','"ElapsedMs":-1'),
         $good.Replace('"OperatorStop"','"synthetic-secret"'),
         $good.Replace('"Action":"Observed"','"Action":"Invalid"'),
         $good.Replace('"is_authoritative_for_consent":false','"is_authoritative_for_consent":true'),
@@ -90,5 +91,5 @@ if ($SelfTest) {
         try { $null = Convert-NativeLifecycleReadback $case } catch { $refused = $true }
         if (!$refused) { throw 'LIFECYCLE_NEGATIVE_TEST_FAILED' }
     }
-    @{schema='suprachat-lifecycle-readback-selftest/v1';passed=$true;cases=8;live_capture=$false} | ConvertTo-Json
+    @{schema='suprachat-lifecycle-readback-selftest/v1';passed=$true;cases=9;live_capture=$false} | ConvertTo-Json
 }
