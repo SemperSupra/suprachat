@@ -18,7 +18,19 @@ public sealed record ModelChoice(string Slug, string DisplayName)
 
 public sealed class ResponsesClient
 {
-    private readonly HttpClient _http = new() { BaseAddress = new Uri("https://api.openai.com/v1/") };
+    private readonly HttpClient _http;
+    private readonly OwnedTransportTrace? _trace;
+    private readonly LocalOwnedStreamControls? _controls;
+
+    public ResponsesClient(OwnedTransportTrace? trace = null, LocalOwnedStreamControls? controls = null) : this(new HttpClient(), trace, controls) { }
+
+    internal ResponsesClient(HttpClient http, OwnedTransportTrace? trace, LocalOwnedStreamControls? controls = null)
+    {
+        _http = http;
+        _http.BaseAddress = new Uri("https://api.openai.com/v1/");
+        _trace = trace;
+        _controls = controls;
+    }
 
     public async Task<IReadOnlyList<ModelChoice>> ListModelsAsync(string accessToken)
     {
@@ -73,31 +85,34 @@ public sealed class ResponsesClient
         string input,
         IEnumerable<ResponseAttachment>? attachments = null,
         bool enableWebSearch = false,
-        Action<string>? onDelta = null) =>
+        Action<string>? onDelta = null,
+        CancellationToken cancellationToken = default) =>
         await SendStreamAsync(
             accessToken,
             SiwcProtocol.BuildResponsesBody(model, input, attachments, enableWebSearch),
             onDelta,
-            onEvent: null).ConfigureAwait(false);
+            onEvent: null, cancellationToken).ConfigureAwait(false);
 
     public Task<StreamedResponse> StreamTextAsync(
         string accessToken,
         string model,
         string input,
-        Action<string>? onDelta = null) =>
-        StreamAsync(accessToken, model, input, null, false, onDelta);
+        Action<string>? onDelta = null,
+        CancellationToken cancellationToken = default) =>
+        StreamAsync(accessToken, model, input, null, false, onDelta, cancellationToken);
 
     public Task<StreamedResponse> StreamRawAsync(
         string accessToken,
         string defaultModel,
         string rawJson,
         Action<string>? onDelta = null,
-        Action<string, string>? onEvent = null) =>
+        Action<string, string>? onEvent = null,
+        CancellationToken cancellationToken = default) =>
         SendStreamAsync(
             accessToken,
             NormalizeRawResponsesBody(rawJson, defaultModel),
             onDelta,
-            onEvent);
+            onEvent, cancellationToken);
 
     public static string NormalizeRawResponsesBody(string rawJson, string defaultModel)
     {
@@ -118,77 +133,102 @@ public sealed class ResponsesClient
         string accessToken,
         string body,
         Action<string>? onDelta,
-        Action<string, string>? onEvent)
+        Action<string, string>? onEvent,
+        CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "responses");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-        var requestId = response.Headers.TryGetValues("x-request-id", out var ids)
-            ? ids.FirstOrDefault()
-            : null;
-
-        if (!response.IsSuccessStatusCode)
+        await using var controlled = _controls?.Register(TraceSurface.ResponsesSse);
+        using var linked = controlled is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, controlled.Token);
+        cancellationToken = linked?.Token ?? cancellationToken;
+        var traceId = controlled?.StreamId.ToString("N") ?? Guid.NewGuid().ToString("N");
+        _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Egress, TraceEventKind.Request,
+            traceId, Encoding.UTF8.GetByteCount(body), outcome: TraceOutcome.Requested);
+        try
         {
-            var responseBody = await response.Content.ReadAsStringAsync();
-            throw BuildHttpFailure("Responses request", response, responseBody);
+            using var request = new HttpRequestMessage(HttpMethod.Post, "responses");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Ingress,
+                TraceEventKind.Response, traceId, status: (int)response.StatusCode);
+            var requestId = response.Headers.TryGetValues("x-request-id", out var ids)
+                ? ids.FirstOrDefault()
+                : null;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw BuildHttpFailure("Responses request", response, responseBody);
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream);
+            var text = new StringBuilder();
+            var completed = false;
+            var eventTypes = new HashSet<string>(StringComparer.Ordinal);
+
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
+            {
+                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                    continue;
+
+                var payload = line[5..].Trim();
+                if (payload.Length == 0 || payload == "[DONE]")
+                    continue;
+
+                using var doc = JsonDocument.Parse(payload);
+                _trace?.RecordJson(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Ingress, traceId, payload);
+                var root = doc.RootElement;
+                var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(type))
+                {
+                    eventTypes.Add(type);
+                    onEvent?.Invoke(type, payload);
+                }
+
+                if (type == "response.output_text.delta" && root.TryGetProperty("delta", out var d))
+                {
+                    var delta = d.GetString() ?? "";
+                    text.Append(delta);
+                    onDelta?.Invoke(delta);
+                }
+                else if (type == "response.completed")
+                {
+                    completed = true;
+                }
+                else if (type == "response.failed")
+                {
+                    throw new InvalidOperationException(
+                        "Responses stream reported response.failed." +
+                        ExtractResponseError(root) +
+                        $" request_id={requestId ?? "unknown"}");
+                }
+                else if (type == "response.incomplete")
+                {
+                    throw new InvalidOperationException(
+                        "Responses stream reported response.incomplete." +
+                        $" request_id={requestId ?? "unknown"}");
+                }
+            }
+
+            if (!completed)
+                _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Local, TraceEventKind.CaptureGap, traceId);
+            return new(
+                completed,
+                text.ToString(),
+                eventTypes.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                requestId);
         }
-
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        using var reader = new StreamReader(stream);
-        var text = new StringBuilder();
-        var completed = false;
-        var eventTypes = new HashSet<string>(StringComparer.Ordinal);
-
-        while (await reader.ReadLineAsync() is { } line)
+        catch (OperationCanceledException)
         {
-            if (!line.StartsWith("data:", StringComparison.Ordinal))
-                continue;
-
-            var payload = line[5..].Trim();
-            if (payload.Length == 0 || payload == "[DONE]")
-                continue;
-
-            using var doc = JsonDocument.Parse(payload);
-            var root = doc.RootElement;
-            var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
-            if (!string.IsNullOrWhiteSpace(type))
-            {
-                eventTypes.Add(type);
-                onEvent?.Invoke(type, payload);
-            }
-
-            if (type == "response.output_text.delta" && root.TryGetProperty("delta", out var d))
-            {
-                var delta = d.GetString() ?? "";
-                text.Append(delta);
-                onDelta?.Invoke(delta);
-            }
-            else if (type == "response.completed")
-            {
-                completed = true;
-            }
-            else if (type == "response.failed")
-            {
-                throw new InvalidOperationException(
-                    "Responses stream reported response.failed." +
-                    ExtractResponseError(root) +
-                    $" request_id={requestId ?? "unknown"}");
-            }
-            else if (type == "response.incomplete")
-            {
-                throw new InvalidOperationException(
-                    "Responses stream reported response.incomplete." +
-                    $" request_id={requestId ?? "unknown"}");
-            }
+            _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Local, TraceEventKind.Cancelled, traceId);
+            throw;
         }
-
-        return new(
-            completed,
-            text.ToString(),
-            eventTypes.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
-            requestId);
+        catch
+        {
+            _trace?.Record(TraceSurface.ResponsesSse, TraceAdapter.Http, TraceDirection.Local, TraceEventKind.Error, traceId);
+            throw;
+        }
     }
 
     private static Exception BuildHttpFailure(
