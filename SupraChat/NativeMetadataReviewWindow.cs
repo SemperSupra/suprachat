@@ -121,6 +121,7 @@ internal sealed class NativeMetadataReviewWindow : Window
                 _lifecycle.Record(NativeMetadataLifecycleReadback.Action.SaveRequested, capture.Status());
                 _plan = null; await capture.StopForSummaryAsync();
                 if (!_operations.Current(generation)) return;
+                _lifecycle.Record(NativeMetadataLifecycleReadback.Action.Observed, capture.Status());
                 var summary = BuildSummary(capture, synthetic);
                 summaryStore.Save(NativeMetadataSummary.AttachLifecycle((JsonElement)summary, _lifecycle));
                 _savedCapture = capture;
