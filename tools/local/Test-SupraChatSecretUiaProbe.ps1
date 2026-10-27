@@ -7,6 +7,11 @@ $exe = [IO.Path]::GetFullPath($Executable)
 if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'QUALIFIED_EXECUTABLE_REQUIRED' }
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+# Strictly test-only assembly, never added to the real application package.
+$interop = Join-Path ([IO.Path]::GetDirectoryName($exe)) 'Interop.UIAutomationClient.dll'
+if (!(Test-Path -LiteralPath $interop -PathType Leaf)) { throw 'UIA3_COM_INTEROP_REQUIRED' }
+Add-Type -Path $interop
+$script:nativeUia = [UIAutomationClient.CUIAutomation]::new()
 
 # A fresh value exists only in this disposable test process and this script's
 # memory. Never print it, capture desktop screenshots or upload a UIA tree.
@@ -63,26 +68,32 @@ try {
             throw 'SYNTHETIC_UIA_TEXT_PATTERN_EXPOSED'
         }
 
-        # The .NET 10 managed UIA client does not expose a
-        # LegacyIAccessiblePattern type. Independently query the Windows UIA
-        # legacy-pattern availability/property IDs via the native property
-        # registry instead: 30090 availability, 30092/30093/30094 scalars.
-        # A registered and readable legacy property must never be omitted just
-        # because the legacy managed pattern class is missing.
-        $legacyAvailability = [System.Windows.Automation.AutomationProperty]::LookupById(30090)
-        if ($null -eq $legacyAvailability) { throw 'SYNTHETIC_LEGACY_METADATA_UNAVAILABLE' }
-        $legacyPresent = $secretControl.GetCurrentPropertyValue($legacyAvailability)
+        # The stock .NET 10 managed client does not expose the Legacy pattern
+        # or register property 30090. Use the independent Windows UIA3 COM
+        # interface from pinned test-only Interop.UIAutomationClient instead.
+        # The native request asks the actual provider for its legacy fallback
+        # availability (30090) and scalars (30092/30093/30094).
+        $root = Get-Window
+        $nativeRoot = $script:nativeUia.ElementFromHandle($process.MainWindowHandle)
+        if ($nativeRoot.CurrentProcessId -ne $process.Id -or
+            $nativeRoot.CurrentAutomationId -cne 'SupraChat.SyntheticSecurityProbe') {
+            throw 'SYNTHETIC_COM_WINDOW_BINDING_REFUSED'
+        }
+        $nativeCondition = $script:nativeUia.CreatePropertyCondition(30011, 'Synthetic.Probe.Passphrase')
+        $nativeSecret = $nativeRoot.FindFirst(
+            [UIAutomationClient.TreeScope]::TreeScope_Descendants, $nativeCondition)
+        if ($null -eq $nativeSecret -or $nativeSecret.CurrentProcessId -ne $process.Id) {
+            throw 'SYNTHETIC_COM_CONTROL_BINDING_REFUSED'
+        }
+        $legacyPresent = $nativeSecret.GetCurrentPropertyValue(30090)
         if ($legacyPresent -isnot [bool]) { throw 'SYNTHETIC_LEGACY_AVAILABILITY_UNQUALIFIED' }
         foreach ($entry in @(
             @{ id=30092; failure='SYNTHETIC_UIA_LEGACY_NAME_EXPOSED' },
             @{ id=30093; failure='SYNTHETIC_UIA_LEGACY_VALUE_EXPOSED' },
             @{ id=30094; failure='SYNTHETIC_UIA_LEGACY_DESCRIPTION_EXPOSED' }
         )) {
-            $property = [System.Windows.Automation.AutomationProperty]::LookupById($entry.id)
-            if ($null -eq $property) { throw 'SYNTHETIC_LEGACY_METADATA_UNAVAILABLE' }
-            $readback = $secretControl.GetCurrentPropertyValue($property)
-            if ($legacyPresent -and [object]::ReferenceEquals(
-                $readback, [System.Windows.Automation.AutomationElement]::NotSupported)) {
+            $readback = $nativeSecret.GetCurrentPropertyValue($entry.id)
+            if ($legacyPresent -and $null -eq $readback) {
                 throw 'SYNTHETIC_LEGACY_READBACK_UNQUALIFIED'
             }
             if ($readback -is [string]) { Check-Not-Synthetic $readback $entry.failure }
