@@ -1111,17 +1111,43 @@ jobs:
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
-                function Require-SemanticControl([string]$automationId) {
+                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
-                $element = $window.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $idCondition)
+                $element = $null
+                $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+                do {
+                  try {
+                    # Native WebView remounts can recreate the provider tree on
+                    # tab selection. Reacquire the current, declared main HWND
+                    # on every attempt; never reuse a stale identity as fallback.
+                    $p.Refresh()
+                    if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+                      $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                      if ($candidate.Current.ProcessId -eq $p.Id -and
+                          $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                        $element = $candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                          $idCondition)
+                      }
+                    }
+                  }
+                  catch [System.Windows.Automation.ElementNotAvailableException] {
+                    $element = $null
+                  }
+                  catch [System.Runtime.InteropServices.COMException] {
+                    # Retry only documented transient COM call-rejection codes:
+                    # RPC_E_CALL_REJECTED (0x80010001) and
+                    # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
+                    # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
+                    if ($_.Exception.HResult -notin @(-2147418111, -2147417846)) { throw }
+                    $element = $null
+                  }
+                  if (-not $element) { Start-Sleep -Milliseconds 100 }
+                } while (-not $element -and (Get-Date) -lt $deadline)
                 if (-not $element) {
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
-
                 $name = $element.Current.Name
                 if ([string]::IsNullOrWhiteSpace($name)) {
                   throw "UI Automation accessible name missing: $automationId"
@@ -1142,10 +1168,55 @@ jobs:
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
+                  if (-not $selection.Current.IsSelected) {
+                    throw "UI Automation tab SelectionItem did not select: $($area.tab)"
+                  }
+                  # A successful SelectionItem.Select is not proof that the
+                  # newly selected tab's child provider has finished attaching.
+                  $null = Require-SemanticControl $area.controls[0] -timeoutSeconds 15
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }
+                  if ($area.tab -eq 'Tab.AgentLab') {
+                    # A masked glyph is not a confidentiality guarantee. Inspect
+                    # the actual native Windows provider, not merely Avalonia's
+                    # source-level IValueProvider override. No credential or
+                    # passphrase is entered, read, logged, or exported here.
+                    $secret = Require-SemanticControl 'Auth.BundlePassphrase'
+                    $exposed = $null
+                    if ($secret.TryGetCurrentPattern(
+                        [System.Windows.Automation.ValuePattern]::Pattern, [ref]$exposed)) {
+                      throw 'SECRET_UIA_VALUE_PATTERN_EXPOSED'
+                    }
+                    $exposed = $null
+                    if ($secret.TryGetCurrentPattern(
+                        [System.Windows.Automation.TextPattern]::Pattern, [ref]$exposed)) {
+                      throw 'SECRET_UIA_TEXT_PATTERN_EXPOSED'
+                    }
+                  }
                 }
+
+                # Check actual provider action + independent UIA state readback,
+                # not merely presence of AutomationId in source/XAML.
+                # The runner uses a disposable application profile; restore state.
+                $check = Require-SemanticControl 'Accessibility.ReducedMotion'
+                $pattern = $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+                $before = $pattern.Current.ToggleState
+                if ($before -eq [System.Windows.Automation.ToggleState]::Indeterminate) {
+                  throw 'UI Automation reduced-motion toggle returned indeterminate state'
+                }
+                $pattern.Toggle()
+                $after = $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState
+                if ($after -eq $before) {
+                  throw 'UI Automation TogglePattern did not change the checkbox state'
+                }
+                $pattern.Toggle()
+                $restored = $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState
+                if ($restored -ne $before) {
+                  throw 'UI Automation TogglePattern did not restore original checkbox state'
+                }
+                $reset = Require-SemanticControl 'Accessibility.ScaleReset'
+                $reset.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
                 $receipt = @{
                   schema = 'suprachat-windows-uia-qualification/v1'

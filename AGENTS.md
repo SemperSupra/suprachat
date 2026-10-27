@@ -15,6 +15,7 @@ Working rules:
 - keep qualification on public/free GitHub Actions;
 - never place credentials, cookies, authorization codes, or token material in repository state or CI artifacts;
 - current bounded architecture/credential-portability mission: public issue #7;
+- current bounded workstreams: #19 (UIA qualification), #38/#39 (control research), and #51 (native metadata lifecycle); consult each issue's current acceptance gates before extending scope;
 - current private DLE/oracle/evidence continuation: SemperSupra/suprachat-private#2;
 - closed public dogfood issue #4 and closed private issue #1 are provenance, not active authority;
 - start further product work as a new bounded mission rather than silently extending a closed one;

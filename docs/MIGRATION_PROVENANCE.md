@@ -26,5 +26,5 @@ Dedicated-repository qualification:
 Canonical authority:
 - main was moved directly from the seed history to the independently green extracted history after run 37023386130 passed.
 - SemperSupra/suprachat is now the public product/source/CI authority.
-- SemperSupra/suprachat-private#1 remains the private DLE/oracle/evidence continuation authority.
+- SemperSupra/suprachat-private#2 is the current private DLE/oracle/evidence continuation authority; closed #1 is migration provenance.
 - Agent Dispatch remains an execution/orchestration substrate rather than product authority.

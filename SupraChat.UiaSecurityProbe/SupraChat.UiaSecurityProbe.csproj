@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Use the exact production SecurePassphraseTextBox peer, not a substitute. -->
+    <ProjectReference Include="../SupraChat/SupraChat.csproj" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
+  </ItemGroup>
+</Project>
