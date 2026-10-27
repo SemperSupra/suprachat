@@ -22,14 +22,16 @@ if ($uiaInterface.Count -ne 1 -or $scopeTypes.Count -ne 1) {
     throw 'UIA3_REQUIRED_INTERFACE_NOT_FOUND'
 }
 $script:nativeTreeScope = [Enum]::Parse($scopeTypes[0], 'TreeScope_Descendants')
-$factory = @($types | Where-Object { $_.Name -eq 'CUIAutomationClass' -and $_.IsClass })
+# UIA3 COM interop documents CUIAutomation8Class as its recommended
+# modern typed entrypoint; qualify that coclass before the old base factory.
+$factory = @($types | Where-Object { $_.Name -eq 'CUIAutomation8Class' -and $_.IsClass })
+if ($factory.Count -eq 0) {
+    $factory = @($types | Where-Object { $_.Name -eq 'CUIAutomationClass' -and $_.IsClass })
+}
 if ($factory.Count -eq 1) {
-    # TlbImp exposes COM coclasses as *Class, not their matching interface.
     $script:nativeUia = [Activator]::CreateInstance($factory[0])
 } else {
-    $comType = [Type]::GetTypeFromCLSID([Guid]'ff48dba4-60ef-4201-aa87-54103eef594e')
-    $comObject = [Activator]::CreateInstance($comType)
-    $script:nativeUia = $comObject -as $uiaInterface[0]
+    throw 'UIA3_COM_COCLASS_UNAVAILABLE'
 }
 if ($null -eq $script:nativeUia) { throw 'UIA3_COM_ACTIVATION_REFUSED' }
 
