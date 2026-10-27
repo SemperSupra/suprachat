@@ -405,6 +405,29 @@ Require(accessibilityDoc.Contains("Accessibility regressions are qualification f
 var mainWindowXamlPath = Path.Combine("SupraChat", "MainWindow.axaml");
 Require(File.Exists(mainWindowXamlPath), "MainWindow accessibility surface missing");
 var mainWindowXaml = File.ReadAllText(mainWindowXamlPath);
+
+// Static XAML guard: stable application-authored AutomationIds must be nonblank
+// and unique within this declared window. Dynamic/runtime provider identity and
+// interactive UIA patterns require separate live Windows qualification.
+static bool HasUniqueDeclaredAutomationIds(string xaml)
+{
+    var ids = XDocument.Parse(xaml).Root!.DescendantsAndSelf()
+        .Attributes()
+        .Where(attribute => attribute.Name.LocalName == "AutomationProperties.AutomationId")
+        .Select(attribute => attribute.Value)
+        .ToArray();
+    return ids.Length > 0 &&
+        ids.All(id => !string.IsNullOrWhiteSpace(id)) &&
+        ids.Distinct(StringComparer.Ordinal).Count() == ids.Length;
+}
+Require(HasUniqueDeclaredAutomationIds(mainWindowXaml),
+    "main window declares duplicate or blank AutomationIds");
+Require(!HasUniqueDeclaredAutomationIds(
+    "<Window><Button AutomationProperties.AutomationId=\"duplicate\"/><Button AutomationProperties.AutomationId=\"duplicate\"/></Window>"),
+    "AutomationId duplicate regression fixture must be refused");
+Require(!HasUniqueDeclaredAutomationIds(
+    "<Window><Button AutomationProperties.AutomationId=\" \"/></Window>"),
+    "blank AutomationId regression fixture must be refused");
 Require(mainWindowXaml.Contains("<local:SecurePassphraseTextBox x:Name=\"CredentialPassphraseBox\"", StringComparison.Ordinal),
     "portable credential passphrase must use the hardened secure textbox");
 Require(!mainWindowXaml.Contains("<TextBox x:Name=\"CredentialPassphraseBox\"", StringComparison.Ordinal),
