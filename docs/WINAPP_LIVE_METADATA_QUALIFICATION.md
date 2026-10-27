@@ -28,6 +28,10 @@ while its owner remains. Owner close requires the original process to exit. Each
 fresh aggregate against the reviewed assembly hash, expected first reason and OFF/cleanup flags.
 On an incomplete test the harness attempts Stop only after admitting the exact review process/window;
 it retains a failure receipt and never blindly retries an uncertain action.
+Supplied and discovered reviews both require the current process instance, exact HWND/title and
+owner HWND. Failure-path Stop rechecks that binding before acting. UI state is parsed through a
+closed scalar projection: exact booleans, nonnegative Int64 counts and allowlisted ending reasons;
+missing or malformed fields cannot be coerced into an OFF state or copied into receipts.
 
 ## Version and targeting lessons
 
@@ -52,6 +56,12 @@ Keep real aggregate files, UI observations and validation receipts local. Public
 profiles, event arrays, account identifiers, private paths, cookies, headers, prompts or responses.
 CLI telemetry is opted out for test commands. The tool does not install WinApp, change Windows
 settings, widen custody or authorize merges/releases.
+
+The aggregate validator checks network/retained/evicted count consistency, including the exact
+network-event count without eviction and the distinction from local CaptureGap events. Its hash
+describes the same bounded byte buffer that was parsed, rather than reopening a potentially changed
+pathname. Synthetic CI covers18 aggregate cases and10 UI-status projection cases, plus refusal of
+live execution without opt-in. It does not run the live harness or upload operator artifacts.
 
 References: [Microsoft WinApp UI automation](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md),
 [v0.7.1 release](https://github.com/microsoft/winappCli/releases/tag/v0.7.1).

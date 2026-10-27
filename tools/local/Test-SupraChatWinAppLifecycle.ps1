@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if (!$FirstPartyMetadataHil) { throw 'EXPLICIT_FIRST_PARTY_HIL_OPT_IN_REQUIRED' }
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'POWERSHELL_7_REQUIRED' }
+. (Join-Path $PSScriptRoot 'Read-NativeMetadataUiState.ps1')
 if (![IO.Path]::IsPathFullyQualified($SummaryDirectory)) { throw 'ABSOLUTE_SUMMARY_DIRECTORY_REQUIRED' }
 if (!$ReceiptDirectory) { $ReceiptDirectory = $SummaryDirectory }
 if (![IO.Path]::IsPathFullyQualified($ReceiptDirectory)) { throw 'ABSOLUTE_RECEIPT_DIRECTORY_REQUIRED' }
@@ -36,9 +37,16 @@ function Invoke-WinApp([string[]]$Arguments) {
 }
 function Read-State {
     $reply = Invoke-WinApp @('ui','get-value','Native.Metadata.Status','-w',"$ReviewWindow",'--json')
-    $state = $reply.text | ConvertFrom-Json
-    if ($state.scope -ne 'SINGLE_OPERATOR_CHATGPT_EXACT_ORIGIN') { throw 'EXACT_ORIGIN_SCOPE_REQUIRED' }
-    return $state
+    if ($reply.text -isnot [string]) { throw 'UI_STATUS_CONTRACT_REFUSED' }
+    return Convert-NativeMetadataUiState $reply.text
+}
+function Assert-ReviewBinding {
+    $current = Get-Process -Id $TargetProcessId -ErrorAction Stop
+    if ($current.StartTime.ToUniversalTime().Ticks -ne $targetStartTicks) { throw 'REVIEW_WINDOW_BINDING_REFUSED' }
+    $windows = @(Invoke-WinApp @('ui','list-windows','-a',"$TargetProcessId",'--json'))
+    $matching = @($windows | Where-Object {$_.hwnd -eq $ReviewWindow -and $_.processId -eq $TargetProcessId -and
+        $_.title -eq 'Review ChatGPT metadata experiment' -and $_.ownerHwnd -eq $MainWindow})
+    if ($matching.Count -ne 1) { throw 'REVIEW_WINDOW_BINDING_REFUSED' }
 }
 function Record-State([string]$Label, $State) {
     $stages.Add([ordered]@{stage=$Label;observed_at_utc=[DateTime]::UtcNow.ToString('o');
@@ -60,6 +68,7 @@ function Save-Receipt([string]$Path, $Value) {
 }
 try {
     $process = Get-Process -Id $TargetProcessId
+    $targetStartTicks = $process.StartTime.ToUniversalTime().Ticks
     $main = Invoke-WinApp @('ui','status','-w',"$MainWindow",'--json')
     if ($main.processId -ne $process.Id -or $main.windowTitle -ne 'SupraChat') { throw 'MAIN_WINDOW_BINDING_REFUSED' }
     if (!$ReviewWindow) {
@@ -77,6 +86,7 @@ try {
     }
     $review = Invoke-WinApp @('ui','status','-w',"$ReviewWindow",'--json')
     if ($review.processId -ne $process.Id -or $review.windowTitle -ne 'Review ChatGPT metadata experiment') { throw 'REVIEW_WINDOW_BINDING_REFUSED' }
+    Assert-ReviewBinding
     $reviewAdmitted = $true;
     $before = @(Get-ChildItem $evidence -Filter 'suprachat-metadata-summary-*.json' | ForEach-Object FullName)
     Action 'Native.Metadata.Acknowledge' 'toggle-on'
@@ -163,13 +173,13 @@ catch {
         'MAIN_WINDOW_BINDING_REFUSED','REVIEW_WINDOW_BINDING_REFUSED','REVIEW_CONTROL_UNAVAILABLE','ONE_REVIEW_WINDOW_REQUIRED',
         'FRESH_REVIEW_NOT_READY','CAPTURE_DID_NOT_START','RELOAD_UNAVAILABLE','FIRST_END_REASON_MISMATCH',
         'OWNER_PROCESS_DID_NOT_EXIT','REVIEW_CLOSE_NOT_INDEPENDENTLY_OBSERVED','ONE_FRESH_AUTOMATIC_SUMMARY_REQUIRED','CLOSE_CONTROL_BINDING_REFUSED',
-        'PRE_DEADLINE_OBSERVATION_TOO_LATE','PRE_DEADLINE_CAPTURE_NOT_ACTIVE')
+        'PRE_DEADLINE_OBSERVATION_TOO_LATE','PRE_DEADLINE_CAPTURE_NOT_ACTIVE','UI_STATUS_CONTRACT_REFUSED')
     $failure = if ($_.Exception.Message -in $known) { $_.Exception.Message } else { 'VALIDATION_OR_AUTOMATION_INCOMPLETE' }
     throw "Native lifecycle qualification incomplete: $failure"
 }
 finally {
     if (!$passed -and $reviewAdmitted) {
-        try { Action 'Native.Metadata.Stop'; $failureStopRequested = $true } catch { }
+        try { Assert-ReviewBinding; Action 'Native.Metadata.Stop'; $failureStopRequested = $true } catch { }
     }
     $receipt = [ordered]@{schema='suprachat-winapp-first-party-lifecycle/v1';case=$Case;passed=$passed;failure=$failure;
         started_at_utc=$started.ToString('o');finished_at_utc=[DateTime]::UtcNow.ToString('o');winapp_version='0.7.1';

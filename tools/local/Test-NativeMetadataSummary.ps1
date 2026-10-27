@@ -67,6 +67,11 @@ function Test-MetadataDocument([string]$Json, [string]$Hash, [string]$Ending) {
         [decimal]$eventTotal = 0
         foreach ($field in $lifecycle.EnumerateObject()) { $eventTotal += Read-MetadataCount $field.Value }
         if ($eventTotal -ne $retained) { throw 'METADATA_EVENT_TOTAL_MISMATCH' }
+        $gapEvents = 0L
+        foreach ($field in $lifecycle.EnumerateObject()) { if ($field.Name -ceq 'CaptureGap') { $gapEvents = Read-MetadataCount $field.Value } }
+        [decimal]$retainedNetwork = [decimal]$retained - $gapEvents
+        if ([decimal]$observed -lt $retainedNetwork -or [decimal]$observed -gt ([decimal]$retained + $evicted) -or
+            ($evicted -eq 0 -and [decimal]$observed -ne $retainedNetwork)) { throw 'METADATA_NETWORK_COUNT_MISMATCH' }
         $diagnostics = $root.GetProperty('diagnostics')
         Assert-MetadataFields $diagnostics @('ObservationIncidents','LifecycleIncidents','Reasons','TotalIncidents')
         $reasons = $diagnostics.GetProperty('Reasons')
@@ -121,27 +126,45 @@ if ($SelfTest) {
     $idle = $base.Replace('"observed_network_events":1','"observed_network_events":0').Replace('"retained_events":1','"retained_events":0').Replace('"Request":1','"Request":0').Replace('FIRST_PARTY_LIVE_REDACTED','NO_FIRST_PARTY_OBSERVATIONS')
     $idleResult = Test-MetadataDocument $idle $hash 'OperatorStop'
     if ($idleResult.first_party_network_metadata_observed) { throw 'SYNTHETIC_IDLE_EVIDENCE_CHECK_FAILED' }
+    $localGap = $base.Replace('"observed_network_events":1','"observed_network_events":0').Replace('"Request":1','"CaptureGap":1').Replace('FIRST_PARTY_LIVE_REDACTED','NO_FIRST_PARTY_OBSERVATIONS')
+    $null = Test-MetadataDocument $localGap $hash 'OperatorStop'
+    $evicted = $base.Replace('"observed_network_events":1','"observed_network_events":500').Replace('"retained_events":1','"retained_events":256').Replace('"Request":1','"Request":256').Replace('"total_evicted_events":0','"total_evicted_events":244')
+    $null = Test-MetadataDocument $evicted $hash 'OperatorStop'
     $negative = @(
         $base.Replace('"capture_active":false','"capture_active":true'),
         $base.Replace('"cleanup_complete":true','"cleanup_complete":false'),
         $base.Replace('"OperatorStop"','"LeaseExpired"'),
         $base.Replace('"Reasons":{}','"Reasons":{"private-unexpected-field":1}'),
         $base.Replace('"native_loss":0','"native_loss":1'),
-        $base.Replace('"schema":','"schema":"duplicate","schema":'))
+        $base.Replace('"schema":','"schema":"duplicate","schema":'),
+        $base.Replace('"retained_events":1','"retained_events":0').Replace('"Request":1','"Request":0'),
+        $base.Replace('"observed_network_events":1','"observed_network_events":2'),
+        $base.Replace('"observed_network_events":1','"observed_network_events":0').Replace('FIRST_PARTY_LIVE_REDACTED','NO_FIRST_PARTY_OBSERVATIONS'),
+        $base.Replace('"Request":1','"CaptureGap":1'))
     foreach ($json in $negative) {
         $refused = $false
         try { $null = Test-MetadataDocument $json $hash 'OperatorStop' } catch { $refused = $true }
         if (!$refused) { throw 'SYNTHETIC_VALIDATOR_NEGATIVE_CASE_FAILED' }
     }
-    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=12;live_capture=$false} | ConvertTo-Json
+    [ordered]@{evidence='SYNTHETIC_VALIDATOR_SELF_TEST';passed=$true;cases=18;live_capture=$false} | ConvertTo-Json
     return
 }
 if (!$SummaryPath -or !$ReceiptPath -or !$ExpectedAssemblyHash) { throw 'SUMMARY_HASH_AND_FRESH_RECEIPT_PATH_REQUIRED' }
 if (Test-Path -LiteralPath $ReceiptPath) { throw 'PRESERVE_EXISTING_VALIDATION_RECEIPT' }
-$source = Get-Item -LiteralPath $SummaryPath
-if ($source.Length -gt 32768) { throw 'METADATA_FILE_BOUND_REFUSED' }
-$result = Test-MetadataDocument ([IO.File]::ReadAllText($source.FullName)) $ExpectedAssemblyHash $ExpectedEndReason
-$result.source_sha256 = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+$sourceStream = [IO.FileStream]::new([IO.Path]::GetFullPath($SummaryPath), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+try {
+    if ($sourceStream.Length -gt 32768) { throw 'METADATA_FILE_BOUND_REFUSED' }
+    $buffer = [byte[]]::new([int]$sourceStream.Length)
+    $offset = 0
+    while ($offset -lt $buffer.Length) {
+        $read = $sourceStream.Read($buffer,$offset,$buffer.Length - $offset)
+        if (!$read) { throw 'METADATA_SOURCE_READ_INCOMPLETE' }
+        $offset += $read
+    }
+} finally { $sourceStream.Dispose() }
+$json = [Text.UTF8Encoding]::new($false,$true).GetString($buffer).TrimStart([char]0xfeff)
+$result = Test-MetadataDocument $json $ExpectedAssemblyHash $ExpectedEndReason
+$result.source_sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($buffer)).ToLowerInvariant()
 $result.recorded_at_utc = [DateTime]::UtcNow.ToString('o')
 $stream = [IO.FileStream]::new([IO.Path]::GetFullPath($ReceiptPath), [IO.FileMode]::CreateNew)
 try {
