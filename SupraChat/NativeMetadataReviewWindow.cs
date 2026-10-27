@@ -122,7 +122,7 @@ internal sealed class NativeMetadataReviewWindow : Window
                 _plan = null; await capture.StopForSummaryAsync();
                 if (!_operations.Current(generation)) return;
                 var summary = BuildSummary(capture, synthetic);
-                summaryStore.Save((JsonElement)summary);
+                summaryStore.Save(NativeMetadataSummary.AttachLifecycle((JsonElement)summary, _lifecycle));
                 _savedCapture = capture;
                 _lifecycle.Record(NativeMetadataLifecycleReadback.Action.SummarySaved, capture.Status());
                 _message.Text = "Stopped and saved an aggregate summary. No event IDs, URLs, titles or payloads were exported.";
@@ -187,12 +187,14 @@ internal sealed class NativeMetadataReviewWindow : Window
         {
             // Persist only after actual closure, never merely because Closing was requested.
             var saved = alreadySaved;
+            // The actual Closed event precedes creation of the aggregate. The write
+            // itself proves persistence; a failed write cannot claim saved evidence.
+            _lifecycle.Record(NativeMetadataLifecycleReadback.Action.Closed, closeStatus);
             if (closeSummary is { } summary)
             {
-                try { summaryStore.Save(summary); saved = true; }
-                catch { closeFailure = "SUMMARY_SAVE_FAILED"; }
+                try { summaryStore.Save(NativeMetadataSummary.AttachLifecycle(summary, _lifecycle)); saved = true; }
+                catch { closeFailure = "SUMMARY_SAVE_FAILED"; _lifecycle.Record(NativeMetadataLifecycleReadback.Action.SaveFailed, closeStatus); }
             }
-            _lifecycle.Record(saved ? NativeMetadataLifecycleReadback.Action.Closed : NativeMetadataLifecycleReadback.Action.SaveFailed, closeStatus);
             _closeCompletion.TrySetResult(new(true, saved, closeFailure, closeStatus));
         };
     }
