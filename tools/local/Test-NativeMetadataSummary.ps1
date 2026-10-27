@@ -7,6 +7,9 @@ param(
     [switch]$SelfTest
 )
 $ErrorActionPreference = 'Stop'
+# Dot-sourcing the parser's own `param(-SelfTest)` would otherwise shadow this
+# validator's same-named switch in the caller scope. Preserve our bound intent.
+$metadataSummarySelfTest = $SelfTest.IsPresent
 . (Join-Path $PSScriptRoot 'Read-NativeMetadataLifecycleReadback.ps1')
 
 function Assert-MetadataFields($Element, [string[]]$Allowed, [bool]$RequireAll = $true) {
@@ -118,7 +121,7 @@ function Test-MetadataDocument([string]$Json, [string]$Hash, [string]$Ending) {
     finally { $document.Dispose() }
 }
 
-if ($SelfTest) {
+if ($metadataSummarySelfTest) {
     # In-memory synthetic schema examples only. No browser, profile or live observations.
     $hash = 'a' * 64
     $sample = [ordered]@{schema='suprachat-first-party-metadata-hil-summary/v2'; evidence='FIRST_PARTY_LIVE_REDACTED';
