@@ -31,8 +31,26 @@ internal sealed class NativeMetadataSummaryStore
         Directory.CreateDirectory(_directory);
         var prefix = _synthetic ? "suprachat-synthetic-metadata-summary" : "suprachat-metadata-summary";
         var path = Path.Combine(_directory, $"{prefix}-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.json");
-        using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        JsonSerializer.Serialize(output, summary, new JsonSerializerOptions { WriteIndented = true });
-        return path;
+        // Serialize and sync in the destination directory before the final
+        // no-overwrite rename. Failed serialization must never leave a partial
+        // *.json aggregate that a later qualification could mistake for evidence.
+        // .pending is a transient staging file, not a separate history ledger.
+        var pending = Path.Combine(_directory, $".{prefix}-{Guid.NewGuid():N}.pending");
+        try
+        {
+            using (var output = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(output, summary, new JsonSerializerOptions { WriteIndented = true });
+                output.Flush(flushToDisk: true);
+            }
+            File.Move(pending, path); // Same directory; refuses a preexisting destination.
+            return path;
+        }
+        finally
+        {
+            // On failure, keep the original summary untouched. This best-effort
+            // cleanup cannot roll back an already committed final file.
+            if (File.Exists(pending)) File.Delete(pending);
+        }
     }
 }
