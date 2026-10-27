@@ -5,6 +5,7 @@ internal static class BrokerContractTests
 {
     public static void Run()
     {
+        VerifyAuthorityIsolationAndStructuredReplay();
         var now = DateTimeOffset.Parse("2026-10-03T12:00:00Z");
         var broker = new CredentialBrokerCore(
             "urn:uuid:broker-test",
@@ -128,6 +129,43 @@ internal static class BrokerContractTests
         foreach (var forbidden in new[] { "access_token", "refresh_token", "id_token", "authorization_code", "cookie" })
             Require(!resultJson.Contains(forbidden, StringComparison.OrdinalIgnoreCase),
                 $"broker serialized result leaked forbidden credential field: {forbidden}");
+    }
+
+    private static void VerifyAuthorityIsolationAndStructuredReplay()
+    {
+        var allowed = new[] { "models.read" };
+        var broker = new CredentialBrokerCore("authority-isolation", 1, allowedCapabilities: allowed);
+        allowed[0] = "responses.create";
+        Require(broker.Acquire(new("denied", "consumer", "binding", new[] { "responses.create" })).Error ==
+            BrokerErrorCodes.CapabilityDenied, "constructor policy aliased caller array");
+        var capabilities = new[] { "models.read" };
+        var request = new BrokerAcquireRequest("isolation", "consumer", "binding", capabilities);
+        var first = broker.Acquire(request);
+        capabilities[0] = "responses.create";
+        var leaseId = first.Lease!.LeaseId;
+        var replayRequest = request with { Capabilities = new[] { "models.read" } };
+        var views = new[] { first.Lease, broker.Acquire(replayRequest).Lease!, broker.LeaseStatus(leaseId)! };
+        foreach (var view in views)
+        {
+            view.Capabilities[0] = "responses.create";
+            Require(broker.TryAdmitProviderOperation("denied", leaseId, "consumer", "binding", "responses.create").Error ==
+                BrokerErrorCodes.CapabilityDenied, "returned view widened authority");
+            Require(broker.TryAdmitProviderOperation("allowed", leaseId, "consumer", "binding", "models.read").Admission is not null,
+                "caller mutation removed stored grant");
+            Require(broker.LeaseStatus(leaseId)!.Capabilities.SequenceEqual(new[] { "models.read" }), "status leaked mutable authority");
+            Require(broker.Acquire(replayRequest).Lease!.Capabilities.SequenceEqual(new[] { "models.read" }), "replay leaked mutable authority");
+        }
+        var collision = broker.Acquire(new("delimiter", "a|b", "c", new[] { "models.read" }));
+        Require(collision.Error is null, "delimiter fixture failed");
+        Require(broker.Acquire(new("delimiter", "a", "b|c", new[] { "models.read" })).Error ==
+            BrokerErrorCodes.RequestConflict, "identity delimiter collision replayed");
+        var custom = new CredentialBrokerCore("capability-delimiters", 1, allowedCapabilities: new[] { "a,b", "a", "b" });
+        Require(custom.Acquire(new("caps", "consumer", "binding", new[] { "a,b" })).Error is null, "capability fixture failed");
+        Require(custom.Acquire(new("caps", "consumer", "binding", new[] { "a", "b" })).Error ==
+            BrokerErrorCodes.RequestConflict, "capability delimiter collision replayed");
+        var normalized = custom.Acquire(new("normalized", "consumer", "binding", new[] { "b", "a", "a" }));
+        Require(custom.Acquire(new("normalized", "consumer", "binding", new[] { "a", "b" })).Replay,
+            "normalized exact replay changed");
     }
 
     private static void Require(bool condition, string message)
