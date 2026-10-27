@@ -1142,10 +1142,35 @@ jobs:
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
+                  if (-not $selection.Current.IsSelected) {
+                    throw "UI Automation tab SelectionItem did not select: $($area.tab)"
+                  }
                   foreach ($automationId in $area.controls) {
                     $null = Require-SemanticControl $automationId
                   }
                 }
+
+                # Check actual provider action + independent UIA state readback,
+                # not merely presence of AutomationId in source/XAML.
+                # The runner uses a disposable application profile; restore state.
+                $check = Require-SemanticControl 'Accessibility.ReducedMotion'
+                $pattern = $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+                $before = $pattern.Current.ToggleState
+                if ($before -eq [System.Windows.Automation.ToggleState]::Indeterminate) {
+                  throw 'UI Automation reduced-motion toggle returned indeterminate state'
+                }
+                $pattern.Toggle()
+                $after = $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState
+                if ($after -eq $before) {
+                  throw 'UI Automation TogglePattern did not change the checkbox state'
+                }
+                $pattern.Toggle()
+                $restored = $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState
+                if ($restored -ne $before) {
+                  throw 'UI Automation TogglePattern did not restore original checkbox state'
+                }
+                $reset = Require-SemanticControl 'Accessibility.ScaleReset'
+                $reset.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
                 $receipt = @{
                   schema = 'suprachat-windows-uia-qualification/v1'
