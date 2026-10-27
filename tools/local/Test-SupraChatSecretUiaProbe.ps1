@@ -22,9 +22,15 @@ if ($uiaInterface.Count -ne 1 -or $scopeTypes.Count -ne 1) {
     throw 'UIA3_REQUIRED_INTERFACE_NOT_FOUND'
 }
 $script:nativeTreeScope = [Enum]::Parse($scopeTypes[0], 'TreeScope_Descendants')
-$comType = [Type]::GetTypeFromCLSID([Guid]'ff48dba4-60ef-4201-aa87-54103eef594e')
-$comObject = [Activator]::CreateInstance($comType)
-$script:nativeUia = [Runtime.InteropServices.Marshal]::CreateWrapperOfType($comObject, $uiaInterface[0])
+$factory = @($types | Where-Object { $_.Name -eq 'CUIAutomationClass' -and $_.IsClass })
+if ($factory.Count -eq 1) {
+    # TlbImp exposes COM coclasses as *Class, not their matching interface.
+    $script:nativeUia = [Activator]::CreateInstance($factory[0])
+} else {
+    $comType = [Type]::GetTypeFromCLSID([Guid]'ff48dba4-60ef-4201-aa87-54103eef594e')
+    $comObject = [Activator]::CreateInstance($comType)
+    $script:nativeUia = $comObject -as $uiaInterface[0]
+}
 if ($null -eq $script:nativeUia) { throw 'UIA3_COM_ACTIVATION_REFUSED' }
 
 # A fresh value exists only in this disposable test process and this script's
