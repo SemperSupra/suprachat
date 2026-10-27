@@ -88,6 +88,22 @@ try {
             throw 'SYNTHETIC_UIA_TEXT_PATTERN_EXPOSED'
         }
 
+        # The test has no browser, network or account data; scan only its own
+        # small native window. No scalar or matching text is exported.
+        $window = Get-Window
+        $descendants = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        if ($descendants.Count -gt 80) { throw 'SYNTHETIC_UIA_TREE_BOUND_REFUSED' }
+        for ($i = 0; $i -lt $descendants.Count; $i++) {
+            $current = $descendants.Item($i).Current
+            Check-Not-Synthetic $current.Name 'SYNTHETIC_UIA_NAME_EXPOSED'
+            Check-Not-Synthetic $current.HelpText 'SYNTHETIC_UIA_HELP_EXPOSED'
+            Check-Not-Synthetic $current.ItemStatus 'SYNTHETIC_UIA_STATUS_EXPOSED'
+            Check-Not-Synthetic $current.ItemType 'SYNTHETIC_UIA_ITEMTYPE_EXPOSED'
+        }
+    }
+
+    function Check-LegacyNativeUIA {
         # The stock .NET 10 managed client does not expose the Legacy pattern
         # or register property 30090. Use the independent Windows UIA3 COM
         # interface from pinned test-only Interop.UIAutomationClient instead.
@@ -141,19 +157,6 @@ try {
             if ($readback -is [string]) { Check-Not-Synthetic $readback $entry.failure }
         }
 
-        # The test has no browser, network or account data; scan only its own
-        # small native window. No scalar or matching text is exported.
-        $window = Get-Window
-        $descendants = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition)
-        if ($descendants.Count -gt 80) { throw 'SYNTHETIC_UIA_TREE_BOUND_REFUSED' }
-        for ($i = 0; $i -lt $descendants.Count; $i++) {
-            $current = $descendants.Item($i).Current
-            Check-Not-Synthetic $current.Name 'SYNTHETIC_UIA_NAME_EXPOSED'
-            Check-Not-Synthetic $current.HelpText 'SYNTHETIC_UIA_HELP_EXPOSED'
-            Check-Not-Synthetic $current.ItemStatus 'SYNTHETIC_UIA_STATUS_EXPOSED'
-            Check-Not-Synthetic $current.ItemType 'SYNTHETIC_UIA_ITEMTYPE_EXPOSED'
-        }
     }
 
     $passphrase = Require-Element 'Synthetic.Probe.Passphrase'
@@ -174,6 +177,11 @@ try {
         throw 'SYNTHETIC_FILL_POSTCONDITION_REFUSED'
     }
     Check-Exposure
+    # The pre- and post-fill managed UIA checks passed. Record that evidence
+    # independently before attempting the separate COM LegacyIAccessible gate;
+    # overall PASS is still impossible unless the legacy gate also qualifies.
+    Write-Host 'SYNTHETIC_FILLED_MODERN_UIA_SCALARS_PASS; LEGACY_UNVERIFIED'
+    Check-LegacyNativeUIA
 
     [ordered]@{
         schema = 'suprachat-native-synthetic-secret-uia/v1'
