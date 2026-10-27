@@ -25,6 +25,9 @@ internal sealed class NativeMetadataReviewWindow : Window
     private (WindowsConsentedMetadataSession Capture, NativeMetadataStatus Status, JsonElement Summary)? _retiringSnapshot;
     private MetadataConsentPlan? _plan;
     private readonly ReviewOperationFence _operations = new();
+    private readonly NativeMetadataLifecycleReadback _lifecycle = new();
+    private readonly TextBox _lifecycleView = Named(new TextBox { IsReadOnly = true, AcceptsReturn = true, Height = 130 },
+        "Native.Metadata.LifecycleReadback", "Sanitized native metadata lifecycle history");
     private bool _closed, _busy;
     private readonly CheckBox _ack = Named(new CheckBox { Content = "I reviewed this window and metadata-only scope" }, "Native.Metadata.Acknowledge", "Acknowledge the local metadata experiment");
     private readonly Button _review = Named(new Button { Content = "Prepare this window's review" }, "Native.Metadata.Prepare", "Prepare metadata review");
@@ -54,6 +57,8 @@ internal sealed class NativeMetadataReviewWindow : Window
         Title = synthetic ? "SupraChat synthetic metadata review qualification" : "Review ChatGPT metadata experiment"; Width = 690; Height = 650;
         AutomationProperties.SetAutomationId(this, "Native.Metadata.Window");
         var summaryStore = new NativeMetadataSummaryStore(outputDirectory, synthetic);
+        _lifecycle.Record(NativeMetadataLifecycleReadback.Action.Opened, null);
+        _lifecycleView.Text = _lifecycle.ToUiValue();
         var panel = new StackPanel { Margin = new Avalonia.Thickness(20), Spacing = 10 };
         panel.Children.Add(new TextBlock { Text = "Local metadata-only experiment", FontSize = 24 });
         panel.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text =
@@ -66,7 +71,7 @@ internal sealed class NativeMetadataReviewWindow : Window
             "Use only after source review and your explicit opt-in for this test. Keep the ChatGPT tab open." });
         foreach (var control in new Control[] { _ack, _review, _confirm }) panel.Children.Add(control);
         var stop = Named(new Button { Content = "Stop capture" }, "Native.Metadata.Stop", "Stop first-party metadata capture");
-        panel.Children.Add(stop); panel.Children.Add(_save); panel.Children.Add(_readiness); panel.Children.Add(_message); panel.Children.Add(_status);
+        panel.Children.Add(stop); panel.Children.Add(_save); panel.Children.Add(_readiness); panel.Children.Add(_message); panel.Children.Add(_status); panel.Children.Add(_lifecycleView);
         Content = new ScrollViewer { Content = panel };
         _review.Click += async (_, _) => await RunOperation(async generation =>
         {
@@ -88,6 +93,7 @@ internal sealed class NativeMetadataReviewWindow : Window
             var prepared = prepareCapture(_ack.IsChecked == true);
             if (!_operations.Current(generation)) { await SafeDispose(prepared); return; }
             _capture = prepared; _plan = prepared.Preview();
+            _lifecycle.Record(NativeMetadataLifecycleReadback.Action.Prepared, prepared.Status());
             _message.Text = "Review ready for this local browser session. Confirm within one minute. Capture remains OFF.";
         });
         _confirm.Click += async (_, _) => await RunOperation(async generation =>
@@ -99,22 +105,26 @@ internal sealed class NativeMetadataReviewWindow : Window
             _ack.IsChecked = false;
             var attached = await capture.ConfirmAsync(plan, reviewed);
             if (!_operations.Current(generation)) return;
+            _lifecycle.Record(attached ? NativeMetadataLifecycleReadback.Action.Confirmed : NativeMetadataLifecycleReadback.Action.Refused, capture.Status());
             _message.Text = attached ? "Metadata capture active. Normal browser activity remains authoritative; no provider action was requested." :
                 "Observer did not start or consent expired. Prepare a new review to try again.";
         });
         stop.Click += (_, _) =>
         {
             _operations.Cancel(); _plan = null; SafeStop(_capture); _ack.IsChecked = false;
+            _lifecycle.Record(NativeMetadataLifecycleReadback.Action.StopRequested, _capture?.Status());
             _message.Text = "Capture stopped. Earlier metadata remains until this review window closes."; Refresh();
         };
         _save.Click += async (_, _) => await RunOperation(async generation =>
         {
                 if (_capture is not { } capture) { _message.Text = "No experiment to summarize."; return; }
+                _lifecycle.Record(NativeMetadataLifecycleReadback.Action.SaveRequested, capture.Status());
                 _plan = null; await capture.StopForSummaryAsync();
                 if (!_operations.Current(generation)) return;
                 var summary = BuildSummary(capture, synthetic);
                 summaryStore.Save((JsonElement)summary);
                 _savedCapture = capture;
+                _lifecycle.Record(NativeMetadataLifecycleReadback.Action.SummarySaved, capture.Status());
                 _message.Text = "Stopped and saved an aggregate summary. No event IDs, URLs, titles or payloads were exported.";
         });
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
@@ -130,6 +140,7 @@ internal sealed class NativeMetadataReviewWindow : Window
             args.Cancel = true;
             if (_closed) return; // Duplicate requests share this finalization.
             _closed = true; _operations.Close(); timer.Stop(); _plan = null;
+            _lifecycle.Record(NativeMetadataLifecycleReadback.Action.CloseRequested, null);
             _review.IsEnabled = _confirm.IsEnabled = _save.IsEnabled = _ack.IsEnabled = stop.IsEnabled = false;
             var capture = _capture ?? _retiringCapture;
             var pending = _operationCompletion?.Task;
@@ -181,6 +192,7 @@ internal sealed class NativeMetadataReviewWindow : Window
                 try { summaryStore.Save(summary); saved = true; }
                 catch { closeFailure = "SUMMARY_SAVE_FAILED"; }
             }
+            _lifecycle.Record(saved ? NativeMetadataLifecycleReadback.Action.Closed : NativeMetadataLifecycleReadback.Action.SaveFailed, closeStatus);
             _closeCompletion.TrySetResult(new(true, saved, closeFailure, closeStatus));
         };
     }
@@ -193,6 +205,7 @@ internal sealed class NativeMetadataReviewWindow : Window
         _ack.IsEnabled = false;
         try { await action(generation); }
         catch (Exception error) { if (!_closed && _operations.Current(generation)) { _plan = null; SafeStop(_capture);
+            _lifecycle.Record(NativeMetadataLifecycleReadback.Action.Refused, _capture?.Status());
             _message.Text = error is NativeMetadataPreparationException preparation ? PreparationMessage(preparation.Reason) :
                 "The native review or local save could not complete. Capture is stopped. Check the loaded ChatGPT tab and local output folder. [NATIVE_OPERATION_UNAVAILABLE]"; } }
         finally { _operations.End(); completion.TrySetResult(true); _busy = false; if (!_closed) { _review.IsEnabled = true; _save.IsEnabled = true;
@@ -226,8 +239,11 @@ internal sealed class NativeMetadataReviewWindow : Window
             if (status is not null && status.EndReason != NativeCaptureEndReason.None && _message.Text?.StartsWith("Metadata capture active") == true)
                 _message.Text = status.EndReason == NativeCaptureEndReason.LeaseExpired ? "Capture expired after two minutes. Save the summary when ready." : "Capture is off. Save the summary when ready.";
             _status.Text = status is null ? "Capture OFF" : JsonSerializer.Serialize(status, TraceNormalizer.JsonOptions);
+            _lifecycle.Record(NativeMetadataLifecycleReadback.Action.Observed, status);
+            _lifecycleView.Text = _lifecycle.ToUiValue();
         }
         catch { _confirm.IsEnabled = false; _status.Text = "Capture unavailable";
+            _lifecycleView.Text = _lifecycle.ToUiValue();
             _readiness.Text = "The browser view is unavailable. Keep the ChatGPT tab selected and wait for it to load."; }
     }
     private static string PreparationMessage(NativeMetadataPreparationReason reason) => reason switch
