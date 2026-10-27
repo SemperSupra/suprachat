@@ -10,8 +10,22 @@ Add-Type -AssemblyName UIAutomationTypes
 # Strictly test-only assembly, never added to the real application package.
 $interop = Join-Path ([IO.Path]::GetDirectoryName($exe)) 'Interop.UIAutomationClient.dll'
 if (!(Test-Path -LiteralPath $interop -PathType Leaf)) { throw 'UIA3_COM_INTEROP_REQUIRED' }
-Add-Type -Path $interop
-$script:nativeUia = [UIAutomationClient.CUIAutomation]::new()
+$interopAssembly = [Reflection.Assembly]::LoadFrom($interop)
+$types = @($interopAssembly.GetExportedTypes())
+$uiaInterface = @($types | Where-Object { $_.Name -eq 'IUIAutomation' -and $_.IsInterface })
+$scopeTypes = @($types | Where-Object { $_.Name -eq 'TreeScope' -and $_.IsEnum })
+if ($uiaInterface.Count -ne 1 -or $scopeTypes.Count -ne 1) {
+    # Log only public library type names, never UI tree content or sentinel.
+    Write-Host ('UIA3 qualified metadata types: ' + (($types | Where-Object {
+        $_.Name -match 'Automation|TreeScope|CUIA'
+    } | Select-Object -ExpandProperty FullName | Select-Object -First 20) -join ','))
+    throw 'UIA3_REQUIRED_INTERFACE_NOT_FOUND'
+}
+$script:nativeTreeScope = [Enum]::Parse($scopeTypes[0], 'TreeScope_Descendants')
+$comType = [Type]::GetTypeFromCLSID([Guid]'ff48dba4-60ef-4201-aa87-54103eef594e')
+$comObject = [Activator]::CreateInstance($comType)
+$script:nativeUia = [Runtime.InteropServices.Marshal]::CreateWrapperOfType($comObject, $uiaInterface[0])
+if ($null -eq $script:nativeUia) { throw 'UIA3_COM_ACTIVATION_REFUSED' }
 
 # A fresh value exists only in this disposable test process and this script's
 # memory. Never print it, capture desktop screenshots or upload a UIA tree.
@@ -81,7 +95,7 @@ try {
         }
         $nativeCondition = $script:nativeUia.CreatePropertyCondition(30011, 'Synthetic.Probe.Passphrase')
         $nativeSecret = $nativeRoot.FindFirst(
-            [UIAutomationClient.TreeScope]::TreeScope_Descendants, $nativeCondition)
+            $script:nativeTreeScope, $nativeCondition)
         if ($null -eq $nativeSecret -or $nativeSecret.CurrentProcessId -ne $process.Id) {
             throw 'SYNTHETIC_COM_CONTROL_BINDING_REFUSED'
         }
