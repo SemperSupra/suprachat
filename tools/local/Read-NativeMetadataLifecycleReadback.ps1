@@ -76,7 +76,7 @@ if ($SelfTest) {
     $result = Convert-NativeLifecycleReadback $good
     if ($result.entries -ne 2 -or $result.latest.end_reason -cne 'OperatorStop') { throw 'LIFECYCLE_TEST_FAILED' }
     $negative = @(
-        $good.Replace('"entries":','"unexpected_private_session":"synthetic-secret","entries":'),
+        $good.Replace('"events":','"unexpected_private_session":"synthetic-secret","events":'),
         $good.Replace('"Active":false','"Active":true'),
         $good.Replace('"ElapsedMs":200','"ElapsedMs":-1'),
         $good.Replace('"OperatorStop"','"synthetic-secret"'),
@@ -85,6 +85,7 @@ if ($SelfTest) {
         $good.Replace('"ElapsedMs":200','"ElapsedMs":200,"ElapsedMs":200')
     )
     foreach ($case in $negative) {
+        if ($case -ceq $good) { throw 'LIFECYCLE_NEGATIVE_MUTATION_NOOP' }
         $refused = $false
         try { $null = Convert-NativeLifecycleReadback $case } catch { $refused = $true }
         if (!$refused) { throw 'LIFECYCLE_NEGATIVE_TEST_FAILED' }
