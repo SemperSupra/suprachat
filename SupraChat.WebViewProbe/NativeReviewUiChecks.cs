@@ -201,10 +201,27 @@ internal static class NativeReviewUiChecks
         var files = Directory.GetFiles(directory, "*.json"); Require(files.Length == 1);
         var json = File.ReadAllText(files[0]);
         using var document = JsonDocument.Parse(json); var root = document.RootElement;
-        Require(root.GetProperty("schema").GetString() == "suprachat-synthetic-native-metadata-summary/v1" &&
+        Require(root.GetProperty("schema").GetString() == "suprachat-synthetic-native-metadata-summary/v2" &&
             root.GetProperty("evidence").GetString() == "SYNTHETIC_LOOPBACK_ONLY" &&
             root.GetProperty("first_lease_end_reason").GetString() == expected.ToString() &&
             root.GetProperty("cleanup_complete").GetBoolean() && !root.GetProperty("capture_active").GetBoolean());
+        var readback = root.GetProperty("lifecycle_readback");
+        var history = readback.GetProperty("events");
+        Require(readback.GetProperty("schema").GetString() == "suprachat-native-lifecycle-readback/v1" &&
+            readback.GetProperty("completeness").GetString() == "UNKNOWN" &&
+            !readback.GetProperty("is_authoritative_for_consent").GetBoolean() &&
+            history.GetArrayLength() is >= 1 and <= 24);
+        var final = history[history.GetArrayLength() - 1];
+        Require(final.GetProperty("EndReason").GetString() == expected.ToString() &&
+            !final.GetProperty("Active").GetBoolean() && !final.GetProperty("ObserverAttached").GetBoolean() &&
+            final.GetProperty("CleanupComplete").GetBoolean());
+        var previous = -1L;
+        foreach (var entry in history.EnumerateArray())
+        {
+            var elapsed = entry.GetProperty("ElapsedMs").GetInt64();
+            Require(elapsed >= 0 && elapsed >= previous);
+            previous = elapsed;
+        }
         foreach (var forbidden in new[] { FixtureServer.Sentinel, "http://", "https://", "Bearer ", "Cookie:", "Authorization:" }) Require(!json.Contains(forbidden));
     }
     private static async Task WaitAsync(Func<bool> condition)
