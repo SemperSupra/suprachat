@@ -2,7 +2,7 @@
 
 Review date: **2026-10-27**  
 Status: **review candidate — design/read-only source findings, not an acceptance or release verdict**  
-Source: public `main` as inspected on this date, plus explicitly **unmerged** draft [#79](https://github.com/SemperSupra/suprachat/pull/79) (and its stacked source).  
+Source: public `main` as inspected on this date, plus explicitly **unmerged** drafts [#79](https://github.com/SemperSupra/suprachat/pull/79), [#81](https://github.com/SemperSupra/suprachat/pull/81), [#82](https://github.com/SemperSupra/suprachat/pull/82), [#83](https://github.com/SemperSupra/suprachat/pull/83), and [#84](https://github.com/SemperSupra/suprachat/pull/84).
 Owner: [#19](https://github.com/SemperSupra/suprachat/issues/19) human/automation/agent UI/UX/DX and [#51](https://github.com/SemperSupra/suprachat/issues/51) native metadata lifecycle; no new orchestration or session authority.
 
 ## What WinApp CLI should and should not be used for
@@ -27,7 +27,7 @@ WinApp CLI's app UIA tree and the embedded ChatGPT WebView's accessible content 
 
 ### P0 — Close the missing native app-owned lifecycle evidence projection (#51, #79 continuation)
 
-The native metadata review window in the stacked candidate uses stable IDs for `Native.Metadata.Acknowledge/Prepare/Confirm/Stop/Save/Status/Message/Readiness`. Its read-only Status textbox emits a serialized diagnostic state; the independent WinApp harness parses a tightly allowlisted scalar projection. The private DLE identifies a further desired app-owned lifecycle-history surface.
+The native metadata review window in the stacked candidate uses stable IDs for `Native.Metadata.Acknowledge/Prepare/Confirm/Stop/Save/Status/Message/Readiness`. Its read-only Status textbox emits a serialized diagnostic state; the independent WinApp harness parses a tightly allowlisted scalar projection. Public drafts #82/#83 implement the proposed app-owned lifecycle readback and bounded durable aggregate history. They remain separate from this additive UIA packet. The independent validator correction in [#86](https://github.com/SemperSupra/suprachat/pull/86) and exact-build v3 lifecycle acceptance remain required before claiming live qualification. Public acceptance is defined here and in #51; it does not depend on access to private evidence.
 
 **Recommendation:** retain the secure full-status path only within permitted scope and expose a separate **sanitized, read-only, human-legible history/status** projection of lifecycle transitions. Fields should be stable enum state, monotonic time/age when useful, build/version, operation class, first ending reason, cleanup and save outcomes, completeness marker, and explicit unknowns — no session/actor/account identifiers, URLs, event payloads, transcript, headers or tokens. Align with existing `suprachat-trace/v1` metadata authority rather than creating a second ledger. The app owns this evidence; WinApp should only **observe it independently**, never supply the application's truth.
 
@@ -35,7 +35,7 @@ Acceptance: UIA control can be identified by stable ID and read without machine 
 
 ### P1 — Turn XAML identity assertions into real UIA semantic action tests (#19)
 
-`SupraChat.ContractTests/Program.cs` checks for required IDs and accessible descriptor invariants. Existing Windows UIA smoke probes can find the root and selected controls but have had historical transient attach/lookup failures. These checks do **not** independently establish every control's provider pattern or postcondition.
+`SupraChat.ContractTests/Program.cs` checks for required IDs and accessible descriptor invariants. Draft #81 adds static ID uniqueness and bounded runtime tab, reduced-motion toggle, scale-reset invocation and empty passphrase pattern checks. Runtime lookup uses FindFirst: it does not establish runtime ID uniqueness, and scale reset still lacks independent resulting-scale readback. Historical transient attach/lookup failures remain unresolved; later green runs do not establish their root cause.
 
 Use a **small synthetic native Windows fixture** for:
 - `Tab.AgentLab` SelectionItem.Select, then verify selected tab, focus and `Auth.SignIn` identification without executing authentication.
@@ -55,7 +55,7 @@ For each generated tab/pane ensure correct accessible Name, selected/running/wai
 
 ### P1 — Secret and data-leak negative tests
 
-Maintain the custom passphrase peer fix and add an independent Windows client test for Name/Help/Value/Text/current property/notification leakage on a synthetic sentinel. Include sensitive-looking transcript, raw Responses body/events, terminal output, pairing-code, file-path and diagnostic textboxes in a **readability classification**: intentionally readable user content must be qualified as sensitive and **not harvested in generic WinApp logs or public CI**. Password/pairing controls require their own scoped decisions; do not globally disable UIA accessibility.
+Maintain the custom passphrase peer fix. Draft #84 adds a filled in-memory synthetic fixture using the production peer and independent modern/legacy scalar and pattern reads. Its observed result is LEGACY_PRESENT_NONDISCLOSURE_PASS, not legacy absence. Notifications, clipboard, screen, transformed/partial disclosure and other runtimes remain separate coverage. Include sensitive-looking transcript, raw Responses body/events, terminal output, pairing-code, file-path and diagnostic textboxes in a **readability classification**: intentionally readable user content must be qualified as sensitive and **not harvested in generic WinApp logs or public CI**. Password/pairing controls require their own scoped decisions; do not globally disable UIA accessibility.
 
 Use separate explicit human/local authorizations for reading real content. No browser sign-in automation, tokens, real credentials, or real first-party prompts in GitHub artifacts.
 
