@@ -24,6 +24,14 @@ internal static class NativeReviewUiChecks
     internal static async Task<object> RunAsync(NativeWebView view)
     {
         Phase = "initial-review";
+        // The readback is an observation projection, not an unbounded second ledger.
+        var historyContract = new NativeMetadataLifecycleReadback();
+        historyContract.Record(NativeMetadataLifecycleReadback.Action.Observed, null);
+        historyContract.Record(NativeMetadataLifecycleReadback.Action.Observed, null);
+        Require(historyContract.Entries.Count == 1);
+        for (var i = 0; i < 40; i++) historyContract.Record(NativeMetadataLifecycleReadback.Action.Opened, null);
+        Require(historyContract.Entries.Count == 24);
+        Require(!historyContract.ToUiValue().Contains("session_id", StringComparison.OrdinalIgnoreCase));
         await using var fixture = new FixtureServer();
         view.Source = fixture.ManualPage("a");
         IntPtr CurrentHandle() => view.TryGetPlatformHandle() is IWindowsWebView2PlatformHandle handle ? handle.CoreWebView2 : IntPtr.Zero;
