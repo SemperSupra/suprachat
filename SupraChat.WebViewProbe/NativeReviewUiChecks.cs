@@ -49,7 +49,7 @@ internal static class NativeReviewUiChecks
             var readiness = Control<TextBlock>(review, "Native.Metadata.Readiness");
             var lifecycle = Control<TextBox>(review, "Native.Metadata.LifecycleReadback");
             Require(lifecycle.IsReadOnly && lifecycle.Text!.Contains("suprachat-native-lifecycle-readback/v1", StringComparison.Ordinal));
-            Require(!lifecycle.Text.Contains("session_id", StringComparison.OrdinalIgnoreCase));
+            Require(!lifecycle.Text!.Contains("session_id", StringComparison.OrdinalIgnoreCase));
             Require(!confirm.IsEnabled && !review.GetLogicalDescendants().OfType<TextBox>().Any(t => AutomationProperties.GetAutomationId(t) == "Native.Metadata.Phrase"));
             prepare.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitAsync(() => message.Text!.Contains("ACKNOWLEDGEMENT_REQUIRED"));
