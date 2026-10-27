@@ -63,15 +63,29 @@ try {
             throw 'SYNTHETIC_UIA_TEXT_PATTERN_EXPOSED'
         }
 
-        # Query the bridge's legacy fallback directly; do not assume that a
-        # missing modern ValuePattern means all read channels are safe.
-        $legacy = $null
-        if ($secretControl.TryGetCurrentPattern(
-            [System.Windows.Automation.LegacyIAccessiblePattern]::Pattern, [ref]$legacy)) {
-            $values = $legacy.Current
-            Check-Not-Synthetic $values.Value 'SYNTHETIC_UIA_LEGACY_VALUE_EXPOSED'
-            Check-Not-Synthetic $values.Name 'SYNTHETIC_UIA_LEGACY_NAME_EXPOSED'
-            Check-Not-Synthetic $values.Description 'SYNTHETIC_UIA_LEGACY_DESCRIPTION_EXPOSED'
+        # The .NET 10 managed UIA client does not expose a
+        # LegacyIAccessiblePattern type. Independently query the Windows UIA
+        # legacy-pattern availability/property IDs via the native property
+        # registry instead: 30090 availability, 30092/30093/30094 scalars.
+        # A registered and readable legacy property must never be omitted just
+        # because the legacy managed pattern class is missing.
+        $legacyAvailability = [System.Windows.Automation.AutomationProperty]::LookupById(30090)
+        if ($null -eq $legacyAvailability) { throw 'SYNTHETIC_LEGACY_METADATA_UNAVAILABLE' }
+        $legacyPresent = $secretControl.GetCurrentPropertyValue($legacyAvailability)
+        if ($legacyPresent -isnot [bool]) { throw 'SYNTHETIC_LEGACY_AVAILABILITY_UNQUALIFIED' }
+        foreach ($entry in @(
+            @{ id=30092; failure='SYNTHETIC_UIA_LEGACY_NAME_EXPOSED' },
+            @{ id=30093; failure='SYNTHETIC_UIA_LEGACY_VALUE_EXPOSED' },
+            @{ id=30094; failure='SYNTHETIC_UIA_LEGACY_DESCRIPTION_EXPOSED' }
+        )) {
+            $property = [System.Windows.Automation.AutomationProperty]::LookupById($entry.id)
+            if ($null -eq $property) { throw 'SYNTHETIC_LEGACY_METADATA_UNAVAILABLE' }
+            $readback = $secretControl.GetCurrentPropertyValue($property)
+            if ($legacyPresent -and [object]::ReferenceEquals(
+                $readback, [System.Windows.Automation.AutomationElement]::NotSupported)) {
+                throw 'SYNTHETIC_LEGACY_READBACK_UNQUALIFIED'
+            }
+            if ($readback -is [string]) { Check-Not-Synthetic $readback $entry.failure }
         }
 
         # The test has no browser, network or account data; scan only its own
