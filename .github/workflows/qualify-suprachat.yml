@@ -1133,6 +1133,7 @@ jobs:
                       $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
                       if ($candidate.Current.ProcessId -eq $p.Id -and
                           $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                        $window = $candidate
                         $element = $candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
                           $idCondition)
                       }
