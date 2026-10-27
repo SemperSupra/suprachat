@@ -1136,9 +1136,11 @@ jobs:
                     $element = $null
                   }
                   catch [System.Runtime.InteropServices.COMException] {
-                    # Transient cross-process RPC rejection while a UIA peer is
-                    # being remounted; preserve every other error.
-                    if ($_.Exception.HResult -ne -2147418113) { throw }
+                    # Retry only documented transient COM call-rejection codes:
+                    # RPC_E_CALL_REJECTED (0x80010001) and
+                    # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
+                    # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
+                    if ($_.Exception.HResult -notin @(-2147418111, -2147417846)) { throw }
                     $element = $null
                   }
                   if (-not $element) { Start-Sleep -Milliseconds 100 }
