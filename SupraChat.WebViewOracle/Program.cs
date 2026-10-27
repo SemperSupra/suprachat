@@ -135,7 +135,9 @@ internal static class Program
         }, new JsonSerializerOptions { WriteIndented = true });
         if (json.Contains(FixtureServer.Sentinel)) throw new InvalidOperationException("Oracle receipt privacy check failed.");
         Directory.CreateDirectory(Path.GetDirectoryName(_receipt)!);
-        File.WriteAllText(_receipt, json);
+        using (var stream = new FileStream(_receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream))
+            writer.Write(json);
         _result = passed ? 0 : 1;
     }
 

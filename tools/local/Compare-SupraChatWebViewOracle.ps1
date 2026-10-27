@@ -26,6 +26,13 @@ foreach ($oracleEngine in @('playwright','webview2')) {
             if ($oracleJson.Contains($oracleForbidden)) { throw 'Independent oracle receipt privacy check failed.' }
         }
         $oracleDoc = $oracleJson | ConvertFrom-Json
+        $expectedEngine = if ($oracleEngine -ceq 'playwright') { 'playwright-chromium' } else { 'microsoft-webview2' }
+        if ($oracleDoc.schema -cne 'suprachat-independent-browser-oracle/v1' -or
+            $oracleDoc.engine -cne $expectedEngine -or $oracleDoc.fixture -cne 'SYNTHETIC_LOOPBACK_ONLY' -or
+            $oracleDoc.raw_payload_exported -isnot [bool] -or $oracleDoc.raw_payload_exported -or
+            $oracleDoc.production_admitted -isnot [bool] -or $oracleDoc.production_admitted) {
+            throw 'Independent browser oracle scope contract refused.'
+        }
         if ($oracleProcess.ExitCode -ne 0 -or !$oracleDoc.passed -or !$oracleDoc.fixture_complete -or $oracleDoc.production_admitted) {
             throw ('Independent browser oracle failed in phase ' + $oracleDoc.phase)
         }
@@ -36,7 +43,7 @@ foreach ($oracleEngine in @('playwright','webview2')) {
     }
     finally { $oracleProcess.Dispose() }
 }
-[ordered]@{
+$comparison = [ordered]@{
     schema = 'suprachat-browser-comparison/v1'
     passed = $true
     same_synthetic_fixture = $true
@@ -46,5 +53,9 @@ foreach ($oracleEngine in @('playwright','webview2')) {
     versions = @($oracleReceipts.runtime_version)
     cause_established = $false
     production_admitted = $false
-} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $oracleOutput 'comparison.json') -Encoding utf8
+} | ConvertTo-Json
+$comparisonStream = [IO.FileStream]::new((Join-Path $oracleOutput 'comparison.json'),
+    [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+$comparisonWriter = [IO.StreamWriter]::new($comparisonStream)
+try { $comparisonWriter.Write($comparison) } finally { $comparisonWriter.Dispose() }
 'Independent Playwright / Microsoft-only WebView2 comparison PASS (synthetic observation only).'
