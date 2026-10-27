@@ -192,12 +192,11 @@ public sealed class CredentialBrokerCore
             if (ttl <= TimeSpan.Zero || ttl > _maxTtl)
                 return AcquireError(request.RequestId, BrokerErrorCodes.CapabilityDenied);
 
-            var fingerprint = string.Join(
-                "|",
-                request.ConsumerId,
-                request.ConsumerBinding,
-                ttl.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                string.Join(",", capabilities));
+            // Structured encoding keeps arbitrary delimiters in identities and
+            // capability names distinct while retaining normalized replay order.
+            var fingerprint = JsonSerializer.Serialize(new {
+                request.ConsumerId, request.ConsumerBinding, TtlTicks = ttl.Ticks, Capabilities = capabilities
+            });
 
             // Once an acquire request is accepted, an exact replay must return the
             // same logical lease even if current credential readiness later changes.
@@ -209,7 +208,7 @@ public sealed class CredentialBrokerCore
                 return new BrokerAcquireResult(
                     request.RequestId,
                     "LEASED",
-                    _leases[existing.LeaseId],
+                    Snapshot(_leases[existing.LeaseId]),
                     Error: null,
                     Replay: true);
             }
@@ -236,7 +235,7 @@ public sealed class CredentialBrokerCore
             return new BrokerAcquireResult(
                 request.RequestId,
                 "LEASED",
-                lease,
+                Snapshot(lease),
                 Error: null,
                 Replay: false);
         
@@ -246,7 +245,7 @@ public sealed class CredentialBrokerCore
     public BrokerLeaseView? LeaseStatus(string leaseId)
     {
         lock (_gate)
-            return _leases.TryGetValue(leaseId, out var lease) ? lease : null;
+            return _leases.TryGetValue(leaseId, out var lease) ? Snapshot(lease) : null;
     }
 
     public BrokerReleaseResult Release(string requestId, string leaseId)
@@ -388,12 +387,16 @@ public sealed class CredentialBrokerCore
         if (!string.Equals(lease.ConsumerId, consumerId, StringComparison.Ordinal) ||
             !string.Equals(lease.ConsumerBinding, consumerBinding, StringComparison.Ordinal))
             return BrokerErrorCodes.ConsumerBindingFailed;
-        if (!lease.Capabilities.Contains(capability, StringComparer.Ordinal))
+        if (!_allowedCapabilities.Contains(capability) || !lease.Capabilities.Contains(capability, StringComparer.Ordinal))
             return BrokerErrorCodes.CapabilityDenied;
         if (!_credentialPresent)
             return BrokerErrorCodes.AuthRequired;
         return null;
     }
+
+    // Public DTO arrays are caller-owned; never expose the stored authority array.
+    private static BrokerLeaseView Snapshot(BrokerLeaseView lease) =>
+        lease with { Capabilities = (string[])lease.Capabilities.Clone() };
 
     private static BrokerAcquireResult AcquireError(string requestId, string error) =>
         new(requestId, "REJECTED", null, error, Replay: false);
