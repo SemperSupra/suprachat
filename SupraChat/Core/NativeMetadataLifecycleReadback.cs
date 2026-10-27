@@ -39,7 +39,7 @@ internal sealed class NativeMetadataLifecycleReadback
             "VIEW_CHANGED" => "VIEW_CHANGED",
             "RECORDER_STOPPED" => "RECORDER_STOPPED",
             "RECORDER_UNAVAILABLE" => "RECORDER_UNAVAILABLE",
-            null => "OFF",
+            null => "UNKNOWN",
             _ => "UNKNOWN"
         };
         var end = status?.EndReason.ToString() ?? "None";
