@@ -10,5 +10,7 @@
     <!-- Use the exact production SecurePassphraseTextBox peer, not a substitute. -->
     <ProjectReference Include="../SupraChat/SupraChat.csproj" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
+    <!-- UIA3 COM metadata, restricted to this synthetic test-only project. -->
+    <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
   </ItemGroup>
 </Project>
