@@ -39,6 +39,9 @@ internal static class NativeReviewUiChecks
             var ack = Control<CheckBox>(review, "Native.Metadata.Acknowledge");
             var message = Control<TextBlock>(review, "Native.Metadata.Message");
             var readiness = Control<TextBlock>(review, "Native.Metadata.Readiness");
+            var lifecycle = Control<TextBox>(review, "Native.Metadata.LifecycleReadback");
+            Require(lifecycle.IsReadOnly && lifecycle.Text!.Contains("suprachat-native-lifecycle-readback/v1", StringComparison.Ordinal));
+            Require(!lifecycle.Text.Contains("session_id", StringComparison.OrdinalIgnoreCase));
             Require(!confirm.IsEnabled && !review.GetLogicalDescendants().OfType<TextBox>().Any(t => AutomationProperties.GetAutomationId(t) == "Native.Metadata.Phrase"));
             prepare.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitAsync(() => message.Text!.Contains("ACKNOWLEDGEMENT_REQUIRED"));
@@ -56,6 +59,8 @@ internal static class NativeReviewUiChecks
             Require(!confirm.IsEnabled);
             Control<Button>(review, "Native.Metadata.Stop").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await WaitAsync(() => message.Text!.StartsWith("Capture stopped"));
+            Require(lifecycle.Text!.Contains("StopRequested", StringComparison.Ordinal) &&
+                lifecycle.Text.Contains("OperatorStop", StringComparison.Ordinal));
             // Exercise the real platform getter after detachment, not a cached handle fixture.
             var parent = (Grid)view.Parent!;
             parent.Children.Remove(view);
@@ -71,6 +76,9 @@ internal static class NativeReviewUiChecks
             await WaitAsync(() => message.Text!.StartsWith("Metadata capture active"));
             clock.Seconds += 121;
             await WaitAsync(() => message.Text!.StartsWith("Capture expired"));
+            Require(lifecycle.Text!.Contains("LeaseExpired", StringComparison.Ordinal));
+            foreach (var forbidden in new[] { FixtureServer.Sentinel, "session_id", "actor_id", "https://", "Bearer ", "Authorization:" })
+                Require(!lifecycle.Text.Contains(forbidden, StringComparison.OrdinalIgnoreCase));
             review.Close(); review.Close();
             var expiredClose = await review.CloseCompletion.WaitAsync(TimeSpan.FromSeconds(10));
             Require(expiredClose.ClosedObserved && expiredClose.AggregateSaved && expiredClose.Failure == "NONE" &&
