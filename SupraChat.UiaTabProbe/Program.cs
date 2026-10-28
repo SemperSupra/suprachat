@@ -73,7 +73,11 @@ internal sealed class ProbeApp : Application
                 {
                     page ??= new LoopbackPage();
                     view.Navigate(page.Origin);
-                    ready.Text = "NATIVE_ADAPTER_READY";
+                };
+                view.NavigationCompleted += (_, args) =>
+                {
+                    if (args.IsSuccess && page is not null && args.Request == page.Origin)
+                        ready.Text = "NATIVE_PAGE_READY";
                 };
                 first.Content = view;
             }

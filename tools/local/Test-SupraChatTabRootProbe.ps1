@@ -31,7 +31,7 @@ foreach ($variant in @('placeholder', 'webview')) {
                 [System.Windows.Automation.PropertyCondition]::new(
                     [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id))
         }
-        $readyExpected = if ($variant -ceq 'webview') { 'NATIVE_ADAPTER_READY' } else { 'PLACEHOLDER_READY' }
+        $readyExpected = if ($variant -ceq 'webview') { 'NATIVE_PAGE_READY' } else { 'PLACEHOLDER_READY' }
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
         $ready = $false
         do {
@@ -45,10 +45,11 @@ foreach ($variant in @('placeholder', 'webview')) {
         if (!$ready) { throw 'SYNTHETIC_TAB_FIXTURE_NOT_READY' }
         $initialHandle = $process.MainWindowHandle
         function Read-ManagedSnapshot {
-            $root = Get-ProbeRoot
-            $value = [ordered]@{root_accepted=($null -ne $root);toolbar_found=$false;
+            $value = [ordered]@{root_accepted=$false;toolbar_found=$false;
                 second_button_found=$false;second_selected=$false;completed=$false}
             try {
+                $root = Get-ProbeRoot
+                $value.root_accepted = $null -ne $root
                 if ($root) {
                     $value.toolbar_found = $null -ne (Find-ProbeControl $root 'Synthetic.TabProbe.Toolbar')
                     $value.second_button_found = $null -ne (Find-ProbeControl $root 'Synthetic.TabProbe.SecondButton')
@@ -83,10 +84,11 @@ foreach ($variant in @('placeholder', 'webview')) {
                     @('Synthetic.TabProbe.SecondButton','IsEnabled','second_button_found'),
                     @('Synthetic.TabProbe.SecondTab','IsSelected','second_selected'))) {
                     $reply = & $cli ui get-property $item[0] -w "$($initialHandle.ToInt64())" --property $item[1] --json 2>$null
-                    if ($LASTEXITCODE -eq 0) {
-                        $observed = ($reply | Out-String | ConvertFrom-Json)
-                        $value[$item[2]] = $observed.properties.($item[1]) -ceq 'True'
-                    }
+                    if ($LASTEXITCODE -ne 0) { return $value }
+                    $observed = ($reply | Out-String | ConvertFrom-Json)
+                    if ($observed.element.automationId -cne $item[0] -or
+                        $observed.properties.($item[1]) -cnotin @('True','False')) { return $value }
+                    $value[$item[2]] = $observed.properties.($item[1]) -ceq 'True'
                 }
                 $value.completed = $true
             } catch { }
@@ -104,12 +106,13 @@ foreach ($variant in @('placeholder', 'webview')) {
         $managed = Read-ManagedSnapshot
         $external = Read-ExternalSnapshot
         $process.Refresh()
+        $sameHandle = $process.MainWindowHandle -eq $initialHandle
         $qualified = $managed.completed -and $managed.root_accepted -and $managed.toolbar_found -and
             $managed.second_button_found -and $managed.second_selected -and
             $external.completed -and $external.root_accepted -and $external.toolbar_found -and
-            $external.second_button_found -and $external.second_selected
+            $external.second_button_found -and $external.second_selected -and $sameHandle
         $results += [ordered]@{variant=$variant;initial=$before;managed_after=$managed;
-            external_after=$external;hwnd_unchanged=($process.MainWindowHandle -eq $initialHandle);
+            external_after=$external;hwnd_unchanged=$sameHandle;
             peers_preserved=$qualified}
     }
     finally {
