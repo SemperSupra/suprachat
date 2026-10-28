@@ -13,7 +13,7 @@
     AutomationProperties.Name="SupraChat">
   <Grid RowDefinitions="Auto,*">
     <Border Grid.Row="0" Padding="8">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
         <Button Grid.Column="0" Margin="0,0,6,0" Content="Back" Click="Back_Click"
                  AutomationProperties.AutomationId="Nav.Back"
                  AutomationProperties.HelpText="Go back in the embedded ChatGPT product view." />
@@ -30,6 +30,10 @@
         <Button Grid.Column="5" Content="Open in browser" Click="OpenExternal_Click"
                  AutomationProperties.AutomationId="Nav.OpenExternal"
                  AutomationProperties.HelpText="Open ChatGPT in the system browser." />
+        <Button x:Name="NativeMetadataReview" Grid.Column="6" Margin="8,0,0,0" IsVisible="False"
+                Content="Review web metadata" Click="NativeMetadataReview_Click"
+                AutomationProperties.AutomationId="Native.Metadata.Review"
+                AutomationProperties.HelpText="Review a local, time-limited first-party metadata experiment. Capture remains off until confirmed." />
       </Grid>
     </Border>
 

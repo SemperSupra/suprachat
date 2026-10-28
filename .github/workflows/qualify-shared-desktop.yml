@@ -1,0 +1,33 @@
+name: Qualify shared desktop and enrolled semantic clients
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.PeerLedgerRdte/**'
+      - 'tools/local/Test-SharedDesktopLab.ps1'
+      - '.github/workflows/qualify-shared-desktop.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shared-desktop-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build isolated workbench
+        run: dotnet build SupraChat.PeerLedgerRdte -c Release
+      - name: Qualify GUI, automation and JSON-RPC clients through one ledger
+        shell: pwsh
+        run: ./tools/local/Test-SharedDesktopLab.ps1 -ReceiptPath "$env:RUNNER_TEMP/shared-desktop-receipt.json"
+      - name: Preserve sanitized host and UIA receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitized-shared-desktop-receipts
+          path: |
+            ${{ runner.temp }}/shared-desktop-receipt.json
+            ${{ runner.temp }}/shared-desktop-receipt.json.uia.json
+          if-no-files-found: ignore

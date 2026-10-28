@@ -1,0 +1,56 @@
+name: Qualify enrolled Windows peer and durable session integration
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.PeerLedgerRdte/**'
+      - 'SupraChat/Core/SharedSession*.cs'
+      - 'SupraChat/Core/LocalOwnedStreamControls.cs'
+      - 'SupraChat/Core/ChatGptControlContract.cs'
+      - 'SupraChat/Core/TrafficTrace.cs'
+      - '.github/workflows/qualify-peer-ledger-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  peer-ledger-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Qualify real peers, scoped metadata, restart and fail-stop
+        shell: pwsh
+        run: |
+          dotnet run --project SupraChat.PeerLedgerRdte -c Release -- --receipt "$env:RUNNER_TEMP/peer-ledger-receipt.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Peer-ledger fixture failed.' }
+          $json = [IO.File]::ReadAllText("$env:RUNNER_TEMP/peer-ledger-receipt.json")
+          foreach ($forbidden in @('synthetic-peer-ledger-private-sentinel', 'Bearer ', 'http://', 'https://', 'S-1-5-', $env:COMPUTERNAME)) {
+            if ($json.Contains($forbidden)) { throw 'Receipt privacy oracle failed.' }
+          }
+          $receipt = $json | ConvertFrom-Json
+          if (!$receipt.passed -or $receipt.cases.Count -ne 17 -or $receipt.production_issuer_custody_qualified -or
+              $receipt.shared_provider_control_qualified -or $receipt.first_party_capture -or $receipt.grants_exported -or
+              $receipt.signing_key_exported -or $receipt.durable_trace_recovery -or $receipt.trace_completeness -ne 'UNKNOWN') {
+            throw 'Peer-ledger receipt scope failed.'
+          }
+      - name: Qualify durable local cancellation write-ahead and SQLite crash windows
+        shell: pwsh
+        run: |
+          dotnet run --project SupraChat.PeerLedgerRdte -c Release --no-build -- --control-receipt "$env:RUNNER_TEMP/control-receipt.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Durable control fixture failed.' }
+          $receipt = Get-Content "$env:RUNNER_TEMP/control-receipt.json" -Raw | ConvertFrom-Json
+          if (!$receipt.passed -or $receipt.cases.Count -ne 6 -or $receipt.production_control_admitted -or
+              $receipt.provider_stop_verified -or $receipt.credentials_used -or $receipt.checkpoint_exported -or $receipt.automatic_recovery_dispatch) {
+            throw 'Durable control receipt scope failed.'
+          }
+      - name: Preserve sanitized receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitized-peer-ledger-receipt
+          path: |
+            ${{ runner.temp }}/peer-ledger-receipt.json
+            ${{ runner.temp }}/control-receipt.json
+          if-no-files-found: ignore

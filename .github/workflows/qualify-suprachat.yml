@@ -1170,10 +1170,12 @@ jobs:
                     # tab selection. Reacquire the current, declared main HWND
                     # on every attempt; never reuse a stale identity as fallback.
                     $p.Refresh()
+                    $window = $null
                     if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
                       $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
                       if ($candidate.Current.ProcessId -eq $p.Id -and
                           $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                        $window = $candidate
                         $element = $candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
                           $idCondition)
                       }
@@ -1195,6 +1197,16 @@ jobs:
                   if (-not $element) { Start-Sleep -Milliseconds 100 }
                 } while (-not $element -and (Get-Date) -lt $deadline)
                 if (-not $element) {
+                  # Fixed declarative IDs only; do not export names, document text or web content.
+                  $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
+                    'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
+                  $visibleIds = @()
+                  if ($window) {
+                    $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                      [System.Windows.Automation.Condition]::TrueCondition) |
+                      ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                  }
+                  Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
                 $name = $element.Current.Name
