@@ -1,0 +1,35 @@
+name: Qualify shared synthetic cancellation across audiences
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.PeerLedgerRdte/**'
+      - 'SupraChat/Core/SharedSession*.cs'
+      - 'SupraChat/Core/LocalOwnedStreamControls.cs'
+      - 'tools/local/Test-SharedCancellationLab.ps1'
+      - '.github/workflows/qualify-shared-cancellation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shared-cancellation-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build disposable shared-control workbench
+        run: dotnet build SupraChat.PeerLedgerRdte -c Release
+      - name: Qualify accessible GUI and observed automation/agent clients
+        shell: pwsh
+        run: ./tools/local/Test-SharedCancellationLab.ps1 -ReceiptPath "$env:RUNNER_TEMP/shared-cancellation-receipt.json"
+      - name: Preserve sanitized aggregate receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitized-shared-cancellation-receipts
+          path: |
+            ${{ runner.temp }}/shared-cancellation-receipt.json
+            ${{ runner.temp }}/shared-cancellation-receipt.json.uia.json
+          if-no-files-found: ignore

@@ -182,12 +182,12 @@ internal static class GovernedControlChecks
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan elapsed) => _now += elapsed;
     }
-    private sealed class BlockingHttpHandler : HttpMessageHandler
+    internal sealed class BlockingHttpHandler : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         { await Task.Delay(Timeout.Infinite, cancellationToken); return new HttpResponseMessage(HttpStatusCode.OK); }
     }
-    private sealed class BlockingSocket(bool blockClose = false) : WebSocket
+    internal sealed class BlockingSocket(bool blockClose = false) : WebSocket
     {
         public TaskCompletionSource CloseStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private WebSocketState _state = WebSocketState.Open;
