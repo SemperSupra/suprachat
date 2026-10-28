@@ -1168,6 +1168,38 @@ jobs:
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
                 $script:uiaTransientRetries = 0
+                $initialMainHandle = [IntPtr]$window.Current.NativeWindowHandle
+                function Read-RootDiagnostic([IntPtr]$handle) {
+                  $diagnostic = [ordered]@{
+                    handle_present = ($handle -ne [IntPtr]::Zero)
+                    process_matches = $false
+                    main_id_matches = $false
+                    descendant_count = $null
+                    known_ids = @()
+                    probe_completed = $false
+                  }
+                  if ($handle -eq [IntPtr]::Zero) { return $diagnostic }
+                  try {
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                    $diagnostic.process_matches = ($root.Current.ProcessId -eq $p.Id)
+                    $diagnostic.main_id_matches = ($root.Current.AutomationId -ceq 'SupraChat.MainWindow')
+                    # No subtree read unless both owner and declared root match.
+                    if ($diagnostic.process_matches -and $diagnostic.main_id_matches) {
+                      $children = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                        [System.Windows.Automation.Condition]::TrueCondition)
+                      $diagnostic.descendant_count = $children.Count
+                      $allowed = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
+                        'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
+                      $diagnostic.known_ids = @($children | ForEach-Object { $_.Current.AutomationId } |
+                        Where-Object { $_ -cin $allowed } | Sort-Object -Unique)
+                    }
+                    $diagnostic.probe_completed = $true
+                  } catch {
+                    # Diagnostics cannot replace or suppress the original failure.
+                    # Emit no exception text, arbitrary IDs, names or web content.
+                  }
+                  return $diagnostic
+                }
                 function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
@@ -1207,16 +1239,14 @@ jobs:
                   if (-not $element) { Start-Sleep -Milliseconds 100 }
                 } while (-not $element -and (Get-Date) -lt $deadline)
                 if (-not $element) {
-                  # Fixed declarative IDs only; do not export names, document text or web content.
-                  $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
-                    'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
-                  $visibleIds = @()
-                  if ($window) {
-                    $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                      [System.Windows.Automation.Condition]::TrueCondition) |
-                      ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                  $p.Refresh()
+                  $diagnostics = [ordered]@{
+                    schema = 'suprachat-uia-root-loss-diagnostic/v1'
+                    current_equals_initial_handle = ($p.MainWindowHandle -eq $initialMainHandle)
+                    current_root = Read-RootDiagnostic $p.MainWindowHandle
+                    initial_root = Read-RootDiagnostic $initialMainHandle
                   }
-                  Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
+                  Write-Host ($diagnostics | ConvertTo-Json -Depth 5 -Compress)
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
                 $name = $element.Current.Name
