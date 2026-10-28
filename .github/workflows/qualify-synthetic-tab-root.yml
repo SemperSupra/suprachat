@@ -13,7 +13,6 @@ jobs:
     timeout-minutes: 15
     env:
       WINAPP_CLI_TELEMETRY_OPTOUT: '1'
-      WINAPP_CLI_CACHE_DIRECTORY: ${{ runner.temp }}/suprachat-winapp-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v5
@@ -34,6 +33,7 @@ jobs:
       - name: Compare persistent managed UIA and fresh external WinApp clients
         shell: pwsh
         run: |
+          $env:WINAPP_CLI_CACHE_DIRECTORY = Join-Path $env:RUNNER_TEMP 'suprachat-winapp-cache'
           $tools = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'winappcli-v0.7.1') -Recurse -File -Filter 'winapp.exe')
           if ($tools.Count -ne 1) { throw 'PINNED_WINAPP_BINARY_AMBIGUOUS' }
           ./tools/local/Test-SupraChatTabRootProbe.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaTabProbe/bin/Release/net10.0-windows/SupraChat.UiaTabProbe.exe') -WinApp $tools[0].FullName -ReceiptPath (Join-Path $env:RUNNER_TEMP 'synthetic-tab-root.json')
