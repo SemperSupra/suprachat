@@ -190,7 +190,7 @@ jobs:
             throw 'Broker lease/release missing-lease oracle changed.'
           }
           $refusedModels = $brokerResponses | Where-Object { $_.id -eq 8 } | Select-Object -First 1
-          if ($refusedModels.error.data.code -ne 'LEASE_NOT_FOUND' -or $refusedModels.result) {
+          if ($refusedModels.error.data.type -ne 'LEASE_NOT_FOUND' -or $refusedModels.result) {
             throw 'Invalid leased model discovery did not fail at broker admission.'
           }
           $traceAfterBroker = $brokerResponses | Where-Object { $_.id -eq 9 } | Select-Object -First 1
