@@ -153,12 +153,14 @@ jobs:
             '{"jsonrpc":"2.0","id":4,"method":"broker/status"}',
             '{"jsonrpc":"2.0","id":5,"method":"lease/acquire","params":{"request_id":"ci-no-credential","capabilities":["models.read"]}}',
             '{"jsonrpc":"2.0","id":6,"method":"lease/status","params":{"lease_id":"ci-missing-lease"}}',
-            '{"jsonrpc":"2.0","id":7,"method":"lease/release","params":{"request_id":"ci-release-missing","lease_id":"ci-missing-lease"}}'
+            '{"jsonrpc":"2.0","id":7,"method":"lease/release","params":{"request_id":"ci-release-missing","lease_id":"ci-missing-lease"}}',
+            '{"jsonrpc":"2.0","id":8,"method":"models/list","params":{"operation_id":"ci-refused-models","lease_id":"ci-missing-lease"}}',
+            '{"jsonrpc":"2.0","id":9,"method":"trace/status"}'
           )
           $brokerLines = $brokerRequests | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
           if ($LASTEXITCODE -ne 0) { throw 'SupraChat broker stdio smoke failed.' }
           $brokerResponses = @($brokerLines | ForEach-Object { $_ | ConvertFrom-Json })
-          if ($brokerResponses.Count -ne 4) { throw 'Broker stdio response count changed.' }
+          if ($brokerResponses.Count -ne 6) { throw 'Broker stdio response count changed.' }
 
           $brokerStatus = $brokerResponses | Where-Object { $_.id -eq 4 } | Select-Object -First 1
           if (-not $brokerStatus -or
@@ -186,6 +188,14 @@ jobs:
               $leaseRelease.result.classification -ne 'REJECTED' -or
               $leaseRelease.result.error -ne 'LEASE_NOT_FOUND') {
             throw 'Broker lease/release missing-lease oracle changed.'
+          }
+          $refusedModels = $brokerResponses | Where-Object { $_.id -eq 8 } | Select-Object -First 1
+          if ($refusedModels.error.data.code -ne 'LEASE_NOT_FOUND' -or $refusedModels.result) {
+            throw 'Invalid leased model discovery did not fail at broker admission.'
+          }
+          $traceAfterBroker = $brokerResponses | Where-Object { $_.id -eq 9 } | Select-Object -First 1
+          if ($traceAfterBroker.result.mode -ne 'OFF') {
+            throw 'Persistent broker dispatch changed or blocked default-OFF trace state.'
           }
 
       - name: Publish self-contained application
