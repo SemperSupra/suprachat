@@ -1,0 +1,39 @@
+name: Qualify synthetic Windows tab root comparison
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-synthetic-tab-root:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      WINAPP_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build disposable synthetic tab fixture
+        shell: pwsh
+        run: dotnet build SupraChat.UiaTabProbe -c Release
+      - name: Acquire pinned Microsoft WinApp CLI
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'winappcli-v0.7.1-x64.zip'
+          Invoke-WebRequest 'https://github.com/microsoft/winappCli/releases/download/v0.7.1/winappcli-x64.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -cne 'D925D1E32CDC320B6D271F653FD2CD3C05B5D7558DEB20D1B548BEAD77900FCF') {
+            throw 'PINNED_WINAPP_HASH_MISMATCH'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'winappcli-v0.7.1')
+      - name: Compare persistent managed UIA and fresh external WinApp clients
+        shell: pwsh
+        run: |
+          $tools = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'winappcli-v0.7.1') -Recurse -File -Filter 'winapp.exe')
+          if ($tools.Count -ne 1) { throw 'PINNED_WINAPP_BINARY_AMBIGUOUS' }
+          ./tools/local/Test-SupraChatTabRootProbe.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaTabProbe/bin/Release/net10.0-windows/SupraChat.UiaTabProbe.exe') -WinApp $tools[0].FullName -ReceiptPath (Join-Path $env:RUNNER_TEMP 'synthetic-tab-root.json')
+      # Fixed synthetic flags only; no UIA trees, real profiles or artifact uploads.
