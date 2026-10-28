@@ -635,7 +635,6 @@ internal static class Program
     private static async Task<int> RunTraceSessionAsync()
     {
         var pending = new List<Task>();
-        var brokerSession = new BrokerStdioSession(Core);
         while (await Console.In.ReadLineAsync() is { } line)
         {
             pending.RemoveAll(task => task.IsCompleted);
