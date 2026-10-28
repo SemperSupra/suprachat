@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 15
     env:
       WINAPP_CLI_TELEMETRY_OPTOUT: '1'
+      WINAPP_CLI_CACHE_DIRECTORY: ${{ runner.temp }}/suprachat-winapp-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v5

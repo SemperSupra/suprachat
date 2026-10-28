@@ -11,7 +11,9 @@ $exe = (Resolve-Path -LiteralPath $Executable).Path
 $cli = (Get-Command $WinApp).Source
 $env:WINAPP_CLI_TELEMETRY_OPTOUT = '1'
 $env:WINAPP_UI_WORKFLOW_ID = 'suprachat-synthetic-tab-' + [Guid]::NewGuid().ToString('N')
-if ((& $cli --version | Out-String).Trim() -cne '0.7.1') { throw 'PINNED_WINAPP_REQUIRED' }
+# Machine mode suppresses the welcome banner emitted by a fresh CLI cache.
+$version = (& $cli --version --json | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $version -cne '0.7.1') { throw 'PINNED_WINAPP_REQUIRED' }
 $results = @()
 foreach ($variant in @('placeholder', 'webview')) {
     $process = $null
