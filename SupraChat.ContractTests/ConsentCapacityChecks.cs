@@ -40,6 +40,7 @@ internal static class ConsentCapacityChecks
             {
                 var result = owner.Confirm(binding, plan, reviewed: true);
                 Require(result.Outcome == (ending == "cancelled" ? "REFUSED" : "ALLOWED"), "first outcome");
+                if (ending == "cancelled") Require(result.Reason == "REVIEW_CANCELLED", "cancelled reason");
                 outcomes.Add(result);
                 if (ending == "confirmed-stopped") owner.Stop(binding);
             }
