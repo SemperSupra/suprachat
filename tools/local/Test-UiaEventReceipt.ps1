@@ -31,7 +31,7 @@ function Test-EventDocument([string]$Json){
         $bools=@('passed','first_party_account_involved','raw_values_exported','owned_process_exit_confirmed','listener_ready',
             'name_positive_observed','value_positive_observed','public_value_mutation_verified','final_diagnostic_received',
             'sticky_disclosure_observed','callback_unknown','simulated_callback','sticky_disclosure_negative_passed',
-            'negative_control_expected','negative_control_refused')
+            'negative_control_expected','negative_control_refused','stdout_drain_completed')
         Assert-Fields $r (@('schema','failure','observer','outcome')+$bools)
         $null=Read-Enum $r 'schema' @('suprachat-synthetic-uia-event-test/v1')
         $outcome=Read-Enum $r 'outcome' @('OBSERVED_SAFE','NOT_VERIFIED','DISCLOSURE_OBSERVED')
@@ -75,11 +75,12 @@ function Test-EventDocument([string]$Json){
         if($b.passed){
             if($outcome -cne 'OBSERVED_SAFE' -or $failure -cne 'NONE' -or !$observerPassed){throw 'PASS_CONTRADICTION'}
             foreach($name in @('owned_process_exit_confirmed','listener_ready','name_positive_observed','value_positive_observed',
-                'final_diagnostic_received')){if(!$b[$name]){throw 'POSITIVE_WITNESS_MISSING'}}
+                'final_diagnostic_received','stdout_drain_completed')){if(!$b[$name]){throw 'POSITIVE_WITNESS_MISSING'}}
             foreach($name in @('sticky_disclosure_observed','callback_unknown','simulated_callback','sticky_disclosure_negative_passed',
                 'negative_control_expected','negative_control_refused')){if($b[$name]){throw 'PASS_CONTRADICTION'}}
         }elseif($outcome -ceq 'OBSERVED_SAFE' -or $failure -ceq 'NONE'){throw 'OUTCOME_CONTRADICTION'}
         if($b.negative_control_refused -and (!$b.negative_control_expected -or $b.passed -or !$b.listener_ready -or
+            $failure -cne 'EVENT_HANDSHAKE_REFUSED' -or $o.ValueKind -ne [System.Text.Json.JsonValueKind]::Null -or !$b.stdout_drain_completed -or
             $b.name_positive_observed -or $b.value_positive_observed -or !$b.public_value_mutation_verified -or
             !$b.final_diagnostic_received -or !$b.owned_process_exit_confirmed -or $disclosure -or $b.callback_unknown)){throw 'NEGATIVE_WITNESS_MISSING'}
         if($b.sticky_disclosure_negative_passed -and (!$b.simulated_callback -or !$b.sticky_disclosure_observed -or
@@ -94,7 +95,7 @@ if($SelfTest){
         outcome='NOT_VERIFIED';first_party_account_involved=$false;raw_values_exported=$false;owned_process_exit_confirmed=$true;
         listener_ready=$true;name_positive_observed=$true;value_positive_observed=$false;public_value_mutation_verified=$true;
         final_diagnostic_received=$true;sticky_disclosure_observed=$false;callback_unknown=$false;simulated_callback=$false;
-        sticky_disclosure_negative_passed=$false;negative_control_expected=$false;negative_control_refused=$false}
+        sticky_disclosure_negative_passed=$false;negative_control_expected=$false;negative_control_refused=$false;stdout_drain_completed=$true}
     $good=$sample|ConvertTo-Json -Depth 10 -Compress
     if((Test-EventDocument $good).property_qualification_passed){throw 'UNKNOWN_UPGRADED'}
     $negative=@(
@@ -137,10 +138,18 @@ if($SelfTest){
         $positive.Replace('"callback_unknown":false','"callback_unknown":true'),
         $positive.Replace('suprachat-synthetic-uia-property-event-witness/v1','unknown-observer/v1'))
     foreach($bad in $nestedBad){if($bad -ceq $positive){throw 'NEGATIVE_MUTATION_NOOP'};$refused=$false;try{$null=Test-EventDocument $bad}catch{$refused=$true};if(!$refused){throw 'NESTED_NEGATIVE_ACCEPTED'}}
-    @{schema='suprachat-uia-event-validator-selftest/v1';passed=$true;cases=22;live_events=$false}|ConvertTo-Json
+    $omitted=$good|ConvertFrom-Json -AsHashtable
+    $omitted.name_positive_observed=$false;$omitted.negative_control_expected=$true;$omitted.negative_control_refused=$true
+    $omittedJson=$omitted|ConvertTo-Json -Depth 10 -Compress
+    $contradictions=@($omittedJson.Replace('EVENT_HANDSHAKE_REFUSED','FIXTURE_UNAVAILABLE'),
+        $omittedJson.Replace('"observer":null',('"observer":'+($observer|ConvertTo-Json -Depth 10 -Compress))))
+    foreach($bad in $contradictions){$refused=$false;try{$null=Test-EventDocument $bad}catch{$refused=$true};if(!$refused){throw 'NEGATIVE_CONTRADICTION_ACCEPTED'}}
+    @{schema='suprachat-uia-event-validator-selftest/v1';passed=$true;cases=24;live_events=$false}|ConvertTo-Json
     return
 }
 try{
     if(!$ReceiptPath){throw 'PATH_REQUIRED'}
-    Test-EventDocument ([IO.File]::ReadAllText([IO.Path]::GetFullPath($ReceiptPath)))|ConvertTo-Json
+    $path=[IO.Path]::GetFullPath($ReceiptPath)
+    if((Get-Item -LiteralPath $path).Length -gt 131072){throw 'FILE_BOUND_REFUSED'}
+    Test-EventDocument ([IO.File]::ReadAllText($path))|ConvertTo-Json
 }catch{throw 'UIA_EVENT_RECEIPT_REFUSED'}
