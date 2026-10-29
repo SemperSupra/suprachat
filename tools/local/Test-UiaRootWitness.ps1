@@ -72,9 +72,9 @@ function SelfTest {
  probe_completed=$true;failure_stage='NONE';failure_hresult=$null;
  known_controls=[ordered]@{'Synthetic.TabProbe.Toolbar'=$true;'Synthetic.TabProbe.SecondTab'=$true;'Synthetic.TabProbe.SecondButton'=$true};
  scope='FIXED_NATIVE_IDS_ONLY';raw_values_exported=$false}
- $count=0
- function Accept($x,$expected){$v=Check (($x | ConvertTo-Json -Depth 8 -Compress));if($v.outcome -cne $expected){throw 'ACCEPT_FAILED'};$script:count++}
- function Reject($x){try{$null=Check (($x | ConvertTo-Json -Depth 8 -Compress));throw 'UNEXPECTED_PASS'}catch{if($_.Exception.Message -ceq 'UNEXPECTED_PASS'){throw}};$script:count++}
+ $script:rootSelfTestCases=0
+ function Accept($x,$expected){$v=Check (($x | ConvertTo-Json -Depth 8 -Compress));if($v.outcome -cne $expected){throw 'ACCEPT_FAILED'};$script:rootSelfTestCases++}
+ function Reject($x){try{$null=Check (($x | ConvertTo-Json -Depth 8 -Compress));throw 'UNEXPECTED_PASS'}catch{if($_.Exception.Message -ceq 'UNEXPECTED_PASS'){throw}};$script:rootSelfTestCases++}
  function Clone($x){return (ConvertFrom-Json -AsHashtable (($x | ConvertTo-Json -Depth 8 -Compress)))}
  Accept $ok 'OBSERVED_ROOT'
  $timeout=Clone $ok;$timeout.failure_stage='FROM_HANDLE';$timeout.probe_completed=$false;$timeout.failure_hresult=-2147023436;$timeout.uia_pid_matches=$null;$timeout.uia_root_id_matches=$null;$timeout.known_controls=$null
@@ -90,8 +90,9 @@ function SelfTest {
  $b=Clone $timeout;$b.wm_null_error=$null;Reject $b
  $b=Clone $ok;$b.extra='sensitive';Reject $b
  $json=(($ok | ConvertTo-Json -Depth 8 -Compress)).Replace('"raw_values_exported":false','"raw_values_exported":false,"raw_values_exported":false')
- try{$null=Check $json;throw 'UNEXPECTED_PASS'}catch{if($_.Exception.Message -ceq 'UNEXPECTED_PASS'){throw}};$count++
- [ordered]@{schema='suprachat-uia-root-validator-selftest/v1';passed=$true;cases=$count;provider_contact=$false}|ConvertTo-Json -Compress
+ try{$null=Check $json;throw 'UNEXPECTED_PASS'}catch{if($_.Exception.Message -ceq 'UNEXPECTED_PASS'){throw}};$script:rootSelfTestCases++
+ if($script:rootSelfTestCases -ne 21){throw 'SELFTEST_COUNT_REFUSED'}
+ [ordered]@{schema='suprachat-uia-root-validator-selftest/v1';passed=$true;cases=$script:rootSelfTestCases;provider_contact=$false}|ConvertTo-Json -Compress
 }
 if($SelfTest){SelfTest}
 elseif($ReceiptPath){if((Get-Item -LiteralPath $ReceiptPath).Length -gt 16384){throw 'INPUT_BOUND'};Check ([IO.File]::ReadAllText([IO.Path]::GetFullPath($ReceiptPath)))|ConvertTo-Json -Compress}
