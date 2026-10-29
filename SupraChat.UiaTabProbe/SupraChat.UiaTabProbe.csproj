@@ -5,10 +5,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>../SupraChat/app.manifest</ApplicationManifest>
+    <!-- Test-only version toggle; default keeps existing qualification unchanged. -->
+    <AvaloniaProbeVersion Condition="'$(AvaloniaProbeVersion)' == ''">12.1.0</AvaloniaProbeVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaProbeVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaProbeVersion)" />
+    <!-- Keep the independently released WebView wrapper fixed across both provider versions. -->
     <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.0" />
   </ItemGroup>
 </Project>

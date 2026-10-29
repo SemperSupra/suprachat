@@ -20,7 +20,7 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Build disposable synthetic tab fixture
         shell: pwsh
-        run: dotnet build SupraChat.UiaTabProbe -c Release
+        run: dotnet build SupraChat.UiaTabProbe -c Release -p:AvaloniaProbeVersion=12.1.4
       - name: Acquire pinned Microsoft WinApp CLI
         shell: pwsh
         run: |
