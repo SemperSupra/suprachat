@@ -1239,6 +1239,7 @@ jobs:
                   if (-not $element) { Start-Sleep -Milliseconds 100 }
                 } while (-not $element -and (Get-Date) -lt $deadline)
                 if (-not $element) {
+                  try {
                   $p.Refresh()
                   $diagnostics = [ordered]@{
                     schema = 'suprachat-uia-root-loss-diagnostic/v1'
@@ -1247,6 +1248,9 @@ jobs:
                     initial_root = Read-RootDiagnostic $initialMainHandle
                   }
                   Write-Host ($diagnostics | ConvertTo-Json -Depth 5 -Compress)
+                  } catch {
+                    Write-Host '{"schema":"suprachat-uia-root-loss-diagnostic/v1","diagnostic_collection_completed":false}'
+                  }
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
                 $name = $element.Current.Name
