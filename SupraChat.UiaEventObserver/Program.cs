@@ -99,14 +99,20 @@ internal static class Program
             });
             Console.WriteLine("LISTENER_READY");
             Read("CONTROL");
-            Wait(() => Volatile.Read(ref armed) == 1 && Volatile.Read(ref valueArmed) == 1);
+            try { Wait(() => Volatile.Read(ref armed) == 1 && Volatile.Read(ref valueArmed) == 1); }
+            catch
+            {
+                var publicMutationVerified = eventValue.Patterns.Value.Pattern.Value.Value == "ARMED";
+                Console.WriteLine($"CONTROL_NOT_VERIFIED_NAME_{Volatile.Read(ref armed)}_VALUE_{Volatile.Read(ref valueArmed)}_MUTATED_{(publicMutationVerified ? 1 : 0)}");
+                return 2;
+            }
             Console.WriteLine("CONTROL_EVENT_OBSERVED");
             Read("FILLED");
             Wait(() => Volatile.Read(ref filled) == 1 && Volatile.Read(ref valueFilled) == 1);
             Thread.Sleep(300); // Bounded delivery drain, not proof from silence alone.
             var propertyKeepAlive = propertyHandler; propertyHandler = null;
-            var textKeepAlive = textHandler; textHandler = null;
             propertyKeepAlive!.Dispose();
+            var textKeepAlive = textHandler; textHandler = null;
             textKeepAlive.Dispose();
             removed = true; Interlocked.Exchange(ref removalPhase, 1);
             Console.WriteLine("LISTENERS_REMOVED");

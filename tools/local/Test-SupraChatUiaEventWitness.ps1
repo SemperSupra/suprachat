@@ -6,6 +6,8 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $fixture=$null; $observer=$null; $evidence=$null; $passed=$false; $failure='EVENT_WITNESS_NOT_VERIFIED'
 $synthetic='SyntheticOnly'+[Guid]::NewGuid().ToString('N')
+$script:controlNameObserved=$false; $script:controlValueObserved=$false; $script:listenerReady=$false
+$script:publicValueMutationVerified=$false
 try {
     $env:SUPRACHAT_SYNTHETIC_UIA_SECRET=$synthetic
     $fixture=Start-Process -FilePath ([IO.Path]::GetFullPath($Executable)) -PassThru
@@ -42,13 +44,19 @@ try {
     Remove-Item Env:SUPRACHAT_SYNTHETIC_UIA_SECRET
     function Expect([string]$Expected) {
         $line=$observer.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
+        if($line -cmatch '^CONTROL_NOT_VERIFIED_NAME_([01])_VALUE_([01])_MUTATED_([01])$') {
+            $script:controlNameObserved=$Matches[1] -ceq '1';$script:controlValueObserved=$Matches[2] -ceq '1'
+            $script:publicValueMutationVerified=$Matches[3] -ceq '1'
+        }
         if ($line -cne $Expected) { throw 'EVENT_HANDSHAKE_REFUSED' }
     }
     function Signal([string]$Value) { $observer.StandardInput.WriteLine($Value);$observer.StandardInput.Flush() }
     function Invoke-Control([string]$Id) { (Find-Control $Id).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
     Expect 'LISTENER_READY'
+    $script:listenerReady=$true
     Invoke-Control 'Synthetic.Probe.EventControl'; Signal 'CONTROL'
     Expect 'CONTROL_EVENT_OBSERVED'
+    $script:controlNameObserved=$true;$script:controlValueObserved=$true
     Invoke-Control 'Synthetic.Probe.Fill'; Signal 'FILLED'
     Expect 'LISTENERS_REMOVED'
     Invoke-Control 'Synthetic.Probe.EventControl'
@@ -77,9 +85,13 @@ finally {
     $ownedExitConfirmed=$true
     foreach($owned in @($observer,$fixture)) { if($owned){try{if(!$owned.HasExited){$owned.Kill();if(!$owned.WaitForExit(5000)){$ownedExitConfirmed=$false}}}catch{$ownedExitConfirmed=$false};$owned.Dispose()} }
     if(!$ownedExitConfirmed){$passed=$false;$failure='OWNED_PROCESS_EXIT_UNCONFIRMED'}
-    $expectedNegativeRefusal=$NegativeNoPropertyListener.IsPresent -and !$passed -and $failure -ceq 'EVENT_HANDSHAKE_REFUSED' -and $ownedExitConfirmed
+    $expectedNegativeRefusal=$NegativeNoPropertyListener.IsPresent -and !$passed -and $failure -ceq 'EVENT_HANDSHAKE_REFUSED' -and $ownedExitConfirmed -and
+        $script:listenerReady -and !$script:controlNameObserved -and !$script:controlValueObserved
     $receipt=[ordered]@{schema='suprachat-synthetic-uia-event-test/v1';passed=$passed;failure=$failure;observer=$evidence;
+        outcome=$(if($passed){'OBSERVED_SAFE'}elseif($evidence.sensitive_value_disclosed){'DISCLOSURE_OBSERVED'}else{'NOT_VERIFIED'});
         first_party_account_involved=$false;raw_values_exported=$false;owned_process_exit_confirmed=$ownedExitConfirmed;
+        listener_ready=$script:listenerReady;name_positive_observed=$script:controlNameObserved;value_positive_observed=$script:controlValueObserved;
+        public_value_mutation_verified=$script:publicValueMutationVerified;
         negative_control_expected=$NegativeNoPropertyListener.IsPresent;negative_control_refused=$expectedNegativeRefusal}
     $stream=[IO.FileStream]::new([IO.Path]::GetFullPath($ReceiptPath),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     $writer=[IO.StreamWriter]::new($stream)
