@@ -11,6 +11,7 @@ $script:controlNameObserved=$false; $script:controlValueObserved=$false; $script
 $script:publicValueMutationVerified=$false
 $script:controlDiagnosticReceived=$false
 $finalDiagnosticReceived=$false;$finalDisclosure=$false;$finalUnknown=$false
+$script:pendingRead=$null;$stdoutDrainCompleted=$false
 try {
     $env:SUPRACHAT_SYNTHETIC_UIA_SECRET=$synthetic
     $fixture=Start-Process -FilePath ([IO.Path]::GetFullPath($Executable)) -PassThru
@@ -46,8 +47,15 @@ try {
     $start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
     $observer=[Diagnostics.Process]::Start($start)
     Remove-Item Env:SUPRACHAT_SYNTHETIC_UIA_SECRET
+    function Read-ObserverLine {
+        if($null -ne $script:pendingRead){throw 'EVENT_HANDSHAKE_REFUSED'}
+        $script:pendingRead=$observer.StandardOutput.ReadLineAsync()
+        $line=$script:pendingRead.WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
+        $script:pendingRead=$null
+        return $line
+    }
     function Expect([string]$Expected) {
-        $line=$observer.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
+        $line=Read-ObserverLine
         if($line -cmatch '^CONTROL_NOT_VERIFIED_NAME_([01])_VALUE_([01])_MUTATED_([01])$') {
             $script:controlDiagnosticReceived=$true
             $script:controlNameObserved=$Matches[1] -ceq '1';$script:controlValueObserved=$Matches[2] -ceq '1'
@@ -69,7 +77,7 @@ try {
     while ((Find-Control 'Synthetic.Probe.State').Current.Name -cne 'POST_REMOVAL' -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
     if ((Find-Control 'Synthetic.Probe.State').Current.Name -cne 'POST_REMOVAL') { throw 'POST_REMOVAL_MUTATION_UNVERIFIED' }
     Signal 'POST_REMOVAL'
-    $line=$observer.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
+    $line=Read-ObserverLine
     if (!$line -or $line.Length -gt 8192 -or $line.Contains($synthetic)) { throw 'EVENT_RECEIPT_REFUSED' }
     $evidence=$line|ConvertFrom-Json
     if (!$observer.WaitForExit(5000) -or $observer.ExitCode -ne 0 -or
@@ -91,18 +99,30 @@ finally {
         try{
             $observer.StandardInput.Close()
             if(!$observer.HasExited -and !$observer.WaitForExit(5000)){$observer.Kill();if(!$observer.WaitForExit(5000)){$ownedExitConfirmed=$false}}
+        }catch{$ownedExitConfirmed=$false}
+        try{
             if($observer.HasExited){
-                $remaining=$observer.StandardOutput.ReadToEnd()
-                if($remaining.Length -le 8192 -and !$remaining.Contains($synthetic) -and $remaining.Trim() -cmatch '^FINAL_DISCLOSURE_([01])_UNKNOWN_([01])$'){
+                $remaining=''
+                if($null -ne $script:pendingRead){
+                    # Settle the one outstanding read before starting a drain.
+                    $remaining=[string]$script:pendingRead.WaitAsync([TimeSpan]::FromSeconds(2)).GetAwaiter().GetResult()+"`n"
+                    $script:pendingRead=$null
+                }
+                $remaining+=$observer.StandardOutput.ReadToEndAsync().WaitAsync([TimeSpan]::FromSeconds(2)).GetAwaiter().GetResult()
+                $stdoutDrainCompleted=$true
+                $lines=@($remaining -split '\r?\n'|Where-Object {$_})
+                $finalLines=@($lines|Where-Object {$_ -cmatch '^FINAL_DISCLOSURE_[01]_UNKNOWN_[01]$'})
+                if($remaining.Length -le 8192 -and !$remaining.Contains($synthetic) -and $finalLines.Count -eq 1 -and
+                    $lines[-1] -ceq $finalLines[0] -and $finalLines[0] -cmatch '^FINAL_DISCLOSURE_([01])_UNKNOWN_([01])$'){
                     $finalDiagnosticReceived=$true;$finalDisclosure=$Matches[1] -ceq '1';$finalUnknown=$Matches[2] -ceq '1'
                 }
             }
-        }catch{$ownedExitConfirmed=$false}
+        }catch{$stdoutDrainCompleted=$false}
         $observer.Dispose()
     }
     if($fixture){try{if(!$fixture.HasExited){$fixture.Kill();if(!$fixture.WaitForExit(5000)){$ownedExitConfirmed=$false}}}catch{$ownedExitConfirmed=$false};$fixture.Dispose()}
     $synthetic=$null
-    if(!$finalDiagnosticReceived -or $finalUnknown -or $finalDisclosure){$passed=$false}
+    if(!$finalDiagnosticReceived -or $finalUnknown -or $finalDisclosure){$passed=$false;if($failure -ceq 'NONE'){$failure='EVENT_RECEIPT_REFUSED'}}
     if(!$ownedExitConfirmed){$passed=$false;$failure='OWNED_PROCESS_EXIT_UNCONFIRMED'}
     $expectedNegativeRefusal=$NegativeNoPropertyListener.IsPresent -and !$passed -and $failure -ceq 'EVENT_HANDSHAKE_REFUSED' -and $ownedExitConfirmed -and
         $script:listenerReady -and !$script:controlNameObserved -and !$script:controlValueObserved
@@ -115,6 +135,7 @@ finally {
         listener_ready=$script:listenerReady;name_positive_observed=$script:controlNameObserved;value_positive_observed=$script:controlValueObserved;
         public_value_mutation_verified=$script:publicValueMutationVerified;
         final_diagnostic_received=$finalDiagnosticReceived;sticky_disclosure_observed=$finalDisclosure;callback_unknown=$finalUnknown;
+        stdout_drain_completed=$stdoutDrainCompleted;
         simulated_callback=$NegativeDisclosureThenFailure.IsPresent;sticky_disclosure_negative_passed=$expectedStickyDisclosure;
         negative_control_expected=$NegativeNoPropertyListener.IsPresent;negative_control_refused=$expectedNegativeRefusal}
     $stream=[IO.FileStream]::new([IO.Path]::GetFullPath($ReceiptPath),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
