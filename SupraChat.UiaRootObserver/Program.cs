@@ -10,13 +10,16 @@ internal static class Program
 {
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SendMessageTimeout(
+        IntPtr hwnd, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out UIntPtr result);
 
     [MTAThread]
     public static int Main(string[] args)
     {
         var result = new Dictionary<string, object?> {
-            ["schema"]="suprachat-fresh-uia-root-witness/v1", ["process_alive"]=false,
+            ["schema"]="suprachat-fresh-uia-root-witness/v2", ["process_alive"]=false,
             ["os_window_valid"]=null, ["os_pid_matches"]=null, ["uia_pid_matches"]=null,
+            ["wm_null_responded"]=null, ["wm_null_error"]=null, ["wm_null_elapsed_ms"]=null,
             ["uia_root_id_matches"]=null, ["probe_completed"]=false,
             ["failure_stage"]="ARGUMENTS", ["failure_hresult"]=null, ["known_controls"]=null,
             ["scope"]="FIXED_NATIVE_IDS_ONLY", ["raw_values_exported"]=false };
@@ -40,6 +43,18 @@ internal static class Program
             GetWindowThreadProcessId(handle, out var ownerPid);
             result["os_pid_matches"]=ownerPid == pid;
             if (!IsWindow(handle) || ownerPid != pid) throw new InvalidOperationException();
+            // WM_NULL has no product action. A separate-process bounded send
+            // distinguishes window responsiveness from UIA availability; neither
+            // outcome is a qualification gate or a substitute for semantic peers.
+            result["failure_stage"]="OS_RESPONSIVENESS";
+            var clock = Stopwatch.StartNew();
+            Marshal.SetLastPInvokeError(0);
+            var responded = SendMessageTimeout(handle, 0, UIntPtr.Zero, IntPtr.Zero,
+                0x22 /* ABORTIFHUNG | ERRORONEXIT */, 1000, out _) != IntPtr.Zero;
+            var messageError = Marshal.GetLastWin32Error();
+            result["wm_null_responded"]=responded;
+            result["wm_null_error"]=responded ? null : messageError;
+            result["wm_null_elapsed_ms"]=clock.ElapsedMilliseconds;
             result["failure_stage"]="FROM_HANDLE";
             automation = new UIA3Automation();
             var root = automation.NativeAutomation.ElementFromHandle(handle);

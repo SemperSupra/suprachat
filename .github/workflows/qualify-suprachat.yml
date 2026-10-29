@@ -1229,7 +1229,7 @@ jobs:
                       $output=$child.StandardOutput.ReadToEnd()
                       if ($output.Length -le 16384) {
                         $snapshot=$output|ConvertFrom-Json
-                        if ($snapshot.schema -ceq 'suprachat-fresh-uia-root-witness/v1' -and
+                        if ($snapshot.schema -ceq 'suprachat-fresh-uia-root-witness/v2' -and
                             $snapshot.scope -ceq 'FIXED_NATIVE_IDS_ONLY' -and $snapshot.raw_values_exported -eq $false) {
                           $witness.observer=$snapshot; $witness.completed=$true
                         }
