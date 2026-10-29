@@ -43,7 +43,7 @@ function Check($json){
   if($rank -ge 3 -and ($win -ne $true -or $owner -ne $true)){throw 'OWNER_UNVERIFIED'}
   if($rank -lt 4 -and ($null -ne $wm -or $null -ne $elapsed -or $null -ne $error)){throw 'PREMATURE_WM'}
   if($rank -ge 4 -and ($null -eq $wm -or $null -eq $elapsed -or ($wm -and $null -ne $error) -or (!$wm -and $null -eq $error))){throw 'WM_UNVERIFIED'}
-  if($rank -le 4 -and ($null -ne $pid -or $null -ne $id)){throw 'UNOBSERVED_UIA'}
+  if($rank -le 4 -and ($null -ne $uiaPid -or $null -ne $id)){throw 'UNOBSERVED_UIA'}
   if($rank -ge 6 -and $uiaPid -ne $true){throw 'UIA_PID_UNVERIFIED'}
   if($rank -lt 6 -and $null -ne $id){throw 'EARLY_UIA_ID'}
   if($rank -ge 7 -and $id -ne $true){throw 'UIA_ROOT_UNVERIFIED'}
