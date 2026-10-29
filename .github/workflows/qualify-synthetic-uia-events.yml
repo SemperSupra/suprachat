@@ -1,0 +1,41 @@
+name: Qualify synthetic UIA property event witness
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: synthetic-uia-events-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-synthetic-uia-events:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build disposable fixture and independent MTA observer
+        id: build
+        shell: pwsh
+        run: |
+          dotnet build SupraChat.UiaSecurityProbe -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'FIXTURE_BUILD_FAILED' }
+          dotnet build SupraChat.UiaEventObserver -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'OBSERVER_BUILD_FAILED' }
+      - name: Require positive event controls and bounded removal witness
+        shell: pwsh
+        run: |
+          ./tools/local/Test-SupraChatUiaEventWitness.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaSecurityProbe/bin/Release/net10.0-windows/SupraChat.UiaSecurityProbe.exe') -ObserverExecutable (Join-Path $PWD 'SupraChat.UiaEventObserver/bin/Release/net10.0-windows/SupraChat.UiaEventObserver.exe') -ReceiptPath (Join-Path $env:RUNNER_TEMP 'uia-property-events-positive.json')
+      - name: Missing property listener must remain unverified
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./tools/local/Test-SupraChatUiaEventWitness.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaSecurityProbe/bin/Release/net10.0-windows/SupraChat.UiaSecurityProbe.exe') -ObserverExecutable (Join-Path $PWD 'SupraChat.UiaEventObserver/bin/Release/net10.0-windows/SupraChat.UiaEventObserver.exe') -ReceiptPath (Join-Path $env:RUNNER_TEMP 'uia-property-events-negative.json') -NegativeNoPropertyListener
+      # No raw callbacks, synthetic sentinels, screenshots, profiles or artifacts.
+      - name: Observed simulated disclosure survives a later protocol failure
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./tools/local/Test-SupraChatUiaEventWitness.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaSecurityProbe/bin/Release/net10.0-windows/SupraChat.UiaSecurityProbe.exe') -ObserverExecutable (Join-Path $PWD 'SupraChat.UiaEventObserver/bin/Release/net10.0-windows/SupraChat.UiaEventObserver.exe') -ReceiptPath (Join-Path $env:RUNNER_TEMP 'uia-property-events-sticky-disclosure.json') -NegativeDisclosureThenFailure
