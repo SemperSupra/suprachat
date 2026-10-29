@@ -24,7 +24,9 @@ New-Item -ItemType Directory -Path $receipts -Force | Out-Null
 $env:WINAPP_CLI_TELEMETRY_OPTOUT = '1'
 $run = [Guid]::NewGuid().ToString('N')
 $env:WINAPP_UI_WORKFLOW_ID = 'suprachat-metadata-hil-' + $run
-if ((& $winapp --version | Out-String).Trim() -ne '0.7.1') { throw 'WINAPP_VERSION_NOT_QUALIFIED' }
+# Machine mode suppresses the welcome banner emitted by a fresh CLI cache.
+$version = (& $winapp --version --json | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $version -cne '0.7.1') { throw 'WINAPP_VERSION_NOT_QUALIFIED' }
 $started = [DateTime]::UtcNow
 $stages = [Collections.Generic.List[object]]::new()
 $passed = $false

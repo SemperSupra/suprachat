@@ -1,0 +1,22 @@
+name: Qualify fixed-schema UIA event receipts
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uia-event-validator-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  event-receipt-validator:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Synthetic fixed-schema and contradiction refusal checks
+        shell: pwsh
+        run: ./tools/local/Test-UiaEventReceipt.ps1 -SelfTest
