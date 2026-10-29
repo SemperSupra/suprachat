@@ -1215,7 +1215,7 @@ jobs:
                 function Read-FreshRootDiagnostic([IntPtr]$handle) {
                   $child = $null
                   $witness = [ordered]@{schema='suprachat-fresh-root-process/v1';completed=$false;
-                    timed_out=$false;exit_confirmed=$false;observer=$null}
+                    timed_out=$false;exit_confirmed=$false;observer=$null;validation_outcome='NOT_RUN'}
                   try {
                     $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $PWD 'SupraChat.UiaRootObserver/bin/Release/net10.0-windows/SupraChat.UiaRootObserver.exe'))
                     $start.ArgumentList.Add([string]$p.Id); $start.ArgumentList.Add([string]$handle.ToInt64())
@@ -1227,12 +1227,25 @@ jobs:
                     } else {
                       $witness.exit_confirmed=$true
                       $output=$child.StandardOutput.ReadToEnd()
-                      if ($output.Length -le 16384) {
-                        $snapshot=$output|ConvertFrom-Json
-                        if ($snapshot.schema -ceq 'suprachat-fresh-uia-root-witness/v2' -and
-                            $snapshot.scope -ceq 'FIXED_NATIVE_IDS_ONLY' -and $snapshot.raw_values_exported -eq $false) {
-                          $witness.observer=$snapshot; $witness.completed=$true
-                        }
+                      if ($output.Length -gt 0 -and $output.Length -le 16384) {
+                        # Validate the strict v2 fixed-field receipt before inclusion
+                        # in the existing failure-only diagnostic projection.
+                        $validationPath=Join-Path $env:RUNNER_TEMP ('suprachat-root-' + [Guid]::NewGuid().ToString('N') + '.json')
+                        try {
+                          [IO.File]::WriteAllText($validationPath,$output,[Text.UTF8Encoding]::new($false))
+                          $checked = & (Join-Path $PWD 'tools/local/Test-UiaRootWitness.ps1') -ReceiptPath $validationPath |
+                            ConvertFrom-Json
+                          if ($checked.valid -eq $true -and
+                              $checked.schema -ceq 'suprachat-uia-root-receipt-validation/v1') {
+                            $snapshot=$output|ConvertFrom-Json
+                            $witness.observer=$snapshot
+                            $witness.completed=$true
+                            $witness.validation_outcome=$checked.outcome
+                          } else { $witness.validation_outcome='REFUSED' }
+                        } catch { $witness.validation_outcome='REFUSED' }
+                        finally { Remove-Item -LiteralPath $validationPath -Force -ErrorAction SilentlyContinue }
+                      } elseif ($output.Length -gt 16384) {
+                        $witness.validation_outcome='INPUT_BOUND'
                       }
                     }
                   } catch {
