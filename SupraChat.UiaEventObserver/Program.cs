@@ -20,10 +20,11 @@ internal static class Program
         AutomationEventHandlerBase? textHandler = null;
         UIA3Automation? automation = null;
         var removed = false;
+        var disclosure = 0; var unknown = 0;
         try
         {
             if (!OperatingSystem.IsWindows() || args.Length is not (2 or 3) ||
-                (args.Length == 3 && args[2] != "--negative-no-property-listener") || !int.TryParse(args[0], out var pid) ||
+                (args.Length == 3 && args[2] is not ("--negative-no-property-listener" or "--negative-disclosure-then-failure")) || !int.TryParse(args[0], out var pid) ||
                 !long.TryParse(args[1], out var hwnd) || pid <= 0 || hwnd <= 0) throw new InvalidOperationException();
             var synthetic = Environment.GetEnvironmentVariable("SUPRACHAT_SYNTHETIC_UIA_SECRET");
             if (synthetic is null || synthetic.Length is < 24 or > 80 ||
@@ -41,7 +42,7 @@ internal static class Program
                 if (found.Length != 1 || found[0].Properties.ProcessId.Value != pid) throw new InvalidOperationException();
                 return found[0];
             }
-            _ = Find("Synthetic.Probe.Passphrase");
+            var secretField = Find("Synthetic.Probe.Passphrase");
             var state = Find("Synthetic.Probe.State");
             var eventValue = Find("Synthetic.Probe.EventValue");
             var properties = new[] { AutomationObjectIds.NameProperty, AutomationObjectIds.HelpTextProperty,
@@ -49,10 +50,10 @@ internal static class Program
                 LegacyIAccessiblePattern.DescriptionProperty, LegacyIAccessiblePattern.HelpProperty,
                 LegacyIAccessiblePattern.DefaultActionProperty };
             var counts = new int[properties.Length];
-            var armed = 0; var filled = 0; var disclosure = 0; var unknown = 0;
+            var armed = 0; var filled = 0;
             var valueArmed = 0; var valueFilled = 0;
             var callbacks = 0; var textCallbacks = 0; var removalPhase = 0; var freshAfterRemoval = 0;
-            if (args.Length == 2) propertyHandler = root.RegisterPropertyChangedEvent(TreeScope.Subtree, (sender, property, value) =>
+            Action<AutomationElement, PropertyId, object> propertyCallback = (sender, property, value) =>
             {
                 try
                 {
@@ -86,7 +87,9 @@ internal static class Program
                         Interlocked.Exchange(ref unknown, 1);
                 }
                 catch { Interlocked.Exchange(ref unknown, 1); }
-            }, properties);
+            };
+            if (args.Length == 2 || args[2] == "--negative-disclosure-then-failure")
+                propertyHandler = root.RegisterPropertyChangedEvent(TreeScope.Subtree, propertyCallback, properties);
             textHandler = root.RegisterAutomationEvent(TextPattern.TextChangedEvent, TreeScope.Subtree, (sender, _) =>
             {
                 try
@@ -99,6 +102,13 @@ internal static class Program
             });
             Console.WriteLine("LISTENER_READY");
             Read("CONTROL");
+            if (args.Length == 3 && args[2] == "--negative-disclosure-then-failure")
+            {
+                // Exercise the same callback comparison, then a later failure.
+                // This is explicitly simulated evidence, not a native disclosure.
+                propertyCallback(secretField, ValuePattern.ValueProperty, synthetic);
+                throw new InvalidOperationException();
+            }
             try { Wait(() => Volatile.Read(ref armed) == 1 && Volatile.Read(ref valueArmed) == 1); }
             catch
             {
@@ -148,6 +158,7 @@ internal static class Program
             try { propertyHandler?.Dispose(); } catch { }
             try { textHandler?.Dispose(); } catch { }
             try { automation?.Dispose(); } catch { }
+            Console.WriteLine($"FINAL_DISCLOSURE_{Volatile.Read(ref disclosure)}_UNKNOWN_{Volatile.Read(ref unknown)}");
         }
     }
 

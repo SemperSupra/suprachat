@@ -34,3 +34,8 @@ jobs:
         run: |
           ./tools/local/Test-SupraChatUiaEventWitness.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaSecurityProbe/bin/Release/net10.0-windows/SupraChat.UiaSecurityProbe.exe') -ObserverExecutable (Join-Path $PWD 'SupraChat.UiaEventObserver/bin/Release/net10.0-windows/SupraChat.UiaEventObserver.exe') -ReceiptPath (Join-Path $env:RUNNER_TEMP 'uia-property-events-negative.json') -NegativeNoPropertyListener
       # No raw callbacks, synthetic sentinels, screenshots, profiles or artifacts.
+      - name: Observed simulated disclosure survives a later protocol failure
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./tools/local/Test-SupraChatUiaEventWitness.ps1 -Executable (Join-Path $PWD 'SupraChat.UiaSecurityProbe/bin/Release/net10.0-windows/SupraChat.UiaSecurityProbe.exe') -ObserverExecutable (Join-Path $PWD 'SupraChat.UiaEventObserver/bin/Release/net10.0-windows/SupraChat.UiaEventObserver.exe') -ReceiptPath (Join-Path $env:RUNNER_TEMP 'uia-property-events-sticky-disclosure.json') -NegativeDisclosureThenFailure

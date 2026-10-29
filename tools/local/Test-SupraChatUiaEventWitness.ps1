@@ -1,13 +1,16 @@
 param([Parameter(Mandatory)][string]$Executable, [Parameter(Mandatory)][string]$ObserverExecutable,
-    [Parameter(Mandatory)][string]$ReceiptPath, [switch]$NegativeNoPropertyListener)
+    [Parameter(Mandatory)][string]$ReceiptPath, [switch]$NegativeNoPropertyListener, [switch]$NegativeDisclosureThenFailure)
 $ErrorActionPreference = 'Stop'
 if (!$IsWindows) { throw 'WINDOWS_REQUIRED' }
+if($NegativeNoPropertyListener -and $NegativeDisclosureThenFailure){throw 'ONE_NEGATIVE_MODE_REQUIRED'}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $fixture=$null; $observer=$null; $evidence=$null; $passed=$false; $failure='EVENT_WITNESS_NOT_VERIFIED'
 $synthetic='SyntheticOnly'+[Guid]::NewGuid().ToString('N')
 $script:controlNameObserved=$false; $script:controlValueObserved=$false; $script:listenerReady=$false
 $script:publicValueMutationVerified=$false
+$script:controlDiagnosticReceived=$false
+$finalDiagnosticReceived=$false;$finalDisclosure=$false;$finalUnknown=$false
 try {
     $env:SUPRACHAT_SYNTHETIC_UIA_SECRET=$synthetic
     $fixture=Start-Process -FilePath ([IO.Path]::GetFullPath($Executable)) -PassThru
@@ -38,6 +41,7 @@ try {
     $start=[Diagnostics.ProcessStartInfo]::new([IO.Path]::GetFullPath($ObserverExecutable))
     $start.ArgumentList.Add([string]$fixture.Id);$start.ArgumentList.Add([string]$hwnd.ToInt64())
     if ($NegativeNoPropertyListener) { $start.ArgumentList.Add('--negative-no-property-listener') }
+    if ($NegativeDisclosureThenFailure) { $start.ArgumentList.Add('--negative-disclosure-then-failure') }
     $start.UseShellExecute=$false;$start.CreateNoWindow=$true
     $start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
     $observer=[Diagnostics.Process]::Start($start)
@@ -45,6 +49,7 @@ try {
     function Expect([string]$Expected) {
         $line=$observer.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(15)).GetAwaiter().GetResult()
         if($line -cmatch '^CONTROL_NOT_VERIFIED_NAME_([01])_VALUE_([01])_MUTATED_([01])$') {
+            $script:controlDiagnosticReceived=$true
             $script:controlNameObserved=$Matches[1] -ceq '1';$script:controlValueObserved=$Matches[2] -ceq '1'
             $script:publicValueMutationVerified=$Matches[3] -ceq '1'
         }
@@ -81,17 +86,36 @@ catch {
 }
 finally {
     Remove-Item Env:SUPRACHAT_SYNTHETIC_UIA_SECRET -ErrorAction SilentlyContinue
-    $synthetic=$null
     $ownedExitConfirmed=$true
-    foreach($owned in @($observer,$fixture)) { if($owned){try{if(!$owned.HasExited){$owned.Kill();if(!$owned.WaitForExit(5000)){$ownedExitConfirmed=$false}}}catch{$ownedExitConfirmed=$false};$owned.Dispose()} }
+    if($observer){
+        try{
+            $observer.StandardInput.Close()
+            if(!$observer.HasExited -and !$observer.WaitForExit(5000)){$observer.Kill();if(!$observer.WaitForExit(5000)){$ownedExitConfirmed=$false}}
+            if($observer.HasExited){
+                $remaining=$observer.StandardOutput.ReadToEnd()
+                if($remaining.Length -le 8192 -and !$remaining.Contains($synthetic) -and $remaining.Trim() -cmatch '^FINAL_DISCLOSURE_([01])_UNKNOWN_([01])$'){
+                    $finalDiagnosticReceived=$true;$finalDisclosure=$Matches[1] -ceq '1';$finalUnknown=$Matches[2] -ceq '1'
+                }
+            }
+        }catch{$ownedExitConfirmed=$false}
+        $observer.Dispose()
+    }
+    if($fixture){try{if(!$fixture.HasExited){$fixture.Kill();if(!$fixture.WaitForExit(5000)){$ownedExitConfirmed=$false}}}catch{$ownedExitConfirmed=$false};$fixture.Dispose()}
+    $synthetic=$null
+    if(!$finalDiagnosticReceived -or $finalUnknown -or $finalDisclosure){$passed=$false}
     if(!$ownedExitConfirmed){$passed=$false;$failure='OWNED_PROCESS_EXIT_UNCONFIRMED'}
     $expectedNegativeRefusal=$NegativeNoPropertyListener.IsPresent -and !$passed -and $failure -ceq 'EVENT_HANDSHAKE_REFUSED' -and $ownedExitConfirmed -and
         $script:listenerReady -and !$script:controlNameObserved -and !$script:controlValueObserved
+    $expectedNegativeRefusal=$expectedNegativeRefusal -and $script:controlDiagnosticReceived -and $script:publicValueMutationVerified -and
+        $finalDiagnosticReceived -and !$finalDisclosure -and !$finalUnknown
+    $expectedStickyDisclosure=$NegativeDisclosureThenFailure.IsPresent -and !$passed -and $finalDiagnosticReceived -and $finalDisclosure -and $ownedExitConfirmed
     $receipt=[ordered]@{schema='suprachat-synthetic-uia-event-test/v1';passed=$passed;failure=$failure;observer=$evidence;
-        outcome=$(if($passed){'OBSERVED_SAFE'}elseif($evidence.sensitive_value_disclosed){'DISCLOSURE_OBSERVED'}else{'NOT_VERIFIED'});
+        outcome=$(if($finalDisclosure -or $evidence.sensitive_value_disclosed){'DISCLOSURE_OBSERVED'}elseif($passed){'OBSERVED_SAFE'}else{'NOT_VERIFIED'});
         first_party_account_involved=$false;raw_values_exported=$false;owned_process_exit_confirmed=$ownedExitConfirmed;
         listener_ready=$script:listenerReady;name_positive_observed=$script:controlNameObserved;value_positive_observed=$script:controlValueObserved;
         public_value_mutation_verified=$script:publicValueMutationVerified;
+        final_diagnostic_received=$finalDiagnosticReceived;sticky_disclosure_observed=$finalDisclosure;callback_unknown=$finalUnknown;
+        simulated_callback=$NegativeDisclosureThenFailure.IsPresent;sticky_disclosure_negative_passed=$expectedStickyDisclosure;
         negative_control_expected=$NegativeNoPropertyListener.IsPresent;negative_control_refused=$expectedNegativeRefusal}
     $stream=[IO.FileStream]::new([IO.Path]::GetFullPath($ReceiptPath),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     $writer=[IO.StreamWriter]::new($stream)
@@ -99,4 +123,5 @@ finally {
     $receipt|ConvertTo-Json -Depth 8
 }
 if($NegativeNoPropertyListener -and !$expectedNegativeRefusal){throw 'NEGATIVE_LISTENER_TEST_FAILED'}
-if(!$passed -and !$expectedNegativeRefusal){throw $failure}
+if($NegativeDisclosureThenFailure -and !$expectedStickyDisclosure){throw 'STICKY_DISCLOSURE_TEST_FAILED'}
+if(!$passed -and !$expectedNegativeRefusal -and !$expectedStickyDisclosure){throw $failure}
