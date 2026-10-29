@@ -1,0 +1,27 @@
+name: Qualify disposable WPF native Value positive-event bridge
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-wpf-native-value-positive:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build bounded WPF positive fixture and separate MTA observer
+        shell: pwsh
+        run: |
+          dotnet build SupraChat.NativeValuePositiveFixture -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'WPF_FIXTURE_BUILD_FAILED' }
+          dotnet build SupraChat.NativeValuePositiveObserver -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'NATIVE_OBSERVER_BUILD_FAILED' }
+      - name: Require actual native Value callback and removal barrier
+        shell: pwsh
+        run: |
+          ./tools/local/Test-NativeValuePositiveBridge.ps1 -Fixture 'SupraChat.NativeValuePositiveFixture/bin/Release/net10.0-windows/SupraChat.NativeValuePositiveFixture.exe' -Observer 'SupraChat.NativeValuePositiveObserver/bin/Release/net10.0-windows/SupraChat.NativeValuePositiveObserver.exe'
+      # Independent test-only positive channel; Avalonia native Value gate remains NOT_VERIFIED.
