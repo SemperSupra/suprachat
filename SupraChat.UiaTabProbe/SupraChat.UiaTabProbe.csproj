@@ -11,6 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaProbeVersion)" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaProbeVersion)" />
-    <PackageReference Include="Avalonia.Controls.WebView" Version="$(AvaloniaProbeVersion)" />
+    <!-- Keep the independently released WebView wrapper fixed across both provider versions. -->
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.0" />
   </ItemGroup>
 </Project>
