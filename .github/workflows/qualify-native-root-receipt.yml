@@ -1,0 +1,30 @@
+name: Qualify native root witness against owned synthetic window
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-root-witness:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Batch strict receipt negative and positive tests
+        shell: pwsh
+        run: ./tools/local/Test-UiaRootWitness.ps1 -SelfTest
+      - name: Build observer and owned placeholder fixture
+        shell: pwsh
+        run: |
+          dotnet build SupraChat.UiaRootObserver -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'OBSERVER_BUILD_FAILED' }
+          dotnet build SupraChat.UiaTabProbe -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'FIXTURE_BUILD_FAILED' }
+      - name: Check actual native MTA receipt and exact owned semantic peers
+        shell: pwsh
+        run: |
+          ./tools/local/Test-UiaRootWitnessLive.ps1 -FixtureExecutable 'SupraChat.UiaTabProbe/bin/Release/net10.0-windows/SupraChat.UiaTabProbe.exe' -ObserverExecutable 'SupraChat.UiaRootObserver/bin/Release/net10.0-windows/SupraChat.UiaRootObserver.exe'
+      # No provider contact; no arbitrary UIA trees, profiles, raw callback values or artifact uploads.
