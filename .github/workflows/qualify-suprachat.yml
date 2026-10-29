@@ -1098,6 +1098,11 @@ jobs:
           Stop-Process -Id $p.Id -Force
           "SupraChat remained alive through an 8-second self-contained Windows launch smoke."
 
+      - name: Build fresh read-only UIA failure observer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: dotnet build SupraChat.UiaRootObserver -c Release
+
       - name: Windows live UI Automation accessibility smoke
         if: runner.os == 'Windows'
         shell: pwsh
@@ -1172,19 +1177,24 @@ jobs:
                 function Read-RootDiagnostic([IntPtr]$handle) {
                   $diagnostic = [ordered]@{
                     handle_present = ($handle -ne [IntPtr]::Zero)
-                    process_matches = $false
-                    main_id_matches = $false
+                    process_matches = $null
+                    main_id_matches = $null
                     descendant_count = $null
                     known_ids = @()
                     probe_completed = $false
+                    failure_stage = 'FROM_HANDLE'
+                    failure_hresult = $null
                   }
                   if ($handle -eq [IntPtr]::Zero) { return $diagnostic }
                   try {
                     $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                    $diagnostic.failure_stage = 'PID_READ'
                     $diagnostic.process_matches = ($root.Current.ProcessId -eq $p.Id)
+                    $diagnostic.failure_stage = 'ROOT_ID_READ'
                     $diagnostic.main_id_matches = ($root.Current.AutomationId -ceq 'SupraChat.MainWindow')
                     # No subtree read unless both owner and declared root match.
                     if ($diagnostic.process_matches -and $diagnostic.main_id_matches) {
+                      $diagnostic.failure_stage = 'DESCENDANTS'
                       $children = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                         [System.Windows.Automation.Condition]::TrueCondition)
                       $diagnostic.descendant_count = $children.Count
@@ -1194,11 +1204,43 @@ jobs:
                         Where-Object { $_ -cin $allowed } | Sort-Object -Unique)
                     }
                     $diagnostic.probe_completed = $true
+                    $diagnostic.failure_stage = 'NONE'
                   } catch {
                     # Diagnostics cannot replace or suppress the original failure.
                     # Emit no exception text, arbitrary IDs, names or web content.
+                    $diagnostic.failure_hresult = $_.Exception.GetBaseException().HResult
                   }
                   return $diagnostic
+                }
+                function Read-FreshRootDiagnostic([IntPtr]$handle) {
+                  $child = $null
+                  $witness = [ordered]@{schema='suprachat-fresh-root-process/v1';completed=$false;
+                    timed_out=$false;exit_confirmed=$false;observer=$null}
+                  try {
+                    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $PWD 'SupraChat.UiaRootObserver/bin/Release/net10.0-windows/SupraChat.UiaRootObserver.exe'))
+                    $start.ArgumentList.Add([string]$p.Id); $start.ArgumentList.Add([string]$handle.ToInt64())
+                    $start.UseShellExecute=$false; $start.CreateNoWindow=$true
+                    $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+                    $child=[Diagnostics.Process]::Start($start)
+                    if (!$child.WaitForExit(12000)) {
+                      $witness.timed_out=$true; $child.Kill(); $witness.exit_confirmed=$child.WaitForExit(2000)
+                    } else {
+                      $witness.exit_confirmed=$true
+                      $output=$child.StandardOutput.ReadToEnd()
+                      if ($output.Length -le 16384) {
+                        $snapshot=$output|ConvertFrom-Json
+                        if ($snapshot.schema -ceq 'suprachat-fresh-uia-root-witness/v1' -and
+                            $snapshot.scope -ceq 'FIXED_NATIVE_IDS_ONLY' -and $snapshot.raw_values_exported -eq $false) {
+                          $witness.observer=$snapshot; $witness.completed=$true
+                        }
+                      }
+                    }
+                  } catch {
+                    # No provider data or exception text is a diagnostic output.
+                  } finally {
+                    if ($child) { try { if (!$child.HasExited) { $child.Kill(); $witness.exit_confirmed=$child.WaitForExit(2000) } } catch { }; $child.Dispose() }
+                  }
+                  return $witness
                 }
                 function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
@@ -1241,9 +1283,12 @@ jobs:
                 if (-not $element) {
                   try {
                   $p.Refresh()
+                  $fresh = Read-FreshRootDiagnostic $initialMainHandle
+                  # This witness never substitutes for missing semantic peers.
                   $diagnostics = [ordered]@{
                     schema = 'suprachat-uia-root-loss-diagnostic/v1'
                     current_equals_initial_handle = ($p.MainWindowHandle -eq $initialMainHandle)
+                    fresh_observer_before_managed_diagnostics = $fresh
                     current_root = Read-RootDiagnostic $p.MainWindowHandle
                     initial_root = Read-RootDiagnostic $initialMainHandle
                   }
