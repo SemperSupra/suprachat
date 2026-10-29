@@ -1,0 +1,14 @@
+name: Check root receipt contract
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./tools/local/Test-UiaRootWitness.ps1 -SelfTest
