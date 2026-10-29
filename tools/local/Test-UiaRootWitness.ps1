@@ -31,7 +31,7 @@ function Check($json){
   if(B 'raw_values_exported' $false){throw 'EXPORT_REFUSED'}
   $alive=B 'process_alive' $false
   $win=B 'os_window_valid' $true;$owner=B 'os_pid_matches' $true
-  $pid=B 'uia_pid_matches' $true;$id=B 'uia_root_id_matches' $true
+  $uiaPid=B 'uia_pid_matches' $true;$id=B 'uia_root_id_matches' $true
   $wm=B 'wm_null_responded' $true;$error=N 'wm_null_error' $true 0 65535
   $elapsed=N 'wm_null_elapsed_ms' $true 0 10000
   $hr=N 'failure_hresult' $true -2147483648 2147483647
@@ -44,7 +44,7 @@ function Check($json){
   if($rank -lt 4 -and ($null -ne $wm -or $null -ne $elapsed -or $null -ne $error)){throw 'PREMATURE_WM'}
   if($rank -ge 4 -and ($null -eq $wm -or $null -eq $elapsed -or ($wm -and $null -ne $error) -or (!$wm -and $null -eq $error))){throw 'WM_UNVERIFIED'}
   if($rank -le 4 -and ($null -ne $pid -or $null -ne $id)){throw 'UNOBSERVED_UIA'}
-  if($rank -ge 6 -and $pid -ne $true){throw 'UIA_PID_UNVERIFIED'}
+  if($rank -ge 6 -and $uiaPid -ne $true){throw 'UIA_PID_UNVERIFIED'}
   if($rank -lt 6 -and $null -ne $id){throw 'EARLY_UIA_ID'}
   if($rank -ge 7 -and $id -ne $true){throw 'UIA_ROOT_UNVERIFIED'}
   $controls=$r.GetProperty('known_controls')
