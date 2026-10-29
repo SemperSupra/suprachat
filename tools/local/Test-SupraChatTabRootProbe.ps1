@@ -15,7 +15,7 @@ $env:WINAPP_UI_WORKFLOW_ID = 'suprachat-synthetic-tab-' + [Guid]::NewGuid().ToSt
 $version = (& $cli --version --json | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or $version -cne '0.7.1') { throw 'PINNED_WINAPP_REQUIRED' }
 $results = @()
-foreach ($variant in @('placeholder', 'webview')) {
+foreach ($variant in @('placeholder', 'webview', 'webview-pending')) {
     $process = $null
     try {
         # Visible disposable test fixture; no product profile or real page.
@@ -33,7 +33,7 @@ foreach ($variant in @('placeholder', 'webview')) {
                 [System.Windows.Automation.PropertyCondition]::new(
                     [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id))
         }
-        $readyExpected = if ($variant -ceq 'webview') { 'NATIVE_PAGE_READY' } else { 'PLACEHOLDER_READY' }
+        $readyExpected = switch ($variant) { 'webview' {'NATIVE_PAGE_READY'} 'webview-pending' {'NATIVE_NAVIGATION_PENDING'} default {'PLACEHOLDER_READY'} }
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
         $ready = $false
         do {
@@ -101,12 +101,15 @@ foreach ($variant in @('placeholder', 'webview')) {
             throw 'SYNTHETIC_TAB_INITIAL_STATE_REFUSED'
         }
         $tab = Find-ProbeControl (Get-ProbeRoot) 'Synthetic.TabProbe.SecondTab'
+        $elapsed = [Diagnostics.Stopwatch]::StartNew()
         $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
         # Observe through the persistent managed client and separate fresh WinApp
         # processes. One client cannot substitute for the other's missing evidence.
         Start-Sleep -Milliseconds 300
         $managed = Read-ManagedSnapshot
+        $managedElapsed = $elapsed.ElapsedMilliseconds
         $external = Read-ExternalSnapshot
+        $externalElapsed = $elapsed.ElapsedMilliseconds
         $process.Refresh()
         $sameHandle = $process.MainWindowHandle -eq $initialHandle
         $qualified = $managed.completed -and $managed.root_accepted -and $managed.toolbar_found -and
@@ -114,6 +117,7 @@ foreach ($variant in @('placeholder', 'webview')) {
             $external.completed -and $external.root_accepted -and $external.toolbar_found -and
             $external.second_button_found -and $external.second_selected -and $sameHandle
         $results += [ordered]@{variant=$variant;initial=$before;managed_after=$managed;
+            initial_readiness=$readyExpected;managed_observed_elapsed_ms=$managedElapsed;external_observed_elapsed_ms=$externalElapsed;
             external_after=$external;hwnd_unchanged=$sameHandle;
             peers_preserved=$qualified}
     }

@@ -18,7 +18,7 @@ internal static class Program
     public static int Main(string[] args)
     {
         if (!OperatingSystem.IsWindows() || args.Length != 2 || args[0] != "--variant" ||
-            args[1] is not ("placeholder" or "webview")) return 64;
+            args[1] is not ("placeholder" or "webview" or "webview-pending")) return 64;
         if (new[] { "WEBVIEW2_USER_DATA_FOLDER", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER",
             "WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER" }.Any(name => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name))))
@@ -52,7 +52,7 @@ internal sealed class ProbeApp : Application
             DockPanel.SetDock(toolbar, Dock.Top);
             DockPanel.SetDock(ready, Dock.Top);
             LoopbackPage? page = null;
-            if (Program.Variant == "webview")
+            if (Program.Variant is "webview" or "webview-pending")
             {
                 // Fresh synthetic-only profile. No product code, AppState,
                 // existing profiles, accounts, CDP observer or provider calls.
@@ -69,10 +69,20 @@ internal sealed class ProbeApp : Application
                         windows.AdditionalBrowserArguments = "--disable-background-networking";
                     }
                 };
-                view.AdapterCreated += (_, _) =>
+                view.AdapterCreated += async (_, _) =>
                 {
-                    page ??= new LoopbackPage();
-                    view.Navigate(page.Origin);
+                    try
+                    {
+                        var pending = Program.Variant == "webview-pending";
+                        page ??= new LoopbackPage(pending);
+                        view.Navigate(page.Origin);
+                        if (pending)
+                        {
+                            await page.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                            ready.Text = "NATIVE_NAVIGATION_PENDING";
+                        }
+                    }
+                    catch { ready.Text = "FIXTURE_REFUSED"; }
                 };
                 view.NavigationCompleted += (_, args) =>
                 {
@@ -102,9 +112,13 @@ internal sealed class ProbeApp : Application
 internal sealed class LoopbackPage : IDisposable
 {
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+    private readonly bool _holdResponse;
+    private readonly CancellationTokenSource _stop = new();
+    public TaskCompletionSource RequestStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Uri Origin { get; }
-    public LoopbackPage()
+    public LoopbackPage(bool holdResponse)
     {
+        _holdResponse = holdResponse;
         _listener.Start();
         Origin = new Uri($"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}/");
         _ = ServeAsync();
@@ -118,6 +132,8 @@ internal sealed class LoopbackPage : IDisposable
                 using var client = await _listener.AcceptTcpClientAsync();
                 using var stream = client.GetStream();
                 _ = await stream.ReadAsync(new byte[4096]).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                RequestStarted.TrySetResult();
+                if (_holdResponse) await Task.Delay(Timeout.Infinite, _stop.Token);
                 var body = "<!doctype html><title>Synthetic tab probe</title><p>Loopback fixture only</p>";
                 var response = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {body.Length}\r\nConnection: close\r\nContent-Security-Policy: default-src 'none'\r\n\r\n{body}");
                 await stream.WriteAsync(response);
@@ -127,6 +143,7 @@ internal sealed class LoopbackPage : IDisposable
         catch (SocketException) { }
         catch (IOException) { }
         catch (TimeoutException) { }
+        catch (OperationCanceledException) { }
     }
-    public void Dispose() => _listener.Stop();
+    public void Dispose() { _stop.Cancel(); _listener.Stop(); }
 }
