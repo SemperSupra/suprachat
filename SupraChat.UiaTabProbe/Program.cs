@@ -39,6 +39,7 @@ internal sealed class ProbeApp : Application
         {
             var ready = Named(new TextBlock { Text = "WAITING" }, "Synthetic.TabProbe.Ready");
             var toolbar = Named(new Button { Content = "Synthetic toolbar" }, "Synthetic.TabProbe.Toolbar");
+            var selectionWitness = Named(new TextBlock { Text = "NOT_APPLICABLE" }, "Synthetic.TabProbe.SelectionWitness");
             var secondButton = Named(new Button { Content = "Synthetic second tab button" }, "Synthetic.TabProbe.SecondButton");
             var first = Named(new TabItem { Header = "First" }, "Synthetic.TabProbe.FirstTab");
             var second = Named(new TabItem { Header = "Second", Content = secondButton }, "Synthetic.TabProbe.SecondTab");
@@ -47,11 +48,19 @@ internal sealed class ProbeApp : Application
             {
                 Title = "SupraChat disposable synthetic tab probe",
                 Width = 800, Height = 500,
-                Content = new DockPanel { Children = { toolbar, ready, tabs } }
+                Content = new DockPanel { Children = { toolbar, ready, selectionWitness, tabs } }
             }, "SupraChat.SyntheticTabProbe");
             DockPanel.SetDock(toolbar, Dock.Top);
             DockPanel.SetDock(ready, Dock.Top);
+            DockPanel.SetDock(selectionWitness, Dock.Top);
             LoopbackPage? page = null;
+            var navigationCompleted = false;
+            tabs.SelectionChanged += (_, _) =>
+            {
+                if (Program.Variant == "webview-pending" && tabs.SelectedIndex == 1)
+                    selectionWitness.Text = page is not null && page.ResponseHeld && !navigationCompleted
+                        ? "PENDING_AT_SELECTION" : "PENDING_NOT_PROVEN";
+            };
             if (Program.Variant is "webview" or "webview-pending")
             {
                 // Fresh synthetic-only profile. No product code, AppState,
@@ -79,15 +88,18 @@ internal sealed class ProbeApp : Application
                         if (pending)
                         {
                             await page.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-                            ready.Text = "NATIVE_NAVIGATION_PENDING";
+                            ready.Text = !navigationCompleted && page.ResponseHeld ? "NATIVE_NAVIGATION_PENDING" : "FIXTURE_REFUSED";
                         }
                     }
                     catch { ready.Text = "FIXTURE_REFUSED"; }
                 };
                 view.NavigationCompleted += (_, args) =>
                 {
-                    if (args.IsSuccess && page is not null && args.Request == page.Origin)
-                        ready.Text = "NATIVE_PAGE_READY";
+                    if (page is not null && page.RequestStarted.Task.IsCompleted)
+                    {
+                        navigationCompleted = true;
+                        ready.Text = args.IsSuccess && args.Request == page.Origin ? "NATIVE_PAGE_READY" : "NATIVE_NAVIGATION_ENDED";
+                    }
                 };
                 first.Content = view;
             }
@@ -115,6 +127,8 @@ internal sealed class LoopbackPage : IDisposable
     private readonly bool _holdResponse;
     private readonly CancellationTokenSource _stop = new();
     public TaskCompletionSource RequestStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _responseHeld;
+    public bool ResponseHeld => Volatile.Read(ref _responseHeld) == 1;
     public Uri Origin { get; }
     public LoopbackPage(bool holdResponse)
     {
@@ -131,7 +145,9 @@ internal sealed class LoopbackPage : IDisposable
             {
                 using var client = await _listener.AcceptTcpClientAsync();
                 using var stream = client.GetStream();
-                _ = await stream.ReadAsync(new byte[4096]).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                var received = await stream.ReadAsync(new byte[4096]).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+                if (received <= 0) throw new IOException();
+                if (_holdResponse) Volatile.Write(ref _responseHeld, 1);
                 RequestStarted.TrySetResult();
                 if (_holdResponse) await Task.Delay(Timeout.Infinite, _stop.Token);
                 var body = "<!doctype html><title>Synthetic tab probe</title><p>Loopback fixture only</p>";
@@ -145,5 +161,5 @@ internal sealed class LoopbackPage : IDisposable
         catch (TimeoutException) { }
         catch (OperationCanceledException) { }
     }
-    public void Dispose() { _stop.Cancel(); _listener.Stop(); }
+    public void Dispose() { Volatile.Write(ref _responseHeld, 0); _stop.Cancel(); _listener.Stop(); }
 }

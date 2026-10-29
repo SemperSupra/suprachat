@@ -107,6 +107,11 @@ foreach ($variant in @('placeholder', 'webview', 'webview-pending')) {
         # processes. One client cannot substitute for the other's missing evidence.
         Start-Sleep -Milliseconds 300
         $managed = Read-ManagedSnapshot
+        $pendingAtSelection = $null
+        if ($variant -ceq 'webview-pending') {
+            $witness = Find-ProbeControl (Get-ProbeRoot) 'Synthetic.TabProbe.SelectionWitness'
+            $pendingAtSelection = $witness -and $witness.Current.Name -ceq 'PENDING_AT_SELECTION'
+        }
         $managedElapsed = $elapsed.ElapsedMilliseconds
         $external = Read-ExternalSnapshot
         $externalElapsed = $elapsed.ElapsedMilliseconds
@@ -115,9 +120,11 @@ foreach ($variant in @('placeholder', 'webview', 'webview-pending')) {
         $qualified = $managed.completed -and $managed.root_accepted -and $managed.toolbar_found -and
             $managed.second_button_found -and $managed.second_selected -and
             $external.completed -and $external.root_accepted -and $external.toolbar_found -and
-            $external.second_button_found -and $external.second_selected -and $sameHandle
+            $external.second_button_found -and $external.second_selected -and $sameHandle -and
+            ($variant -cne 'webview-pending' -or $pendingAtSelection -eq $true)
         $results += [ordered]@{variant=$variant;initial=$before;managed_after=$managed;
             initial_readiness=$readyExpected;managed_observed_elapsed_ms=$managedElapsed;external_observed_elapsed_ms=$externalElapsed;
+            pending_at_selection=$pendingAtSelection;
             external_after=$external;hwnd_unchanged=$sameHandle;
             peers_preserved=$qualified}
     }
