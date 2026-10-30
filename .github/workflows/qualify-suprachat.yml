@@ -1738,6 +1738,14 @@ jobs:
             echo 'Draft release asset set does not match the generated SHA256SUMS inventory.' >&2
             exit 1
           }
+          readback="$RUNNER_TEMP/suprachat-release-readback"
+          mkdir -p "$readback"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$readback"
+          cmp "$RELEASE_ASSET_DIR/SHA256SUMS" "$readback/SHA256SUMS"
+          (cd "$readback" && sha256sum -c SHA256SUMS)
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$tagged_sha" == "$SOURCE_SHA" ]] || { echo 'Remote release tag moved during asset verification.' >&2; exit 1; }
 
 
   linux-desktop-oracle-census:
