@@ -44,7 +44,7 @@ static class Program
         MustRefuse(() => w.Open(conversationUrl: "https://attacker.invalid"), "unrecognized_conversation");
 
         var clock = new DateTimeOffset(2026, 10, 30, 0, 0, 0, TimeSpan.Zero);
-        var drafts = new WorkbenchLocalDrafts(w, () => clock);
+        using var drafts = new WorkbenchLocalDrafts(w, () => clock);
         var r = drafts.Prepare(first.Id, "chat-to-terminal", "SYNTHETIC_ONLY_DRAFT");
         Check(r.RequiresExplicitUserAction && !r.TerminalExecutionPermitted && !r.ChatSubmissionPermitted,
             "review_no_execution");
@@ -61,6 +61,12 @@ static class Program
         clock = clock.AddMinutes(3);
         MustRefuse(() => drafts.StageReviewed(first.Id, r.ReviewId, "EXPIRING_SYNTHETIC_ONLY"), "expired_review");
 
+        r = drafts.Prepare(first.Id, "chat-to-terminal", "SELECTION_CHANGE_SYNTHETIC");
+        Check(w.Select(second.Id) && w.Select(first.Id), "selection_round_trip");
+        MustRefuse(() => drafts.StageReviewed(first.Id, r.ReviewId, "SELECTION_CHANGE_SYNTHETIC"),
+            "selection_change_revokes_review");
+        Check(drafts.PendingReviewCount == 0, "selection_change_clears_review_payload");
+
         var js = WorkbenchMetadataExport.Prepare(w.Snapshot(), "json");
         var md = WorkbenchMetadataExport.Prepare(w.Snapshot(), "markdown");
         Check(js.Content.Contains("SESSION_METADATA_ONLY", StringComparison.Ordinal), "metadata_scope");
@@ -74,9 +80,22 @@ static class Program
               !md.WasSaved && md.RequiresUserSelectedDestination, "no_implicit_file_write");
         MustRefuse(() => WorkbenchMetadataExport.Prepare(w.Snapshot(), "pdf"), "unimplemented_pdf_refused");
 
+        Check(drafts.RetainedSessionCount == 1, "one_live_session_draft_retained");
         Check(w.Move(first.Id, 1) && w.Close(first.Id), "move_and_close");
-        drafts.ForgetSession(first.Id);
+        Check(drafts.RetainedSessionCount == 0, "close_clears_session_draft_payload");
         MustRefuse(() => drafts.Read(first.Id), "closed_session_isolation");
+
+        // Repeated close/open cycles never retain draft text outside the live-session bound.
+        for (var n = 0; n < 64; n++)
+        {
+            var cycle = w.Open("Cycle " + n);
+            var cycleReview = drafts.Prepare(cycle.Id, "chat-to-terminal", "CYCLE_SYNTHETIC_ONLY");
+            Check(drafts.StageReviewed(cycle.Id, cycleReview.ReviewId, "CYCLE_SYNTHETIC_ONLY").DraftStaged,
+                "cycle_draft_staged");
+            Check(drafts.RetainedSessionCount == 1, "cycle_retained_only_while_live");
+            Check(w.Close(cycle.Id), "cycle_session_closed");
+            Check(drafts.RetainedSessionCount == 0, "cycle_close_releases_payload");
+        }
         for (var n = 0; n < 15; n++) w.Open();
         Check(w.Snapshot().Sessions.Count == SessionWorkbench.MaximumSessions, "capacity");
         MustRefuse(() => w.Open(), "capacity_refusal");

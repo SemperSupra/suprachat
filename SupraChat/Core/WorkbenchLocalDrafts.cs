@@ -5,7 +5,7 @@ namespace SupraChat.Core;
 /// This component has no terminal handle, browser, clipboard, filesystem or
 /// credential access, and exposes no execution or chat-submission capability.
 /// </summary>
-public sealed class WorkbenchLocalDrafts
+public sealed class WorkbenchLocalDrafts : IDisposable
 {
     public const string Schema = "suprachat-local-draft-transfer/v1";
     private static readonly TimeSpan MaximumApprovalAge = TimeSpan.FromMinutes(2);
@@ -13,11 +13,27 @@ public sealed class WorkbenchLocalDrafts
     private readonly Func<DateTimeOffset> _now;
     private readonly Dictionary<string, PendingReview> _reviews = new();
     private readonly Dictionary<string, WorkbenchLocalDraftPair> _drafts = new();
+    private bool _disposed;
 
     public WorkbenchLocalDrafts(SessionWorkbench workbench, Func<DateTimeOffset>? now = null)
     {
         _workbench = workbench ?? throw new ArgumentNullException(nameof(workbench));
         _now = now ?? (() => DateTimeOffset.UtcNow);
+        _workbench.ActiveSessionChanged += OnActiveSessionChanged;
+        _workbench.SessionClosed += OnSessionClosed;
+    }
+
+    internal int PendingReviewCount => _reviews.Count;
+    internal int RetainedSessionCount => _drafts.Count;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _workbench.ActiveSessionChanged -= OnActiveSessionChanged;
+        _workbench.SessionClosed -= OnSessionClosed;
+        _reviews.Clear();
+        _drafts.Clear();
+        _disposed = true;
     }
 
     public WorkbenchLocalDraftReview Prepare(string sessionId, string direction, string input)
@@ -76,6 +92,10 @@ public sealed class WorkbenchLocalDrafts
         _reviews.Remove(sessionId);
         _drafts.Remove(sessionId);
     }
+
+    private void OnActiveSessionChanged() => _reviews.Clear();
+
+    private void OnSessionClosed(string sessionId) => ForgetSession(sessionId);
 
     private void EnsureSelected(string sessionId)
     {
