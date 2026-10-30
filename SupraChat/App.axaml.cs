@@ -13,6 +13,7 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var window = new MainWindow();
+            window.InstallW0WorkbenchTab();
             desktop.MainWindow = window;
             window.Opened += async (_, _) =>
                 await window.HandleStartupArgumentsAsync(desktop.Args ?? Array.Empty<string>());
