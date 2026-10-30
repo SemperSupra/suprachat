@@ -1258,15 +1258,38 @@ jobs:
                     Start-Sleep -Milliseconds 100
                   } while ((Get-Date) -lt $selectionDeadline)
                   if (-not $selected) {
-                    $tabs = $window.FindAll(
-                      [System.Windows.Automation.TreeScope]::Descendants,
-                      [System.Windows.Automation.PropertyCondition]::new(
-                        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-                        $area.tab))
-                    $tabCount = $tabs.Count
+                    # Reacquire and revalidate the declared process root for
+                    # diagnostics; a remounted window must not leave a stale root.
+                    $diagnosticWindow = $null
+                    $rootAvailable = $false
+                    $tabCount = 0
                     $isEnabled = $false
-                    if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
-                    throw "UI Automation tab selection timed out: id=$($area.tab); count=$tabCount; enabled=$isEnabled; selected=$($selection.Current.IsSelected)"
+                    $diagnosticReadSucceeded = $false
+                    try {
+                      $p.Refresh()
+                      if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+                        $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                        if ($candidate.Current.ProcessId -eq $p.Id -and
+                            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                          $diagnosticWindow = $candidate
+                          $rootAvailable = $true
+                          $tabs = $diagnosticWindow.FindAll(
+                            [System.Windows.Automation.TreeScope]::Descendants,
+                            [System.Windows.Automation.PropertyCondition]::new(
+                              [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                              $area.tab))
+                          $tabCount = $tabs.Count
+                          if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
+                          $diagnosticReadSucceeded = $true
+                        }
+                      }
+                    } catch {
+                      # Do not let a transient provider error mask the bounded
+                      # selection failure, and never include exception text.
+                    }
+                    $isSelected = $false
+                    try { $isSelected = $selection.Current.IsSelected } catch {}
+                    throw "UI Automation tab selection timed out: id=$($area.tab); root_available=$rootAvailable; read_succeeded=$diagnosticReadSucceeded; count=$tabCount; enabled=$isEnabled; selected=$isSelected"
                   }
                   # A successful SelectionItem.Select is not proof that the
                   # newly selected tab's child provider has finished attaching.
