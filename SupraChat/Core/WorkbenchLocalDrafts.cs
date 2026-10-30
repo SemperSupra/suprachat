@@ -5,7 +5,7 @@ namespace SupraChat.Core;
 /// This component has no terminal handle, browser, clipboard, filesystem or
 /// credential access, and exposes no execution or chat-submission capability.
 /// </summary>
-public sealed class WorkbenchLocalDrafts
+public sealed class WorkbenchLocalDrafts : IDisposable
 {
     public const string Schema = "suprachat-local-draft-transfer/v1";
     private static readonly TimeSpan MaximumApprovalAge = TimeSpan.FromMinutes(2);
@@ -13,15 +13,32 @@ public sealed class WorkbenchLocalDrafts
     private readonly Func<DateTimeOffset> _now;
     private readonly Dictionary<string, PendingReview> _reviews = new();
     private readonly Dictionary<string, WorkbenchLocalDraftPair> _drafts = new();
+    private bool _disposed;
 
     public WorkbenchLocalDrafts(SessionWorkbench workbench, Func<DateTimeOffset>? now = null)
     {
         _workbench = workbench ?? throw new ArgumentNullException(nameof(workbench));
         _now = now ?? (() => DateTimeOffset.UtcNow);
+        _workbench.ActiveSessionChanged += OnActiveSessionChanged;
+        _workbench.SessionClosed += OnSessionClosed;
+    }
+
+    internal int PendingReviewCount => _reviews.Count;
+    internal int RetainedSessionCount => _drafts.Count;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _workbench.ActiveSessionChanged -= OnActiveSessionChanged;
+        _workbench.SessionClosed -= OnSessionClosed;
+        _reviews.Clear();
+        _drafts.Clear();
+        _disposed = true;
     }
 
     public WorkbenchLocalDraftReview Prepare(string sessionId, string direction, string input)
     {
+        ThrowIfDisposed();
         var preview = _workbench.PreviewTransfer(sessionId, direction, input);
         EnsureSelected(sessionId);
         var reviewId = Guid.NewGuid().ToString("N");
@@ -35,6 +52,7 @@ public sealed class WorkbenchLocalDrafts
 
     public WorkbenchLocalDraftCommit StageReviewed(string sessionId, string reviewId, string stillVisibleInput)
     {
+        ThrowIfDisposed();
         EnsureSelected(sessionId);
         if (!_reviews.TryGetValue(sessionId, out var pending) ||
             pending.Id != reviewId)
@@ -63,6 +81,7 @@ public sealed class WorkbenchLocalDrafts
 
     public WorkbenchLocalDraftPair Read(string sessionId)
     {
+        ThrowIfDisposed();
         if (!_workbench.Snapshot().Sessions.Any(s => s.Id == sessionId))
             throw new ArgumentException("UNKNOWN_SESSION_ID", nameof(sessionId));
         return _drafts.TryGetValue(sessionId, out var drafts)
@@ -76,6 +95,12 @@ public sealed class WorkbenchLocalDrafts
         _reviews.Remove(sessionId);
         _drafts.Remove(sessionId);
     }
+
+    private void OnActiveSessionChanged() => _reviews.Clear();
+
+    private void OnSessionClosed(string sessionId) => ForgetSession(sessionId);
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
     private void EnsureSelected(string sessionId)
     {
