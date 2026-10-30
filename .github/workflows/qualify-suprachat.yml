@@ -1308,17 +1308,28 @@ jobs:
 
                     $createDeadline = (Get-Date).AddSeconds(5)
                     $created = $false
+                    $createReadbackCount = 0
+                    $createReadbackRowNameNonempty = $false
+                    $createReadbackExpectedNameMatch = $false
                     while ((Get-Date) -lt $createDeadline) {
                       $sessionList = Require-SemanticControl 'Sessions.List'
                       $listSelection = $sessionList.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
                       $selectedRows = $listSelection.Current.GetSelection()
-                      if ($selectedRows.Count -eq 1 -and $selectedRows[0].Current.Name -eq 'SupraChat UIA fixture') {
+                      $createReadbackCount = $selectedRows.Count
+                      if ($createReadbackCount -eq 1) {
+                        $selectedName = $selectedRows[0].Current.Name
+                        $createReadbackRowNameNonempty = -not [string]::IsNullOrWhiteSpace($selectedName)
+                        $createReadbackExpectedNameMatch = $selectedName -eq 'SupraChat UIA fixture'
+                      }
+                      if ($createReadbackCount -eq 1 -and $createReadbackExpectedNameMatch) {
                         $created = $true
                         break
                       }
                       Start-Sleep -Milliseconds 100
                     }
-                    if (-not $created) { throw 'W1 UIA create did not select the new local fixture session.' }
+                    if (-not $created) {
+                      throw "W1 UIA create readback failed; selected_row_count=$createReadbackCount; selected_row_name_nonempty=$createReadbackRowNameNonempty; expected_name_match=$createReadbackExpectedNameMatch."
+                    }
 
                     $titleValue.SetValue('SupraChat UIA renamed fixture')
                     (Require-SemanticControl 'Sessions.Rename').GetCurrentPattern(
