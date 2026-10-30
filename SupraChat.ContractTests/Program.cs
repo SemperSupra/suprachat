@@ -651,5 +651,6 @@ await DurableCancellationChecks.RunAsync();
 await DurableTransportCancellationChecks.RunAsync();
 await SharedSessionAdmissionChecks.RunAsync();
 await MetadataConsentChecks.RunAsync();
+ConsentCapacityChecks.Run();
 await NativeConsentChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");
