@@ -1244,8 +1244,29 @@ jobs:
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
-                  if (-not $selection.Current.IsSelected) {
-                    throw "UI Automation tab SelectionItem did not select: $($area.tab)"
+                  $selected = $false
+                  $selectionDeadline = (Get-Date).AddSeconds(5)
+                  do {
+                    # Reacquire the element and pattern while Avalonia's UIA
+                    # provider publishes the selection change asynchronously.
+                    $tab = Require-SemanticControl $area.tab
+                    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+                    if ($selection.Current.IsSelected) {
+                      $selected = $true
+                      break
+                    }
+                    Start-Sleep -Milliseconds 100
+                  } while ((Get-Date) -lt $selectionDeadline)
+                  if (-not $selected) {
+                    $tabs = $window.FindAll(
+                      [System.Windows.Automation.TreeScope]::Descendants,
+                      [System.Windows.Automation.PropertyCondition]::new(
+                        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                        $area.tab))
+                    $tabCount = $tabs.Count
+                    $isEnabled = $false
+                    if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
+                    throw "UI Automation tab selection timed out: id=$($area.tab); count=$tabCount; enabled=$isEnabled; selected=$($selection.Current.IsSelected)"
                   }
                   # A successful SelectionItem.Select is not proof that the
                   # newly selected tab's child provider has finished attaching.
