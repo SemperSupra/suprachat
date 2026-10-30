@@ -14,6 +14,9 @@ public sealed class SessionWorkbench
     private readonly List<WorkbenchSession> _sessions = new();
     private string? _activeSessionId;
 
+    internal event Action? ActiveSessionChanged;
+    internal event Action<string>? SessionClosed;
+
     public WorkbenchSnapshot Snapshot()
     {
         var collisions = new List<WorkbenchCollision>();
@@ -55,13 +58,16 @@ public sealed class SessionWorkbench
             "NOT_CONNECTED", TerminalExecutionPermitted: false, ChatSubmissionPermitted: false);
         _sessions.Add(item);
         _activeSessionId = item.Id;
+        ActiveSessionChanged?.Invoke();
         return item;
     }
 
     public bool Select(string sessionId)
     {
         if (!_sessions.Any(s => s.Id == sessionId)) return false;
+        if (_activeSessionId == sessionId) return true;
         _activeSessionId = sessionId;
+        ActiveSessionChanged?.Invoke();
         return true;
     }
 
@@ -69,9 +75,14 @@ public sealed class SessionWorkbench
     {
         var index = _sessions.FindIndex(s => s.Id == sessionId);
         if (index < 0) return false;
+        var wasActive = _activeSessionId == sessionId;
         _sessions.RemoveAt(index);
-        if (_activeSessionId == sessionId)
+        if (wasActive)
+        {
             _activeSessionId = _sessions.Count == 0 ? null : _sessions[Math.Min(index, _sessions.Count - 1)].Id;
+            ActiveSessionChanged?.Invoke();
+        }
+        SessionClosed?.Invoke(sessionId);
         return true;
     }
 
