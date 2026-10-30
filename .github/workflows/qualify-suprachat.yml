@@ -1569,6 +1569,15 @@ jobs:
             throw 'Extracted Windows archive browser runtime smoke failed.'
           }
 
+      - name: Upload SPDX SBOM for inspection (Windows)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-spdx
+          path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Windows release archive
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -1634,6 +1643,15 @@ jobs:
           jq -e '.ok == true' <<<"$capabilities" >/dev/null
           browser="$("$cli" browser-snapshot --url https://example.com/)"
           jq -e '.ok == true and (.value.aria_snapshot | length > 0)' <<<"$browser" >/dev/null
+
+      - name: Upload SPDX SBOM for inspection (Unix)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-spdx
+          path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload Unix release archive
         if: github.ref == 'refs/tags/v0.0.1' && runner.os != 'Windows'
