@@ -1539,6 +1539,17 @@ jobs:
           } | ConvertTo-Json -Depth 5
           $provenance | Set-Content -LiteralPath (Join-Path $source 'build-provenance.json') -Encoding UTF8
 
+          $sbomTool = Join-Path $env:RUNNER_TEMP 'sbom-tool.exe'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/sbom-tool/releases/download/v4.1.5/sbom-tool-win-x64.exe' -OutFile $sbomTool
+          $sbomToolHash = (Get-FileHash -Algorithm SHA256 -Path $sbomTool).Hash.ToLowerInvariant()
+          if ($sbomToolHash -ne '625767b371b7fdd58f40f618b8a86da0247a33c89e419039c86b4edba1dad4b5') {
+            throw "Microsoft SBOM tool digest mismatch: $sbomToolHash"
+          }
+          & $sbomTool generate -b $source -bc $PWD -pn SupraChat -pv 0.0.1 -ps 'SemperSupra' -nsb 'https://github.com/SemperSupra/suprachat'
+          if ($LASTEXITCODE -ne 0) { throw "SPDX SBOM generation failed with $LASTEXITCODE" }
+          & $sbomTool validate -b $source -o (Join-Path $env:RUNNER_TEMP 'sbom-validation-source.json') -mi SPDX:2.2
+          if ($LASTEXITCODE -ne 0) { throw "SPDX source-tree validation failed with $LASTEXITCODE" }
+
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $nameVersion = if ($isReleaseTag) { 'v0.0.1' } else { "qualification-$($env:GITHUB_SHA.Substring(0, 12))" }
           $archive = Join-Path $env:RUNNER_TEMP "SupraChat-$nameVersion-${{ matrix.platform }}.zip"
@@ -1546,6 +1557,8 @@ jobs:
             $source, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)
           $extract = Join-Path $env:RUNNER_TEMP 'suprachat-windows-archive-smoke'
           Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          & $sbomTool validate -b $extract -o (Join-Path $env:RUNNER_TEMP 'sbom-validation-archive.json') -mi SPDX:2.2
+          if ($LASTEXITCODE -ne 0) { throw "SPDX extracted-archive validation failed with $LASTEXITCODE" }
           if (!(Test-Path -LiteralPath (Join-Path $extract '.playwright/package/cli.js'))) { throw 'Archive omitted Playwright runtime.' }
           if (!(Test-Path -LiteralPath (Join-Path $extract 'install.ps1'))) { throw 'Archive omitted Windows installer script.' }
           $cli = Join-Path $extract 'SupraChat.Automation.exe'
@@ -1588,11 +1601,23 @@ jobs:
             --arg runner_image_version "${ImageVersion:-unknown}" \
             '{schema:"suprachat-platform-build/v1",platform:$platform,source_commit:$source_commit,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt,dotnet_sdk:$dotnet_sdk,runner_image_os:$runner_image_os,runner_image_version:$runner_image_version}' \
             > "$source/build-provenance.json"
+          tool="$RUNNER_TEMP/sbom-tool"
+          if [[ "$RUNNER_OS" == 'macOS' ]]; then
+            curl --fail --location --silent --show-error 'https://github.com/microsoft/sbom-tool/releases/download/v4.1.5/sbom-tool-osx-arm64' --output "$tool"
+            echo 'bb25842fd707fbe78d3ac9de0d2b27ee2f4a97764f3b8a5c2068c826e75f3535  '"$tool" | shasum -a 256 --check --status
+          else
+            curl --fail --location --silent --show-error 'https://github.com/microsoft/sbom-tool/releases/download/v4.1.5/sbom-tool-linux-x64' --output "$tool"
+            echo 'bf5d4f99bc98c119d549d08fc02ae92598a7a42772f17317c01031a92632e05b  '"$tool" | sha256sum --check --status
+          fi
+          chmod +x "$tool"
+          "$tool" generate -b "$source" -bc "$PWD" -pn SupraChat -pv 0.0.1 -ps SemperSupra -nsb https://github.com/SemperSupra/suprachat
+          "$tool" validate -b "$source" -o "$RUNNER_TEMP/sbom-validation-source.json" -mi SPDX:2.2
           archive="$RUNNER_TEMP/SupraChat-$name_version-${{ matrix.platform }}.tar.gz"
           tar -czf "$archive" -C "$source" .
           extract="$RUNNER_TEMP/suprachat-${{ matrix.rid }}-archive-smoke"
           mkdir -p "$extract"
           tar -xzf "$archive" -C "$extract"
+          "$tool" validate -b "$extract" -o "$RUNNER_TEMP/sbom-validation-archive.json" -mi SPDX:2.2
           test -f "$extract/build-provenance.json"
           if [[ '${{ matrix.platform }}' == 'macos-arm64' ]]; then
             cli="$extract/SupraChat.app/Contents/MacOS/SupraChat.Automation"
@@ -1625,6 +1650,7 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: out/${{ matrix.rid }}/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
