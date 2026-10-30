@@ -1235,9 +1235,11 @@ jobs:
                   $null = Require-SemanticControl $automationId
                 }
                 foreach ($area in @(
+                  # Run the bounded W1 fixture first so its independent evidence
+                  # is retained even if a later legacy tab hits the known UIA flake.
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.Heading', 'Sessions.NewTitle', 'Sessions.NewConversation', 'Sessions.NewWorkspace', 'Sessions.Create', 'Sessions.Rename', 'Sessions.List', 'Sessions.Status', 'Sessions.ExportJsonPreview', 'Sessions.ExportMarkdownPreview', 'Sessions.ExportPreview') },
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') },
-                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.Heading', 'Sessions.NewTitle', 'Sessions.NewConversation', 'Sessions.NewWorkspace', 'Sessions.Create', 'Sessions.Rename', 'Sessions.List', 'Sessions.Status', 'Sessions.ExportJsonPreview', 'Sessions.ExportMarkdownPreview', 'Sessions.ExportPreview') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
