@@ -1512,7 +1512,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic UIA secret boundary failed.' }
 
       - name: Build and smoke Windows release archive
-        if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -1520,9 +1520,12 @@ jobs:
           $appVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo(
             (Join-Path $source 'SupraChat.exe')).FileVersion
           if ($appVersion -ne '0.0.1.0') { throw "Windows app version mismatch: $appVersion" }
-          foreach ($required in @('LICENSE', 'THIRD-PARTY-NOTICES.md', 'RELEASE_NOTES-v0.0.1.md')) {
-            if (!(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Release notice missing: $required" }
-            Copy-Item -LiteralPath $required -Destination $source
+          $isReleaseTag = $env:GITHUB_REF -eq 'refs/tags/v0.0.1'
+          if ($isReleaseTag) {
+            foreach ($required in @('LICENSE', 'THIRD-PARTY-NOTICES.md', 'RELEASE_NOTES-v0.0.1.md')) {
+              if (!(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Release notice missing: $required" }
+              Copy-Item -LiteralPath $required -Destination $source
+            }
           }
           $provenance = @{
             schema = 'suprachat-platform-build/v1'
@@ -1537,7 +1540,8 @@ jobs:
           $provenance | Set-Content -LiteralPath (Join-Path $source 'build-provenance.json') -Encoding UTF8
 
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archive = Join-Path $env:RUNNER_TEMP 'SupraChat-v0.0.1-${{ matrix.platform }}.zip'
+          $nameVersion = if ($isReleaseTag) { 'v0.0.1' } else { "qualification-$($env:GITHUB_SHA.Substring(0, 12))" }
+          $archive = Join-Path $env:RUNNER_TEMP "SupraChat-$nameVersion-${{ matrix.platform }}.zip"
           [System.IO.Compression.ZipFile]::CreateFromDirectory(
             $source, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)
           $extract = Join-Path $env:RUNNER_TEMP 'suprachat-windows-archive-smoke'
@@ -1562,12 +1566,17 @@ jobs:
           retention-days: 7
 
       - name: Build and smoke Unix release archive
-        if: github.ref == 'refs/tags/v0.0.1' && runner.os != 'Windows'
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
           source="out/${{ matrix.rid }}"
-          cp LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md "$source/"
+          if [[ "$GITHUB_REF" == 'refs/tags/v0.0.1' ]]; then
+            cp LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md "$source/"
+            name_version='v0.0.1'
+          else
+            name_version="qualification-${GITHUB_SHA:0:12}"
+          fi
           dotnet_sdk="$(dotnet --version)"
           jq -n \
             --arg platform '${{ matrix.platform }}' \
@@ -1579,7 +1588,7 @@ jobs:
             --arg runner_image_version "${ImageVersion:-unknown}" \
             '{schema:"suprachat-platform-build/v1",platform:$platform,source_commit:$source_commit,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt,dotnet_sdk:$dotnet_sdk,runner_image_os:$runner_image_os,runner_image_version:$runner_image_version}' \
             > "$source/build-provenance.json"
-          archive="$RUNNER_TEMP/SupraChat-v0.0.1-${{ matrix.platform }}.tar.gz"
+          archive="$RUNNER_TEMP/SupraChat-$name_version-${{ matrix.platform }}.tar.gz"
           tar -czf "$archive" -C "$source" .
           extract="$RUNNER_TEMP/suprachat-${{ matrix.rid }}-archive-smoke"
           mkdir -p "$extract"
@@ -1642,6 +1651,9 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" == "v0.0.1" ]] || { echo "Unexpected release tag: $RELEASE_TAG" >&2; exit 1; }
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$tagged_sha" == "$SOURCE_SHA" ]] || { echo 'Remote release tag moved away from the triggering source commit.' >&2; exit 1; }
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$SOURCE_SHA" FETCH_HEAD || { echo 'Release tag must target a commit contained in main.' >&2; exit 1; }
           test -s LICENSE
@@ -1685,13 +1697,26 @@ jobs:
             '{schema:"suprachat-release-provenance/v1",tag:$tag,source_commit:$source_commit,workflow_run_id:$workflow_run_id,build_provenance:$build_provenance,platforms:["windows-x64","linux-x64","macos-arm64"]}' \
             > "$stage/release-provenance.json"
           (cd "$stage" && sha256sum SupraChat-* LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md release-provenance.json > SHA256SUMS)
+          (cd "$stage" && sha256sum -c SHA256SUMS)
           echo "RELEASE_ASSET_DIR=$stage" >> "$GITHUB_ENV"
 
       - name: Create draft GitHub Release
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$tagged_sha" == "$SOURCE_SHA" ]] || { echo 'Remote release tag moved during staging; refusing draft update.' >&2; exit 1; }
+          expected_names="$(find "$RELEASE_ASSET_DIR" -maxdepth 1 -type f -printf '%f\n' | sort)"
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+            existing_names="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | .[]')"
+            while IFS= read -r existing_name; do
+              [[ -z "$existing_name" ]] && continue
+              grep -Fxq -- "$existing_name" <<<"$expected_names" || {
+                echo "Draft release has an unexpected asset outside this manifest: $existing_name" >&2
+                exit 1
+              }
+            done <<<"$existing_names"
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --draft \
@@ -1708,6 +1733,11 @@ jobs:
               --notes-file RELEASE_NOTES-v0.0.1.md \
               --verify-tag
           fi
+          final_names="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | .[]')"
+          [[ "$final_names" == "$expected_names" ]] || {
+            echo 'Draft release asset set does not match the generated SHA256SUMS inventory.' >&2
+            exit 1
+          }
 
 
   linux-desktop-oracle-census:
