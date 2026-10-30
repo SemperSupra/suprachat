@@ -38,6 +38,7 @@ public sealed class WorkbenchLocalDrafts : IDisposable
 
     public WorkbenchLocalDraftReview Prepare(string sessionId, string direction, string input)
     {
+        ThrowIfDisposed();
         var preview = _workbench.PreviewTransfer(sessionId, direction, input);
         EnsureSelected(sessionId);
         var reviewId = Guid.NewGuid().ToString("N");
@@ -51,6 +52,7 @@ public sealed class WorkbenchLocalDrafts : IDisposable
 
     public WorkbenchLocalDraftCommit StageReviewed(string sessionId, string reviewId, string stillVisibleInput)
     {
+        ThrowIfDisposed();
         EnsureSelected(sessionId);
         if (!_reviews.TryGetValue(sessionId, out var pending) ||
             pending.Id != reviewId)
@@ -79,6 +81,7 @@ public sealed class WorkbenchLocalDrafts : IDisposable
 
     public WorkbenchLocalDraftPair Read(string sessionId)
     {
+        ThrowIfDisposed();
         if (!_workbench.Snapshot().Sessions.Any(s => s.Id == sessionId))
             throw new ArgumentException("UNKNOWN_SESSION_ID", nameof(sessionId));
         return _drafts.TryGetValue(sessionId, out var drafts)
@@ -96,6 +99,8 @@ public sealed class WorkbenchLocalDrafts : IDisposable
     private void OnActiveSessionChanged() => _reviews.Clear();
 
     private void OnSessionClosed(string sessionId) => ForgetSession(sessionId);
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
     private void EnsureSelected(string sessionId)
     {

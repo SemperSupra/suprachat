@@ -15,6 +15,12 @@ static class Program
         catch (InvalidOperationException) { _cases++; return; }
         throw new InvalidOperationException("WORKBENCH_REFUSAL_MISSING_" + name);
     }
+    private static void MustBeDisposed(Action action, string name)
+    {
+        try { action(); }
+        catch (ObjectDisposedException) { _cases++; return; }
+        throw new InvalidOperationException("WORKBENCH_DISPOSED_REFUSAL_MISSING_" + name);
+    }
     static int Main()
     {
         // No local desktop, browser, credential, network, terminal process or profile.
@@ -96,6 +102,19 @@ static class Program
             Check(w.Close(cycle.Id), "cycle_session_closed");
             Check(drafts.RetainedSessionCount == 0, "cycle_close_releases_payload");
         }
+
+        var disposedWorkbench = new SessionWorkbench();
+        var disposedSession = disposedWorkbench.Open("Dispose fixture");
+        var disposedDrafts = new WorkbenchLocalDrafts(disposedWorkbench, () => clock);
+        var disposedReview = disposedDrafts.Prepare(disposedSession.Id, "chat-to-terminal", "DISPOSED_SYNTHETIC_ONLY");
+        disposedDrafts.Dispose();
+        Check(disposedDrafts.PendingReviewCount == 0 && disposedDrafts.RetainedSessionCount == 0,
+            "dispose_clears_payloads");
+        MustBeDisposed(() => disposedDrafts.Prepare(disposedSession.Id, "chat-to-terminal", "AFTER_DISPOSE"),
+            "prepare_after_dispose");
+        MustBeDisposed(() => disposedDrafts.StageReviewed(disposedSession.Id, disposedReview.ReviewId,
+            "DISPOSED_SYNTHETIC_ONLY"), "stage_after_dispose");
+        MustBeDisposed(() => disposedDrafts.Read(disposedSession.Id), "read_after_dispose");
         for (var n = 0; n < 15; n++) w.Open();
         Check(w.Snapshot().Sessions.Count == SessionWorkbench.MaximumSessions, "capacity");
         MustRefuse(() => w.Open(), "capacity_refusal");
