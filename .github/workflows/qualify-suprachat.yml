@@ -1209,7 +1209,9 @@ jobs:
                 if (-not $element) {
                   # Fixed declarative IDs only; do not export names, document text or web content.
                   $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
-                    'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
+                    'Tab.Sessions', 'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output',
+                    'Sessions.Heading', 'Sessions.NewTitle', 'Sessions.Create', 'Sessions.List', 'Sessions.Status',
+                    'Sessions.ExportJsonPreview', 'Sessions.ExportPreview')
                   $visibleIds = @()
                   if ($window) {
                     $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -1233,14 +1235,61 @@ jobs:
                   $null = Require-SemanticControl $automationId
                 }
                 foreach ($area in @(
+                  # Run the bounded W1 fixture first so its independent evidence
+                  # is retained even if a later legacy tab hits the known UIA flake.
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.Heading', 'Sessions.NewTitle', 'Sessions.NewConversation', 'Sessions.NewWorkspace', 'Sessions.Create', 'Sessions.Rename', 'Sessions.List', 'Sessions.Status', 'Sessions.ExportJsonPreview', 'Sessions.ExportMarkdownPreview', 'Sessions.ExportPreview') },
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
                   @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
-                  if (-not $selection.Current.IsSelected) {
-                    throw "UI Automation tab SelectionItem did not select: $($area.tab)"
+                  $selected = $false
+                  $selectionDeadline = (Get-Date).AddSeconds(5)
+                  do {
+                    # Reacquire the element and pattern while Avalonia's UIA
+                    # provider publishes the selection change asynchronously.
+                    $tab = Require-SemanticControl $area.tab
+                    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+                    if ($selection.Current.IsSelected) {
+                      $selected = $true
+                      break
+                    }
+                    Start-Sleep -Milliseconds 100
+                  } while ((Get-Date) -lt $selectionDeadline)
+                  if (-not $selected) {
+                    # Reacquire and revalidate the declared process root for
+                    # diagnostics; a remounted window must not leave a stale root.
+                    $diagnosticWindow = $null
+                    $rootAvailable = $false
+                    $tabCount = 0
+                    $isEnabled = $false
+                    $diagnosticReadSucceeded = $false
+                    try {
+                      $p.Refresh()
+                      if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+                        $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                        if ($candidate.Current.ProcessId -eq $p.Id -and
+                            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                          $diagnosticWindow = $candidate
+                          $rootAvailable = $true
+                          $tabs = $diagnosticWindow.FindAll(
+                            [System.Windows.Automation.TreeScope]::Descendants,
+                            [System.Windows.Automation.PropertyCondition]::new(
+                              [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                              $area.tab))
+                          $tabCount = $tabs.Count
+                          if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
+                          $diagnosticReadSucceeded = $true
+                        }
+                      }
+                    } catch {
+                      # Do not let a transient provider error mask the bounded
+                      # selection failure, and never include exception text.
+                    }
+                    $isSelected = $false
+                    try { $isSelected = $selection.Current.IsSelected } catch {}
+                    throw "UI Automation tab selection timed out: id=$($area.tab); root_available=$rootAvailable; read_succeeded=$diagnosticReadSucceeded; count=$tabCount; enabled=$isEnabled; selected=$isSelected"
                   }
                   # A successful SelectionItem.Select is not proof that the
                   # newly selected tab's child provider has finished attaching.
@@ -1290,6 +1339,98 @@ jobs:
                       }
                       if (-not $traceModeObserved) { throw 'Accessible trace control did not change semantic capture state.' }
                     }
+                  }
+                  if ($area.tab -eq 'Tab.Sessions') {
+                    # Exercise only a fresh, ephemeral in-process fixture record.
+                    # This proves the accessible W1 vertical slice without touching
+                    # ChatGPT submission, credentials, files, terminals, or persistence.
+                    $titleInput = Require-SemanticControl 'Sessions.NewTitle'
+                    $titleValue = $titleInput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    $titleValue.SetValue('SupraChat UIA fixture')
+                    (Require-SemanticControl 'Sessions.Create').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+
+                    $createDeadline = (Get-Date).AddSeconds(5)
+                    $created = $false
+                    $createReadbackListItemCount = 0
+                    $createReadbackExpectedNameMatch = $false
+                    $createReadbackSelectedItemPatternMatch = $false
+                    $listItemCondition = New-Object System.Windows.Automation.PropertyCondition(
+                      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                      [System.Windows.Automation.ControlType]::ListItem)
+                    while ((Get-Date) -lt $createDeadline) {
+                      $sessionList = Require-SemanticControl 'Sessions.List'
+                      $listItems = $sessionList.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
+                      $createReadbackListItemCount = $listItems.Count
+                      $createReadbackExpectedNameMatch = $false
+                      $createReadbackSelectedItemPatternMatch = $false
+                      foreach ($listItem in $listItems) {
+                        if ($listItem.Current.Name -eq 'SupraChat UIA fixture') {
+                          $createReadbackExpectedNameMatch = $true
+                          $selectionItemPattern = $null
+                          if ($listItem.TryGetCurrentPattern(
+                              [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                              [ref]$selectionItemPattern) -and $selectionItemPattern.Current.IsSelected) {
+                            $createReadbackSelectedItemPatternMatch = $true
+                          }
+                        }
+                      }
+                      if ($createReadbackListItemCount -eq 1 -and
+                          $createReadbackExpectedNameMatch -and
+                          $createReadbackSelectedItemPatternMatch) {
+                        $created = $true
+                        break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $created) {
+                      throw "W1 UIA create readback failed; list_item_count=$createReadbackListItemCount; expected_name_match=$createReadbackExpectedNameMatch; selected_item_pattern_match=$createReadbackSelectedItemPatternMatch."
+                    }
+
+                    $titleValue.SetValue('SupraChat UIA renamed fixture')
+                    (Require-SemanticControl 'Sessions.Rename').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $renameDeadline = (Get-Date).AddSeconds(5)
+                    $renamed = $false
+                    while ((Get-Date) -lt $renameDeadline) {
+                      $sessionList = Require-SemanticControl 'Sessions.List'
+                      $listItems = $sessionList.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
+                      foreach ($listItem in $listItems) {
+                        if ($listItem.Current.Name -eq 'SupraChat UIA renamed fixture') {
+                          $selectionItemPattern = $null
+                          if ($listItem.TryGetCurrentPattern(
+                              [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                              [ref]$selectionItemPattern) -and $selectionItemPattern.Current.IsSelected) {
+                            $renamed = $true
+                            break
+                          }
+                        }
+                      }
+                      if ($renamed) { break }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $renamed) { throw 'W1 UIA rename did not update the selected ledger fixture.' }
+
+                    (Require-SemanticControl 'Sessions.ExportJsonPreview').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $previewDeadline = (Get-Date).AddSeconds(5)
+                    $previewed = $false
+                    while ((Get-Date) -lt $previewDeadline) {
+                      $preview = Require-SemanticControl 'Sessions.ExportPreview'
+                      $previewValue = $null
+                      if ($preview.TryGetCurrentPattern(
+                          [System.Windows.Automation.ValuePattern]::Pattern, [ref]$previewValue) -and
+                          $previewValue.Current.Value -match 'SupraChat UIA renamed fixture' -and
+                          $previewValue.Current.Value -match 'suprachat-workbench-metadata-export/v1') {
+                        $previewed = $true
+                        break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $previewed) { throw 'W1 UIA did not expose the expected metadata-only JSON preview.' }
+                    Write-Host 'Windows W1 Sessions UIA create/rename/metadata-preview smoke PASS.'
                   }
                 }
 
