@@ -1316,6 +1316,8 @@ jobs:
                       $listSelection = $sessionList.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
                       $selectedRows = $listSelection.Current.GetSelection()
                       $createReadbackCount = $selectedRows.Count
+                      $createReadbackRowNameNonempty = $false
+                      $createReadbackExpectedNameMatch = $false
                       if ($createReadbackCount -eq 1) {
                         $selectedName = $selectedRows[0].Current.Name
                         $createReadbackRowNameNonempty = -not [string]::IsNullOrWhiteSpace($selectedName)
@@ -1328,7 +1330,38 @@ jobs:
                       Start-Sleep -Milliseconds 100
                     }
                     if (-not $created) {
-                      throw "W1 UIA create readback failed; selected_row_count=$createReadbackCount; selected_row_name_nonempty=$createReadbackRowNameNonempty; expected_name_match=$createReadbackExpectedNameMatch."
+                      $sessionList = Require-SemanticControl 'Sessions.List'
+                      $listItemCondition = New-Object System.Windows.Automation.PropertyCondition(
+                        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                        [System.Windows.Automation.ControlType]::ListItem)
+                      $listItems = $sessionList.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
+                      $createReadbackListItemCount = $listItems.Count
+                      $createReadbackExpectedListItemMatch = $false
+                      $createReadbackSelectedItemPatternMatch = $false
+                      foreach ($listItem in $listItems) {
+                        $listItemName = $listItem.Current.Name
+                        if ($listItemName -eq 'SupraChat UIA fixture') {
+                          $createReadbackExpectedListItemMatch = $true
+                          $selectionItemPattern = $null
+                          if ($listItem.TryGetCurrentPattern(
+                              [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                              [ref]$selectionItemPattern) -and $selectionItemPattern.Current.IsSelected) {
+                            $createReadbackSelectedItemPatternMatch = $true
+                          }
+                        }
+                      }
+                      $createStatusMessageSeen = $false
+                      $createStatusOneSessionSeen = $false
+                      $statusControl = Require-SemanticControl 'Sessions.Status'
+                      $statusTextPattern = $null
+                      if ($statusControl.TryGetCurrentPattern(
+                          [System.Windows.Automation.TextPattern]::Pattern, [ref]$statusTextPattern)) {
+                        $statusText = $statusTextPattern.DocumentRange.GetText(-1)
+                        $createStatusMessageSeen = $statusText.Contains('Local metadata created')
+                        $createStatusOneSessionSeen = $statusText.Contains('sessions=1/16')
+                      }
+                      throw "W1 UIA create readback failed; selected_row_count=$createReadbackCount; selected_row_name_nonempty=$createReadbackRowNameNonempty; expected_selected_name_match=$createReadbackExpectedNameMatch; list_item_count=$createReadbackListItemCount; expected_list_item_match=$createReadbackExpectedListItemMatch; selected_item_pattern_match=$createReadbackSelectedItemPatternMatch; create_status_message_seen=$createStatusMessageSeen; one_session_count_seen=$createStatusOneSessionSeen."
                     }
 
                     $titleValue.SetValue('SupraChat UIA renamed fixture')
