@@ -1647,7 +1647,16 @@ jobs:
           test -s LICENSE
           test -s THIRD-PARTY-NOTICES.md
           test -s RELEASE_NOTES-v0.0.1.md
-          ! grep -Eiq 'TODO|TBD|PLACEHOLDER|CHOOSE A LICENSE' LICENSE THIRD-PARTY-NOTICES.md
+          if grep -Eiq 'TODO|TBD|PLACEHOLDER|CHOOSE A LICENSE' LICENSE THIRD-PARTY-NOTICES.md; then
+            echo 'Release license or third-party notices contain an unresolved placeholder.' >&2
+            exit 1
+          else
+            grep_status=$?
+            if [[ "$grep_status" -ne 1 ]]; then
+              echo 'Could not verify release license or third-party notices.' >&2
+              exit "$grep_status"
+            fi
+          fi
           grep -q '<Version>0.0.1</Version>' Directory.Build.props
 
       - name: Download platform-native release archives
