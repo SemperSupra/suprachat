@@ -5,6 +5,8 @@ on:
     branches:
       - 'migration/extracted-qualified-20261002'
       - 'main'
+    tags:
+      - 'v0.0.1'
   pull_request:
   workflow_dispatch:
 
@@ -1497,6 +1499,92 @@ jobs:
           path: out/${{ matrix.rid }}/
           if-no-files-found: error
           retention-days: 7
+
+  draft-release:
+    if: github.event_name == 'push' && github.ref == 'refs/tags/v0.0.1'
+    name: Stage v0.0.1 draft GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      SOURCE_SHA: ${{ github.sha }}
+      WORKFLOW_RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Require release metadata and distribution notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" == "v0.0.1" ]] || { echo "Unexpected release tag: $RELEASE_TAG" >&2; exit 1; }
+          test -s LICENSE
+          test -s THIRD-PARTY-NOTICES.md
+          test -s RELEASE_NOTES-v0.0.1.md
+          grep -q '<Version>0.0.1</Version>' Directory.Build.props
+
+      - name: Download qualified platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: suprachat-*
+          path: release-stage/packages
+          merge-multiple: false
+
+      - name: Assemble versioned release archives and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/suprachat-release"
+          mkdir -p "$stage"
+          for platform in windows-x64 linux-x64 macos-arm64; do
+            source="release-stage/packages/suprachat-$platform"
+            test -d "$source"
+            cp LICENSE THIRD-PARTY-NOTICES.md "$source/"
+            if [[ "$platform" == "windows-x64" ]]; then
+              (cd "$source" && zip -qr "$stage/SupraChat-$RELEASE_TAG-$platform.zip" .)
+            else
+              tar -czf "$stage/SupraChat-$RELEASE_TAG-$platform.tar.gz" -C "$source" .
+            fi
+          done
+          cp LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md "$stage/"
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg source_commit "$SOURCE_SHA" \
+            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
+            --arg dotnet_sdk "$(dotnet --version)" \
+            '{schema:"suprachat-release-provenance/v1",tag:$tag,source_commit:$source_commit,workflow_run_id:$workflow_run_id,dotnet_sdk:$dotnet_sdk,platforms:["windows-x64","linux-x64","macos-arm64"]}' \
+            > "$stage/release-provenance.json"
+          (cd "$stage" && sha256sum SupraChat-* LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md release-provenance.json > SHA256SUMS)
+          echo "RELEASE_ASSET_DIR=$stage" >> "$GITHUB_ENV"
+
+      - name: Create draft GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "SupraChat $RELEASE_TAG" \
+              --notes-file RELEASE_NOTES-v0.0.1.md
+            gh release upload "$RELEASE_TAG" "$RELEASE_ASSET_DIR"/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" "$RELEASE_ASSET_DIR"/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "SupraChat $RELEASE_TAG" \
+              --notes-file RELEASE_NOTES-v0.0.1.md \
+              --verify-tag
+          fi
 
 
   linux-desktop-oracle-census:
