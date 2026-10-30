@@ -1209,7 +1209,9 @@ jobs:
                 if (-not $element) {
                   # Fixed declarative IDs only; do not export names, document text or web content.
                   $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
-                    'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
+                    'Tab.Sessions', 'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output',
+                    'Sessions.Heading', 'Sessions.NewTitle', 'Sessions.Create', 'Sessions.List', 'Sessions.Status',
+                    'Sessions.ExportJsonPreview', 'Sessions.ExportPreview')
                   $visibleIds = @()
                   if ($window) {
                     $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -1234,7 +1236,8 @@ jobs:
                 }
                 foreach ($area in @(
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
-                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
+                  @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') },
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.Heading', 'Sessions.NewTitle', 'Sessions.NewConversation', 'Sessions.NewWorkspace', 'Sessions.Create', 'Sessions.Rename', 'Sessions.List', 'Sessions.Status', 'Sessions.ExportJsonPreview', 'Sessions.ExportMarkdownPreview', 'Sessions.ExportPreview') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
@@ -1290,6 +1293,59 @@ jobs:
                       }
                       if (-not $traceModeObserved) { throw 'Accessible trace control did not change semantic capture state.' }
                     }
+                  }
+                  if ($area.tab -eq 'Tab.Sessions') {
+                    # Exercise only a fresh, ephemeral in-process fixture record.
+                    # This proves the accessible W1 vertical slice without touching
+                    # ChatGPT submission, credentials, files, terminals, or persistence.
+                    $titleInput = Require-SemanticControl 'Sessions.NewTitle'
+                    $titleValue = $titleInput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    $titleValue.SetValue('SupraChat UIA fixture')
+                    (Require-SemanticControl 'Sessions.Create').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+
+                    $sessionList = Require-SemanticControl 'Sessions.List'
+                    $listSelection = $sessionList.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+                    $selectedRows = $listSelection.GetCurrentSelection()
+                    if ($selectedRows.Count -ne 1 -or $selectedRows[0].Current.Name -ne 'SupraChat UIA fixture') {
+                      throw 'W1 UIA create did not select the new local fixture session.'
+                    }
+
+                    $titleValue.SetValue('SupraChat UIA renamed fixture')
+                    (Require-SemanticControl 'Sessions.Rename').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $renameDeadline = (Get-Date).AddSeconds(5)
+                    $renamed = $false
+                    while ((Get-Date) -lt $renameDeadline) {
+                      $sessionList = Require-SemanticControl 'Sessions.List'
+                      $listSelection = $sessionList.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+                      $selectedRows = $listSelection.GetCurrentSelection()
+                      if ($selectedRows.Count -eq 1 -and $selectedRows[0].Current.Name -eq 'SupraChat UIA renamed fixture') {
+                        $renamed = $true
+                        break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $renamed) { throw 'W1 UIA rename did not update the selected ledger fixture.' }
+
+                    (Require-SemanticControl 'Sessions.ExportJsonPreview').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $previewDeadline = (Get-Date).AddSeconds(5)
+                    $previewed = $false
+                    while ((Get-Date) -lt $previewDeadline) {
+                      $preview = Require-SemanticControl 'Sessions.ExportPreview'
+                      $previewValue = $null
+                      if ($preview.TryGetCurrentPattern(
+                          [System.Windows.Automation.ValuePattern]::Pattern, [ref]$previewValue) -and
+                          $previewValue.Current.Value -match 'SupraChat UIA renamed fixture' -and
+                          $previewValue.Current.Value -match 'suprachat-workbench-metadata-export/v1') {
+                        $previewed = $true
+                        break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $previewed) { throw 'W1 UIA did not expose the expected metadata-only JSON preview.' }
+                    Write-Host 'Windows W1 Sessions UIA create/rename/metadata-preview smoke PASS.'
                   }
                 }
 
