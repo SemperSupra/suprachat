@@ -47,8 +47,14 @@ public static class SessionLedgerHost
             options.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(10);
         });
 
+        var storePath = Environment.GetEnvironmentVariable("SUPRACHAT_LEDGER_STORE");
+        using var durableStore = string.IsNullOrWhiteSpace(storePath) ? null :
+            new W9DurableSessionStore(storePath);
+        var ledger = new SharedSessionLedger(
+            durableStore?.Load(),
+            durableStore is null ? null : (Action<SessionLedgerCheckpoint>)durableStore.Save);
+
         var app = builder.Build();
-        var ledger = new SharedSessionLedger();
         app.Use(async (context, next) =>
         {
             context.Response.Headers["Cache-Control"] = "no-store";
@@ -79,11 +85,16 @@ public static class SessionLedgerHost
             schema = Schema, transport = "HTTP_LOOPBACK_BEARER",
             address = "127.0.0.1",
             port, audience_identity_authenticated = false,
-            durable_recovery_available = false,
+            durable_recovery_available = durableStore is not null,
             chat_submission_allowed = false,
             terminal_execution_allowed = false
         }));
-        app.MapGet("/v1/sessions", () => Results.Json(ledger.InspectAll()));
+        app.MapGet("/v1/sessions", () => Results.Json(
+            ledger.InspectAll() with
+            {
+                DurableAcrossProcessRestart = durableStore is not null,
+                CrossProcessTransportAvailable = true
+            }));
         app.MapGet("/v1/sessions/{sessionId}", (string sessionId) =>
         {
             var snapshot = ledger.Inspect(sessionId);
@@ -124,7 +135,7 @@ public static class SessionLedgerHost
             bearer_token_required = true,
             authenticated_audience_identity = false,
             cross_process_transport_available = true,
-            persistent_recovery_available = false,
+            persistent_recovery_available = durableStore is not null,
             provider_prompt_submission_available = false
         }));
         Console.Out.Flush();
