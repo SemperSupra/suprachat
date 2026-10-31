@@ -189,7 +189,7 @@ internal sealed class SharedDesktopHost : IDisposable
             PipeOptions.CurrentUserOnly | PipeOptions.Asynchronous);
         var audience = sameSessionAgent || index == 1 ? "agent" : "automation";
         var actor = sameSessionAgent ? "agent-shared-fixture" : index == 0 ? "automation-fixture" : "agent-fixture";
-        using var child = Program.Spawn("--shared-client", pipeName, audience, revoke ? "revoke" : "mutate");
+        using var child = Program.Spawn("--shared-client", pipeName, audience, sameSessionAgent ? "replay" : revoke ? "revoke" : "mutate");
         try
         {
             var pid = child.Id; var started = child.StartTime.ToUniversalTime();
@@ -233,7 +233,7 @@ internal sealed class SharedDesktopHost : IDisposable
                 else
                 {
                     var result = _ledger.ExecuteAdmitted(new(operation, request.SessionId, request.Key, request.Version, request.Value), Admit);
-                    reply = new(result.Status, result.Session?.Version ?? -1, result.Sequence, 0);
+                    reply = new(result.Status, result.Session?.Version ?? -1, result.Sequence, 0, result.IsReplay);
                 }
                 var expected = revoke ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
                     n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : n == 4 ? "CONSENT_OFF" : "OBSERVED";
