@@ -280,7 +280,10 @@ internal sealed class SharedDesktopHost : IDisposable
             new[] { "session/inspect", "session/change", "trace/read", "session/inspect" };
         for (var n = 0; n < methods.Length; n++)
         {
-            var request = new Request(mode == "mutate" && n == 3 ? other : session, audience + "-shared-mutation-key", version, audience + "-updated");
+            var request = new Request(mode == "mutate" && n == 3 ? other : session,
+                mode == "replay" && n == 4 ? audience + "-shared-stale-key" : audience + "-shared-mutation-key",
+                mode == "replay" && n == 4 ? version - 1 : version,
+                mode == "replay" && n == 3 ? audience + "-altered-payload" : audience + "-updated");
             var envelope = new Envelope(audience == "automation" ? methods[n] : null,
                 audience == "agent" ? methods[n] : null, audience == "agent" ? "2.0" : null, audience == "agent" ? n + 1 : null, request);
             await Program.WriteFrameAsync(pipe, JsonSerializer.SerializeToUtf8Bytes(envelope, TraceNormalizer.JsonOptions), timeout.Token);
