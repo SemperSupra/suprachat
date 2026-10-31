@@ -1497,6 +1497,25 @@ jobs:
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
           }
 
+      # PR checks may report a runner boundary as an inconclusive UIA result.
+      # A tagged release must not interpret that as native semantic qualification.
+      - name: Require live Windows UIA PASS for tagged release
+        if: github.event_name == 'push' && github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $receiptPath = Join-Path $PWD 'out/win-x64/qualification/windows-uia.json'
+          if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
+            throw 'Tagged release Windows UIA qualification receipt is missing.'
+          }
+          $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ($receipt.schema -ne 'suprachat-windows-uia-qualification/v1' -or
+              $receipt.state -ne 'PASS' -or
+              $receipt.static_accessibility_contract -ne 'PASS' -or
+              $receipt.gui_launch_smoke -ne 'PASS') {
+            throw 'Tagged release requires live Windows UIA PASS; runner boundary is inconclusive.'
+          }
+
       - name: Qualify synthetic secret UIA boundary for v0.0.1
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
         shell: pwsh
