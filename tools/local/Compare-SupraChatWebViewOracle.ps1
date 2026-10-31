@@ -20,7 +20,48 @@ foreach ($oracleEngine in @('playwright','webview2')) {
     $oracleStart.ArgumentList.Add($oracleReceipt)
     $oracleProcess = [Diagnostics.Process]::Start($oracleStart)
     try {
-        if (!$oracleProcess.WaitForExit(35000)) { $oracleProcess.Kill($true); throw 'Independent browser oracle timed out.' }
+        $oracleTimer = [Diagnostics.Stopwatch]::StartNew()
+        $finished = $oracleProcess.WaitForExit(35000)
+        $oracleTimer.Stop()
+        if (!$finished) {
+            # Fixed-only first-failure evidence. Never print subprocess output,
+            # paths, URLs, browser profiles or fixture contents.
+            $cpuMs = $null
+            try { $cpuMs = [int][Math]::Round($oracleProcess.TotalProcessorTime.TotalMilliseconds) } catch {}
+            $receiptExists = Test-Path -LiteralPath $oracleReceipt -PathType Leaf
+            $killConfirmed = $false
+            try {
+                $oracleProcess.Kill($true)
+                $killConfirmed = $oracleProcess.WaitForExit(5000)
+            } catch {}
+            $observation = [ordered]@{
+                schema = 'suprachat-browser-oracle-first-failure/v1'
+                stage = 'SUBPROCESS_TIMEOUT'
+                engine = $oracleEngine
+                allotted_ms = 35000
+                elapsed_ms = [int]$oracleTimer.ElapsedMilliseconds
+                child_cpu_ms = $cpuMs
+                receipt_present = [bool]$receiptExists
+                owned_process_exit_confirmed = [bool]$killConfirmed
+                raw_payload_exported = $false
+                cause_established = $false
+                qualification_passed = $false
+            }
+            Write-Host ($observation | ConvertTo-Json -Compress)
+            throw ('Independent browser oracle timed out: ' + $oracleEngine)
+        }
+        if (!(Test-Path -LiteralPath $oracleReceipt -PathType Leaf)) {
+            Write-Host (@{
+                schema = 'suprachat-browser-oracle-first-failure/v1'
+                stage = 'RECEIPT_MISSING'
+                engine = $oracleEngine
+                process_exit_code = [int]$oracleProcess.ExitCode
+                raw_payload_exported = $false
+                cause_established = $false
+                qualification_passed = $false
+            } | ConvertTo-Json -Compress)
+            throw ('Independent browser oracle receipt missing: ' + $oracleEngine)
+        }
         $oracleJson = [IO.File]::ReadAllText($oracleReceipt)
         foreach ($oracleForbidden in @('synthetic-private-sentinel-51', 'http://', 'https://', 'Bearer ', 'Cookie:', 'Authorization:')) {
             if ($oracleJson.Contains($oracleForbidden)) { throw 'Independent oracle receipt privacy check failed.' }
