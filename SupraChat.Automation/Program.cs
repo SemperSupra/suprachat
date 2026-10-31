@@ -85,6 +85,14 @@ internal static class Program
                 "respond" => WriteSuccess(await RespondAsync(args[1..])),
                 "responses-raw" => WriteSuccess(await RawResponsesAsync(args[1..])),
                 "codex-rpc" => WriteSuccess(await CodexRpcAsync(args[1..])),
+                "session-ledger-contract" => WriteSuccess(SharedSessionLedger.DescribeContract()),
+                "session-ledger-host" => await RunSessionLedgerHostAsync(args[1..]),
+                "session-ledger-list" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "list")),
+                "session-ledger-open" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
+                "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "change", await ReadLedgerStdinAsync())),
                 "stdio" => await RunStdioAsync(),
                 _ => WriteFailure(2, "USAGE", $"Unknown command: {args[0]}", Help())
             };
@@ -145,6 +153,11 @@ internal static class Program
             new { name = "codex-rpc", description = "Invoke one Codex app-server RPC.", syntax = "codex-rpc --method <name> [--params <json>]" },
             new { name = "trace-status", description = "Read this process's metadata trace status; capture starts OFF." },
             new { name = "trace-session", description = "Run persistent JSON-line automation commands: trace status/start/stop/read/export and owned respond/responses-raw/codex-rpc actions." },
+            new { name = "session-ledger-contract", description = "Read synthetic W6 session core limits; no external authority qualification." },
+            new { name = "session-ledger-host", description = "Explicitly run a disposable loopback-only W6 ledger; requires synthetic-mode environment gate." },
+            new { name = "session-ledger-list", description = "Inspect the running synthetic W6 ledger; requires explicit port and token." },
+            new { name = "session-ledger-open", description = "Create synthetic ledger metadata from stdin; not an authenticated principal." },
+            new { name = "session-ledger-change", description = "CAS synthetic ledger metadata from stdin; not a provider action." },
             new { name = "stdio", description = "Serve line-delimited JSON-RPC 2.0 for agent clients with sessionful Codex events." }
         },
         auth_boundary = "Interactive authorization is completed by a human through the GUI. Machine shells reuse the same protected local credential store."
@@ -170,6 +183,10 @@ internal static class Program
         },
         machine_methods = new[]
         {
+            "session/ledger/read",
+            "session/ledger/list",
+            "session/ledger/open",
+            "session/ledger/change",
             "capabilities/read",
             "accessibility/read",
             "accessibility/preferences/read",
@@ -773,6 +790,10 @@ internal static class Program
     {
         return method switch
         {
+            "session/ledger/read" => SharedSessionLedger.DescribeContract(),
+            "session/ledger/list" => await RpcLedgerAsync(parameters, "list"),
+            "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
+            "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
@@ -1686,6 +1707,50 @@ internal static class Program
     private static string RequiredOption(string[] args, string name) =>
         Option(args, name)
         ?? throw new MachineException(2, "USAGE", $"Missing required option {name}.");
+
+    // Reused from the previously qualified W6 experiment. No automatic owner
+    // startup, credential provider, browser interaction, or remote binding.
+    private static int ParseLedgerPort(string? input)
+    {
+        if (!int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out var port) ||
+            port is < 1024 or > 65535)
+            throw new MachineException(2, "INVALID_PARAMS", "Explicit synthetic loopback port must be 1024..65535.");
+        return port;
+    }
+
+    private static async Task<int> RunSessionLedgerHostAsync(string[] args)
+    {
+        await SessionLedgerHost.RunAsync(ParseLedgerPort(Option(args, "--port")));
+        return 0;
+    }
+
+    private static async Task<JsonElement> ReadLedgerStdinAsync()
+    {
+        var input = await Console.In.ReadToEndAsync();
+        if (input.Length is 0 or > 8192)
+            throw new MachineException(2, "INVALID_PARAMS", "Synthetic metadata JSON must be 1..8192 characters.");
+        using var document = JsonDocument.Parse(input);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new MachineException(2, "INVALID_PARAMS", "Metadata request must be a JSON object.");
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<object> RpcLedgerAsync(JsonElement? parameters, string operation)
+    {
+        var p = RequireObject(parameters);
+        if (!p.TryGetProperty("port", out var el) ||
+            el.ValueKind != JsonValueKind.Number || !el.TryGetInt32(out var port))
+            throw new MachineException(2, "INVALID_PARAMS", "Ledger params.port integer required.");
+        JsonElement? request = null;
+        if (operation != "list")
+        {
+            if (!p.TryGetProperty("request", out var body) || body.ValueKind != JsonValueKind.Object)
+                throw new MachineException(2, "INVALID_PARAMS", "Ledger params.request JSON object required.");
+            request = body;
+        }
+        return await SessionLedgerClient.RequestAsync(
+            ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)), operation, request);
+    }
 
     private static string? Option(string[] args, string name)
     {

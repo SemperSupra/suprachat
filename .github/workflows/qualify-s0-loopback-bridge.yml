@@ -1,0 +1,37 @@
+name: Qualify W6 disposable cross-process session bridge
+
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.Automation/**'
+      - 'tools/qualify-w6-shared-ledger.mjs'
+      - '.github/workflows/qualify-s0-loopback-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s0-w6-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  independent-processes:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build current automation CLI and agent shell
+        run: dotnet build SupraChat.Automation -c Release
+      - name: Qualify three independent synthetic processes and fail-closed local host
+        run: node tools/qualify-w6-shared-ledger.mjs
