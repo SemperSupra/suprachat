@@ -92,6 +92,12 @@ try {
   $agentInfo.RedirectStandardInput = $true
   $agentInfo.RedirectStandardOutput = $true
   $agentInfo.RedirectStandardError = $true
+  # Windows PowerShell 5.1's default redirected stdin encoding may emit a
+  # Unicode BOM. JSON-RPC is newline-delimited UTF-8 with no BOM.
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  $agentInfo.StandardInputEncoding = $utf8NoBom
+  $agentInfo.StandardOutputEncoding = $utf8NoBom
+  $agentInfo.StandardErrorEncoding = $utf8NoBom
   $agent = [Diagnostics.Process]::Start($agentInfo)
   if (!$agent) { throw 'AGENT_START_FAILED' }
   try {
