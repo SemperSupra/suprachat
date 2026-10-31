@@ -81,8 +81,41 @@ try {
     port=$port;request=@{sessionId=$session.id;expectedVersion=0;operation='set-title';
     idempotencyKey='s0-synthetic-actor-update';audience='agent';value='Synthetic agent'}
   }}|ConvertTo-Json -Depth 8 -Compress
-  $reply=($rpc | & dotnet $cli stdio 2>$null | Select-Object -Last 1)|ConvertFrom-Json
-  if ($LASTEXITCODE -ne 0 -or $reply.id -ne 77 -or !$reply.result.succeeded -or
+  # WinPS 5.1 promotes redirected native stderr into a terminating
+  # NativeCommandError with ErrorActionPreference=Stop. Read both streams
+  # explicitly and accept only the fixed metadata-only stdio readiness line.
+  $agentInfo = [Diagnostics.ProcessStartInfo]::new()
+  $agentInfo.FileName = (Get-Command dotnet).Source
+  $agentInfo.Arguments = ('"{0}" stdio' -f $cli)
+  $agentInfo.UseShellExecute = $false
+  $agentInfo.CreateNoWindow = $true
+  $agentInfo.RedirectStandardInput = $true
+  $agentInfo.RedirectStandardOutput = $true
+  $agentInfo.RedirectStandardError = $true
+  $agent = [Diagnostics.Process]::Start($agentInfo)
+  if (!$agent) { throw 'AGENT_START_FAILED' }
+  try {
+    $stdoutTask = $agent.StandardOutput.ReadToEndAsync()
+    $stderrTask = $agent.StandardError.ReadToEndAsync()
+    $agent.StandardInput.WriteLine($rpc)
+    $agent.StandardInput.Close()
+    if (!$agent.WaitForExit(12000)) {
+      $agent.Kill()
+      throw 'AGENT_TIMEOUT'
+    }
+    $stdoutText = $stdoutTask.GetAwaiter().GetResult()
+    $stderrText = $stderrTask.GetAwaiter().GetResult()
+    if ($agent.ExitCode -ne 0) { throw 'AGENT_PROCESS_FAILED' }
+    if ($stderrText.Trim() -ne '{"suprachat":"stdio-ready","schema":"suprachat-jsonrpc/v1"}') {
+      throw 'AGENT_STDERR_UNEXPECTED'
+    }
+    $lines = @($stdoutText -split "\\r?\\n" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -ne 1) { throw 'AGENT_RESPONSE_COUNT_INVALID' }
+    $reply = $lines[0] | ConvertFrom-Json
+  } finally {
+    $agent.Dispose()
+  }
+  if ($reply.id -ne 77 -or !$reply.result.succeeded -or
       $reply.result.payload.session.version -ne 1) { throw 'AGENT_COMMIT_FAILED' }
   $phase='GUI_AGAIN'
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic final')
