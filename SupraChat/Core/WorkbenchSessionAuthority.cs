@@ -7,12 +7,12 @@ namespace SupraChat.Core;
 /// </summary>
 public interface IWorkbenchSessionAuthority
 {
-    LedgerWorkbenchReadReceipt Read(string? selectedSessionId = null);
-    SessionLedgerState? Inspect(string sessionId);
-    SessionLedgerResult Create(string operationId, string title,
-        string? conversationUrl = null, string? workspaceKey = null);
-    SessionLedgerResult Rename(string operationId, string sessionId,
-        long expectedVersion, string title);
+    ValueTask<LedgerWorkbenchReadReceipt> ReadAsync(string? selectedSessionId = null, CancellationToken token = default);
+    ValueTask<SessionLedgerState?> InspectAsync(string sessionId, CancellationToken token = default);
+    ValueTask<SessionLedgerResult> CreateAsync(string operationId, string title,
+        string? conversationUrl = null, string? workspaceKey = null, CancellationToken token = default);
+    ValueTask<SessionLedgerResult> RenameAsync(string operationId, string sessionId,
+        long expectedVersion, string title, CancellationToken token = default);
 }
 
 /// <summary>
@@ -25,16 +25,17 @@ public sealed class ExperimentalLocalWorkbenchSessionAuthority : IWorkbenchSessi
 {
     private readonly SharedSessionLedger _ledger = new();
 
-    public LedgerWorkbenchReadReceipt Read(string? selectedSessionId = null) =>
-        LedgerWorkbenchProjection.Read(_ledger, selectedSessionId);
+    public ValueTask<LedgerWorkbenchReadReceipt> ReadAsync(string? selectedSessionId = null, CancellationToken token = default) =>
+        ValueTask.FromResult(LedgerWorkbenchProjection.Read(_ledger, selectedSessionId));
 
-    public SessionLedgerState? Inspect(string sessionId) => _ledger.Inspect(sessionId);
+    public ValueTask<SessionLedgerState?> InspectAsync(string sessionId, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Inspect(sessionId));
 
-    public SessionLedgerResult Create(string operationId, string title,
-        string? conversationUrl = null, string? workspaceKey = null) =>
-        _ledger.Open(operationId, "human", title, conversationUrl, workspaceKey);
+    public ValueTask<SessionLedgerResult> CreateAsync(string operationId, string title,
+        string? conversationUrl = null, string? workspaceKey = null, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Open(operationId, "human", title, conversationUrl, workspaceKey));
 
-    public SessionLedgerResult Rename(string operationId, string sessionId,
-        long expectedVersion, string title) =>
-        _ledger.Change(operationId, "human", sessionId, expectedVersion, "set-title", title);
+    public ValueTask<SessionLedgerResult> RenameAsync(string operationId, string sessionId,
+        long expectedVersion, string title, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Change(operationId, "human", sessionId, expectedVersion, "set-title", title));
 }
