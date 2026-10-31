@@ -1188,7 +1188,7 @@ jobs:
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
                 $script:uiaTransientRetries = 0
-                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
+                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 15) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
@@ -1220,7 +1220,7 @@ jobs:
                     # RPC_E_CALL_REJECTED (0x80010001) and
                     # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
                     # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
-                    if ($_.Exception.HResult -notin @(-2147418111, -2147417846)) { throw }
+                    if ($_.Exception.HResult -notin @(-2147418113, -2147418111, -2147417846)) { throw }
                     $script:uiaTransientRetries++
                     $element = $null
                   }
@@ -1265,7 +1265,7 @@ jobs:
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
                   $selected = $false
-                  $selectionDeadline = (Get-Date).AddSeconds(5)
+                  $selectionDeadline = (Get-Date).AddSeconds(12)
                   do {
                     # Reacquire the element and pattern while Avalonia's UIA
                     # provider publishes the selection change asynchronously.

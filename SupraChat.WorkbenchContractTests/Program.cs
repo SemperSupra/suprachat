@@ -118,6 +118,63 @@ static class Program
         for (var n = 0; n < 15; n++) w.Open();
         Check(w.Snapshot().Sessions.Count == SessionWorkbench.MaximumSessions, "capacity");
         MustRefuse(() => w.Open(), "capacity_refusal");
+
+        // Category 1 Interactive Surface: Collision Warnings (DUPLICATE_CONVERSATION and SHARED_WORKSPACE)
+        var collisionWorkbench = new SessionWorkbench();
+        var sharedUrl = $"https://chatgpt.com/c/{Guid.NewGuid():D}";
+        var c1 = collisionWorkbench.Open("Session Alpha", sharedUrl, "project/frontend");
+        var c2 = collisionWorkbench.Open("Session Beta", sharedUrl, "PROJECT\\FRONTEND");
+        var collisionSnap = collisionWorkbench.Snapshot();
+        Check(collisionSnap.Collisions.Count == 2, "two_collisions_detected");
+        Check(collisionSnap.Collisions.Any(c => c.Type == "DUPLICATE_CONVERSATION" && c.LeftSessionId == c1.Id && c.RightSessionId == c2.Id), "duplicate_conversation_collision");
+        Check(collisionSnap.Collisions.Any(c => c.Type == "SHARED_WORKSPACE" && c.LeftSessionId == c1.Id && c.RightSessionId == c2.Id), "shared_workspace_collision");
+        var cMd = WorkbenchMetadataExport.Prepare(collisionSnap, "markdown");
+        Check(cMd.Content.Contains("- DUPLICATE_CONVERSATION:", StringComparison.Ordinal), "markdown_duplicate_conversation_warning");
+        Check(cMd.Content.Contains("- SHARED_WORKSPACE:", StringComparison.Ordinal), "markdown_shared_workspace_warning");
+        Check(cMd.Content.Contains("| Session | ID | Conversation reference | Workspace reference | Terminal |", StringComparison.Ordinal), "markdown_table_header");
+        Check(cMd.Content.Contains("Active session: " + c2.Id, StringComparison.Ordinal), "markdown_active_session");
+        Check(cMd.Content.Contains("Chat submission: disabled. Terminal execution: disabled.", StringComparison.Ordinal), "markdown_disabled_capabilities");
+        Check(cMd.Content.Contains("Excluded: credentials, transcripts, terminal output, and transfer preview text.", StringComparison.Ordinal), "markdown_excluded_notice");
+        Check(collisionWorkbench.Close(c2.Id), "close_conflicting_session");
+        var resolvedSnap = collisionWorkbench.Snapshot();
+        Check(resolvedSnap.Collisions.Count == 0, "collisions_cleared_on_close");
+        var resolvedMd = WorkbenchMetadataExport.Prepare(resolvedSnap, "markdown");
+        Check(resolvedMd.Content.Contains("None observed.", StringComparison.Ordinal), "markdown_none_observed_when_cleared");
+
+        // Category 1 Interactive Surface: CAS VERSION_CONFLICT Status Readout & Recovery
+        var casAuthority = new ExperimentalLocalWorkbenchSessionAuthority();
+        var createOutcome = casAuthority.CreateAsync("cas-operation-001", "Initial Title", sharedUrl, "test/workspace").AsTask().GetAwaiter().GetResult();
+        Check(createOutcome.Applied && createOutcome.Session is not null, "cas_session_created");
+        var casSessionId = createOutcome.Session!.Id;
+        Check(createOutcome.Session.Version == 0, "initial_version_zero");
+        // Concurrent update bumps version from 0 to 1
+        var concurrentOutcome = casAuthority.RenameAsync("cas-concurrent-op-001", casSessionId, 0, "Concurrent Title").AsTask().GetAwaiter().GetResult();
+        Check(concurrentOutcome.Applied && concurrentOutcome.Session!.Version == 1, "concurrent_update_applied");
+        // Stale rename with expected version 0 produces VERSION_CONFLICT
+        var staleRename = casAuthority.RenameAsync("cas-stale-operation", casSessionId, 0, "Stale Title").AsTask().GetAwaiter().GetResult();
+        Check(!staleRename.Applied && staleRename.Status == "VERSION_CONFLICT", "cas_version_conflict_readout");
+        // Recovery: inspect to read current state/version, then retry with updated version
+        var inspectedCurrent = casAuthority.InspectAsync(casSessionId).AsTask().GetAwaiter().GetResult();
+        Check(inspectedCurrent is not null && inspectedCurrent.Version == 1 && inspectedCurrent.Title == "Concurrent Title", "cas_recovery_inspect");
+        var recoveredRename = casAuthority.RenameAsync("cas-recovery-operation", casSessionId, inspectedCurrent!.Version, "Recovered Title").AsTask().GetAwaiter().GetResult();
+        Check(recoveredRename.Applied && recoveredRename.Session!.Version == 2 && recoveredRename.Session.Title == "Recovered Title", "cas_version_conflict_recovery");
+
+        // Category 1 Interactive Surface: Accessibility Preference Normalization (ScaleUp, ScaleDown, ScaleReset, ReducedMotion)
+        var defA11y = AccessibilityPreferences.Default;
+        Check(defA11y.InterfaceScale == 1.0 && !defA11y.ReducedMotion, "a11y_default");
+        var clampedLow = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 0.4, false));
+        Check(clampedLow.InterfaceScale == AccessibilityPreferencesStore.MinimumScale, "a11y_clamp_min_0_8");
+        var clampedHigh = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 3.5, true));
+        Check(clampedHigh.InterfaceScale == AccessibilityPreferencesStore.MaximumScale && clampedHigh.ReducedMotion, "a11y_clamp_max_2_0");
+        var steppedDown = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 1.0 - AccessibilityPreferencesStore.ScaleStep, false));
+        Check(Math.Abs(steppedDown.InterfaceScale - 0.9) < 0.001, "a11y_scale_down_step");
+        var steppedUp = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 1.0 + AccessibilityPreferencesStore.ScaleStep, false));
+        Check(Math.Abs(steppedUp.InterfaceScale - 1.1) < 0.001, "a11y_scale_up_step");
+        var steppedReset = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 1.0, true));
+        Check(steppedReset.InterfaceScale == 1.0 && steppedReset.ReducedMotion, "a11y_scale_reset_step");
+        var rounded = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 1.24, false));
+        Check(Math.Abs(rounded.InterfaceScale - 1.2) < 0.001, "a11y_round_to_nearest_tenth");
+
         Console.WriteLine($"WORKBENCH_SOURCE_ONLY_CONTRACT_PASS cases={_cases} provider_contact=false terminal_execution=false browser_submission=false persistent_state=false");
         return 0;
     }
