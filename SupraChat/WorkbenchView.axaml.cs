@@ -8,11 +8,14 @@ public partial class WorkbenchView : UserControl
 {
     // One local view, one accepted in-process W5 ledger. No independent W0 registry.
     private readonly SharedSessionLedger _ledger = new();
+    private readonly LedgerLocalDrafts _drafts;
+    private string? _w2ReviewId;
     private bool _refreshing;
     private string? _selectedId;
 
     public WorkbenchView()
     {
+        _drafts = new LedgerLocalDrafts(_ledger);
         InitializeComponent();
         Refresh();
     }
@@ -28,6 +31,12 @@ public partial class WorkbenchView : UserControl
             return;
         }
         _selectedId = receipt.Snapshot.ActiveSessionId;
+        if (_drafts.SelectedId != _selectedId)
+        {
+            _drafts.Select(_selectedId);
+            W2ClearReview();
+        }
+        RefreshDraftFields();
         _refreshing = true;
         try
         {
@@ -97,6 +106,7 @@ public partial class WorkbenchView : UserControl
             var outcome = _ledger.Change("workbench-ui-" + Guid.NewGuid().ToString("N"),
                 "human", existing.Id, existing.Version, "set-title", W0NewTitle.Text);
             W0Output.Text = string.Empty;
+            W2ClearReview(); // a ledger metadata change fences any previous review
             Refresh(outcome.Applied ? "Ledger title updated" : "Update refused: " + outcome.Status);
         }
         catch (ArgumentException)
@@ -121,4 +131,97 @@ public partial class WorkbenchView : UserControl
 
     private void W0PreviewJson_Click(object? sender, RoutedEventArgs e) => Preview("json");
     private void W0PreviewMarkdown_Click(object? sender, RoutedEventArgs e) => Preview("markdown");
+
+    private void W2ClearReview()
+    {
+        _w2ReviewId = null;
+        _drafts.DiscardPending();
+        W2ReviewOutput.Text = string.Empty;
+    }
+
+    private void RefreshDraftFields()
+    {
+        if (_drafts.SelectedId is null)
+        {
+            W2TerminalDraft.Text = string.Empty;
+            W2ChatDraft.Text = string.Empty;
+            return;
+        }
+        try
+        {
+            var buffers = _drafts.ReadSelected();
+            W2TerminalDraft.Text = buffers.TerminalInput;
+            W2ChatDraft.Text = buffers.ChatInput;
+        }
+        catch (InvalidOperationException)
+        {
+            W2TerminalDraft.Text = string.Empty;
+            W2ChatDraft.Text = string.Empty;
+        }
+    }
+
+    private void W2Prepare(string direction)
+    {
+        W2ClearReview();
+        try
+        {
+            var review = _drafts.Prepare(direction, W2DraftInput.Text ?? string.Empty);
+            _w2ReviewId = review.ReviewId;
+            W2ReviewOutput.Text = review.PreviewText;
+            W2Status.Text = "Review valid for two minutes, one use, selected session/version only. " +
+                "Nothing has been staged, submitted or executed.";
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            W2Status.Text = "Draft review refused; check selection, direction and 16 KiB UTF-8 bound.";
+        }
+    }
+
+    private void W2ReviewToTerminal_Click(object? sender, RoutedEventArgs e) =>
+        W2Prepare("chat-to-terminal");
+
+    private void W2ReviewToChat_Click(object? sender, RoutedEventArgs e) =>
+        W2Prepare("terminal-to-chat");
+
+    private void W2Stage_Click(object? sender, RoutedEventArgs e)
+    {
+        var id = _w2ReviewId;
+        _w2ReviewId = null;
+        if (id is null)
+        {
+            W2Status.Text = "STAGE_REFUSED: create and inspect a fresh review first.";
+            return;
+        }
+        try
+        {
+            var receipt = _drafts.StageReviewed(id, W2DraftInput.Text ?? string.Empty);
+            W2DraftInput.Text = string.Empty;
+            W2ReviewOutput.Text = string.Empty;
+            RefreshDraftFields();
+            W2Status.Text = receipt.Staged
+                ? "Staged only to this session's local inert text buffer. Nothing transmitted or executed."
+                : "Stage refused.";
+        }
+        catch (InvalidOperationException)
+        {
+            W2ClearReview();
+            W2Status.Text = "STAGE_REFUSED: review changed, expired, replayed, or ledger version changed.";
+        }
+    }
+
+    private void W2Discard_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_selectedId is null)
+        {
+            W2Status.Text = "Select a local session before discarding.";
+            return;
+        }
+        _drafts.Forget(_selectedId);
+        _drafts.Select(_selectedId);
+        W2ClearReview();
+        W2DraftInput.Text = string.Empty;
+        RefreshDraftFields();
+        W2Status.Text = "Local session draft buffers discarded; no provider or terminal effects.";
+    }
+
 }
