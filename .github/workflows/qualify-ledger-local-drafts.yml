@@ -1,0 +1,21 @@
+name: Qualify ledger-bound local draft staging
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ledger-drafts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify one-use draft and ledger version fences
+        run: dotnet run --project SupraChat.LedgerDraftTests/SupraChat.LedgerDraftTests.csproj -c Release
