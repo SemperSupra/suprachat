@@ -39,7 +39,7 @@ try {
     if ($desktop.HasExited) { throw 'GUI_EXITED' }
     if ($desktop.MainWindowHandle -ne [intptr]::Zero) {
       try {
-        $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle)
+        $candidate=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$desktop.MainWindowHandle)
         if ($candidate.Current.ProcessId -eq $desktop.Id -and
             $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
           $window = $candidate
@@ -59,7 +59,7 @@ try {
         # provider tree; reacquire the current declared main HWND each poll.
         $desktop.Refresh()
         if ($desktop.MainWindowHandle -ne [intptr]::Zero) {
-          $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle)
+          $candidate=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$desktop.MainWindowHandle)
           if ($candidate.Current.ProcessId -eq $desktop.Id -and
               $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
             $control=$candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
