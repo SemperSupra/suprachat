@@ -149,9 +149,9 @@ try {
 
     $labPhase = 'enrolled-clients'
     Invoke-Lab 'Shared.Clients'
-    Wait-LabStatus 'Both clients completed'
+    Wait-LabStatus 'All enrolled clients completed'
     $view = Get-LabValue 'Shared.Snapshot' | ConvertFrom-Json
-    if ($view.version -ne 2 -or $view.title -ne 'automation-updated') { throw 'Automation and GUI projections disagreed.' }
+    if ($view.version -ne 3 -or $view.title -ne 'agent-updated') { throw 'GUI, automation and agent disagreed on session A.' }
 
     $labPhase = 'agent-gui-projection'
     Select-LabSession 'Session B'
@@ -175,9 +175,9 @@ try {
     $expectedSchema = if ($Consent) { 'suprachat-metadata-consent-rdte/v1' } else { 'suprachat-shared-desktop-rdte/v1' }
     if ($labProcess.ExitCode -ne 0 -or !$receipt.passed -or $receipt.schema -ne $expectedSchema -or $receipt.phase -ne 'VERIFIED' -or
         $receipt.details.shared_sessions -ne 2 -or $receipt.details.gui_mutations -ne 1 -or
-        $receipt.details.enrolled_peer_runs -ne 3 -or !$receipt.details.common_cursor -or
+        $receipt.details.enrolled_peer_runs -ne 4 -or !$receipt.details.same_session_agent_after_automation -or !$receipt.details.common_cursor -or
         !$receipt.details.durable_revocation_recovered -or !$receipt.details.metadata_recovered -or
-        !$receipt.details.trace_session_routing -or $receipt.details.versions[0] -ne 2 -or $receipt.details.versions[1] -ne 1 -or
+        !$receipt.details.trace_session_routing -or $receipt.details.versions[0] -ne 3 -or $receipt.details.versions[1] -ne 1 -or
         $receipt.provider_actions -or $receipt.first_party_capture -or $receipt.human_identity_qualified -or
         $receipt.production_shared_host_qualified -or $receipt.production_issuer_custody_qualified -or $receipt.payload_exported) {
         throw 'Shared lab receipt qualification failed.'
