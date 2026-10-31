@@ -115,8 +115,14 @@ try {
   } finally {
     $agent.Dispose()
   }
-  if ($reply.id -ne 77 -or !$reply.result.succeeded -or
-      $reply.result.payload.session.version -ne 1) { throw 'AGENT_COMMIT_FAILED' }
+  # Log only bounded classification flags; never echo untrusted
+  # RPC response bodies or synthetic bearer values into public CI.
+  if ($reply.id -ne 77) { throw 'AGENT_RPC_ID_MISMATCH' }
+  if (!$reply.result) { throw 'AGENT_RPC_RESULT_MISSING' }
+  if (!$reply.result.succeeded) { throw 'AGENT_RPC_APPLICATION_REFUSED' }
+  if (!$reply.result.payload) { throw 'AGENT_RPC_PAYLOAD_MISSING' }
+  if (!$reply.result.payload.session) { throw 'AGENT_RPC_SESSION_MISSING' }
+  if ($reply.result.payload.session.version -ne 1) { throw 'AGENT_RPC_VERSION_MISMATCH' }
   $phase='GUI_AGAIN'
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic final')
   (Get-Control 'Sessions.Rename').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
