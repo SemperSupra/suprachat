@@ -262,7 +262,7 @@ internal sealed class SharedDesktopHost : IDisposable
 
     internal static async Task<int> ClientAsync(string name, string audience, string mode)
     {
-        if (audience is not ("automation" or "agent") || mode is not ("mutate" or "revoke")) return 64;
+        if (audience is not ("automation" or "agent") || mode is not ("mutate" or "revoke" or "replay")) return 64;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
         using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
         await pipe.ConnectAsync(timeout.Token);
@@ -272,7 +272,10 @@ internal sealed class SharedDesktopHost : IDisposable
         var other = welcome.RootElement.GetProperty("other_session_id").GetString()!;
         var version = welcome.RootElement.GetProperty("version").GetInt64();
         var consentProtocol = welcome.RootElement.GetProperty("consent_protocol").GetBoolean();
-        var methods = mode == "revoke" ? new[] { "session/revoke-self", "session/inspect" } :
+        var methods = mode == "replay"
+            ? new[] { "session/inspect", "session/change", "session/change",
+                "session/change", "session/change", "trace/read", "session/inspect" }
+            : mode == "revoke" ? new[] { "session/revoke-self", "session/inspect" } :
             consentProtocol ? new[] { "session/inspect", "session/change", "trace/read", "session/inspect", "consent/status" } :
             new[] { "session/inspect", "session/change", "trace/read", "session/inspect" };
         for (var n = 0; n < methods.Length; n++)
