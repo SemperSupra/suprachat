@@ -335,6 +335,7 @@ internal sealed class SharedDesktopHost : IDisposable
         {
             shared_sessions = 2, gui_mutations = GuiMutations, enrolled_peer_runs = _peers,
             automation_and_agent_protocols = true, same_session_agent_after_automation = true,
+            same_session_replay_conflict_stale_qualified = true,
             wrong_session_refused = true, revoked_read_refused = true,
             versions = after.Select(p => p.Version).ToArray(), common_cursor = after.Select(p => p.Cursor).Distinct().Count() == 1,
             durable_revocation_recovered = true, metadata_recovered = true, trace_session_routing = true,
