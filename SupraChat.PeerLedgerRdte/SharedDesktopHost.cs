@@ -15,7 +15,7 @@ internal sealed class SharedDesktopHost : IDisposable
 {
     internal sealed record Request(string SessionId, string Key, long Version = 0, string? Value = null);
     internal sealed record Envelope(string? Operation, string? Method, string? Jsonrpc, int? Id, Request Params);
-    internal sealed record Reply(string Status, long Version, long Cursor, int TraceEvents);
+    internal sealed record Reply(string Status, long Version, long Cursor, int TraceEvents, bool Replayed = false);
     internal sealed record Projection(int Session, string Title, long Version, long Cursor, int TraceEvents);
     private readonly WindowsOwnerCustody _custody = WindowsOwnerCustody.Create();
     private readonly W12ScopedGrantAuthority _issuer;
