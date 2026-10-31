@@ -92,34 +92,43 @@ try {
   $agentInfo.RedirectStandardInput = $true
   $agentInfo.RedirectStandardOutput = $true
   $agentInfo.RedirectStandardError = $true
-  # .NET Framework / Windows PowerShell 5.1 lacks
-  # ProcessStartInfo.StandardInputEncoding. Write exact UTF8-no-BOM bytes
-  # directly to the standard-input pipe instead.
-  $agent = [Diagnostics.Process]::Start($agentInfo)
-  if (!$agent) { throw 'AGENT_START_FAILED' }
+  # In .NET Framework 4.8 (Windows PowerShell 5.1), Process.Start with
+  # RedirectStandardInput=true constructs StreamWriter(pipe, Console.InputEncoding)
+  # and sets AutoFlush=true inside StartWithCreateProcess, which immediately
+  # flushes Console.InputEncoding.GetPreamble() (3-byte UTF-8 BOM on CP65001
+  # runners) to the pipe before Process.Start returns. Set Console.InputEncoding
+  # to UTF-8 without BOM before starting the child process.
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  $priorInputEncoding = [Console]::InputEncoding
+  [Console]::InputEncoding = $utf8NoBom
   try {
-    $stdoutTask = $agent.StandardOutput.ReadToEndAsync()
-    $stderrTask = $agent.StandardError.ReadToEndAsync()
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $rpcBytes = $utf8NoBom.GetBytes($rpc + "`n")
-    $agent.StandardInput.BaseStream.Write($rpcBytes, 0, $rpcBytes.Length)
-    $agent.StandardInput.BaseStream.Flush()
-    $agent.StandardInput.BaseStream.Dispose()
-    if (!$agent.WaitForExit(12000)) {
-      $agent.Kill()
-      throw 'AGENT_TIMEOUT'
+    $agent = [Diagnostics.Process]::Start($agentInfo)
+    if (!$agent) { throw 'AGENT_START_FAILED' }
+    try {
+      $stdoutTask = $agent.StandardOutput.ReadToEndAsync()
+      $stderrTask = $agent.StandardError.ReadToEndAsync()
+      $rpcBytes = $utf8NoBom.GetBytes($rpc + "`n")
+      $agent.StandardInput.BaseStream.Write($rpcBytes, 0, $rpcBytes.Length)
+      $agent.StandardInput.BaseStream.Flush()
+      $agent.StandardInput.BaseStream.Dispose()
+      if (!$agent.WaitForExit(12000)) {
+        $agent.Kill()
+        throw 'AGENT_TIMEOUT'
+      }
+      $stdoutText = $stdoutTask.GetAwaiter().GetResult()
+      $stderrText = $stderrTask.GetAwaiter().GetResult()
+      if ($agent.ExitCode -ne 0) { throw 'AGENT_PROCESS_FAILED' }
+      if ($stderrText.Trim() -ne '{"suprachat":"stdio-ready","schema":"suprachat-jsonrpc/v1"}') {
+        throw 'AGENT_STDERR_UNEXPECTED'
+      }
+      $lines = @($stdoutText -split "\r?\n" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+      if ($lines.Count -ne 1) { throw 'AGENT_RESPONSE_COUNT_INVALID' }
+      $reply = $lines[0] | ConvertFrom-Json
+    } finally {
+      $agent.Dispose()
     }
-    $stdoutText = $stdoutTask.GetAwaiter().GetResult()
-    $stderrText = $stderrTask.GetAwaiter().GetResult()
-    if ($agent.ExitCode -ne 0) { throw 'AGENT_PROCESS_FAILED' }
-    if ($stderrText.Trim() -ne '{"suprachat":"stdio-ready","schema":"suprachat-jsonrpc/v1"}') {
-      throw 'AGENT_STDERR_UNEXPECTED'
-    }
-    $lines = @($stdoutText -split "\r?\n" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
-    if ($lines.Count -ne 1) { throw 'AGENT_RESPONSE_COUNT_INVALID' }
-    $reply = $lines[0] | ConvertFrom-Json
   } finally {
-    $agent.Dispose()
+    [Console]::InputEncoding = $priorInputEncoding
   }
   # Log only bounded classification flags; never echo untrusted
   # RPC response bodies or synthetic bearer values into public CI.
