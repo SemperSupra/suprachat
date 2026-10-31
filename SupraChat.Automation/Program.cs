@@ -85,6 +85,14 @@ internal static class Program
                 "respond" => WriteSuccess(await RespondAsync(args[1..])),
                 "responses-raw" => WriteSuccess(await RawResponsesAsync(args[1..])),
                 "codex-rpc" => WriteSuccess(await CodexRpcAsync(args[1..])),
+                "session-ledger-contract" => WriteSuccess(SharedSessionLedger.DescribeContract()),
+                "session-ledger-host" => await RunSessionLedgerHostAsync(args[1..]),
+                "session-ledger-list" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "list")),
+                "session-ledger-open" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
+                "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "change", await ReadLedgerStdinAsync())),
                 "stdio" => await RunStdioAsync(),
                 _ => WriteFailure(2, "USAGE", $"Unknown command: {args[0]}", Help())
             };
