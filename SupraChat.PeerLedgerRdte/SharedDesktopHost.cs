@@ -305,6 +305,8 @@ internal sealed class SharedDesktopHost : IDisposable
             } : mode == "revoke" ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
                 n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : n == 4 ? "CONSENT_OFF" : "OBSERVED";
             if (reply.Status != expected || mode == "mutate" && n is 1 or 2 && reply.Version != version + 1 || mode == "replay" && reply.Replayed != (n == 2)) return 72;
+            if (mode == "replay" && (n is 1 or 2 or 4 or 5 or 6) && reply.Version != version + 1) return 72;
+            if (mode == "replay" && n == 3 && reply.Version != -1) return 72;
         }
         return 0;
     }
