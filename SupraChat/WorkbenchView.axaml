@@ -63,8 +63,51 @@
                AcceptsReturn="True" TextWrapping="Wrap"
                AutomationProperties.AutomationId="Sessions.ExportPreview"
                AutomationProperties.Name="Unsaved metadata preview" />
+      <Separator Margin="0,10,0,6" />
+      <TextBlock Text="Explicit one-use local draft review" FontSize="18" FontWeight="SemiBold"
+                 AutomationProperties.AutomationId="Sessions.DraftHeading"
+                 AutomationProperties.ControlTypeOverride="Header"
+                 AutomationProperties.HeadingLevel="2" />
       <TextBlock TextWrapping="Wrap"
-                 Text="W1 boundary: ephemeral local metadata with a logical inactive terminal slot only. Cross-process auth, durable storage, explicit transfer staging, full transcript export, GUI and CLI agent sync require separate qualification." />
+                 Text="This is user-entered text, not live terminal output or ChatGPT history. Do not paste passwords or secrets. Review first, then separately stage into the local nonexecuting buffer; no terminal command or chat message is submitted." />
+      <TextBox x:Name="W2DraftInput" AcceptsReturn="True" TextWrapping="Wrap"
+               MaxLength="16384" MinHeight="70"
+               AutomationProperties.AutomationId="Sessions.DraftInput"
+               AutomationProperties.Name="Unsent local draft input" />
+      <WrapPanel Orientation="Horizontal">
+        <Button Content="Review to terminal draft" Click="W2ReviewToTerminal_Click" Margin="0,0,8,8"
+                AutomationProperties.AutomationId="Sessions.ReviewToTerminal"
+                AutomationProperties.HelpText="Review for local-only terminal input staging; does not execute." />
+        <Button Content="Review to chat draft" Click="W2ReviewToChat_Click" Margin="0,0,8,8"
+                AutomationProperties.AutomationId="Sessions.ReviewToChat"
+                AutomationProperties.HelpText="Review for local-only chat input staging; does not submit." />
+        <Button Content="Stage reviewed text locally" Click="W2Stage_Click"
+                AutomationProperties.AutomationId="Sessions.StageDraft"
+                AutomationProperties.HelpText="Second explicit action. One-use review expires after two minutes." />
+      </WrapPanel>
+      <TextBox x:Name="W2ReviewOutput" IsReadOnly="True" AcceptsReturn="True"
+               TextWrapping="Wrap" MinHeight="55"
+               AutomationProperties.AutomationId="Sessions.DraftReview"
+               AutomationProperties.Name="Human preview of local draft before staging" />
+      <TextBlock x:Name="W2Status" TextWrapping="Wrap"
+                 Text="No review pending. The local draft is not executable or submittable."
+                 AutomationProperties.AutomationId="Sessions.DraftStatus"
+                 AutomationProperties.LiveSetting="Polite" />
+      <TextBlock Text="Terminal input draft — never executable" FontWeight="SemiBold" />
+      <TextBox x:Name="W2TerminalDraft" IsReadOnly="True" AcceptsReturn="True"
+               TextWrapping="Wrap" MinHeight="45"
+               AutomationProperties.AutomationId="Sessions.TerminalDraft"
+               AutomationProperties.Name="Current session local inert terminal draft" />
+      <TextBlock Text="Chat input draft — never submitted" FontWeight="SemiBold" />
+      <TextBox x:Name="W2ChatDraft" IsReadOnly="True" AcceptsReturn="True"
+               TextWrapping="Wrap" MinHeight="45"
+               AutomationProperties.AutomationId="Sessions.ChatDraft"
+               AutomationProperties.Name="Current session local unsent chat draft" />
+      <Button Content="Discard current session drafts" Click="W2Discard_Click"
+              AutomationProperties.AutomationId="Sessions.DiscardDrafts"
+              AutomationProperties.HelpText="Erase current session's local buffers and any pending approval." />
+      <TextBlock TextWrapping="Wrap"
+                 Text="W2 boundary: ephemeral reviewed drafts only, no actual paired terminal or conversation connection, no command execution, no ChatGPT submission, no durable storage, and no shared process/CLI/agent authority. PDF and transcript exports are not available." />
     </StackPanel>
   </ScrollViewer>
 </UserControl>
