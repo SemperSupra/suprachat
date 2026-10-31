@@ -92,19 +92,19 @@ try {
   $agentInfo.RedirectStandardInput = $true
   $agentInfo.RedirectStandardOutput = $true
   $agentInfo.RedirectStandardError = $true
-  # Windows PowerShell 5.1's default redirected stdin encoding may emit a
-  # Unicode BOM. JSON-RPC is newline-delimited UTF-8 with no BOM.
-  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-  $agentInfo.StandardInputEncoding = $utf8NoBom
-  $agentInfo.StandardOutputEncoding = $utf8NoBom
-  $agentInfo.StandardErrorEncoding = $utf8NoBom
+  # .NET Framework / Windows PowerShell 5.1 lacks
+  # ProcessStartInfo.StandardInputEncoding. Write exact UTF8-no-BOM bytes
+  # directly to the standard-input pipe instead.
   $agent = [Diagnostics.Process]::Start($agentInfo)
   if (!$agent) { throw 'AGENT_START_FAILED' }
   try {
     $stdoutTask = $agent.StandardOutput.ReadToEndAsync()
     $stderrTask = $agent.StandardError.ReadToEndAsync()
-    $agent.StandardInput.WriteLine($rpc)
-    $agent.StandardInput.Close()
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $rpcBytes = $utf8NoBom.GetBytes($rpc + "`n")
+    $agent.StandardInput.BaseStream.Write($rpcBytes, 0, $rpcBytes.Length)
+    $agent.StandardInput.BaseStream.Flush()
+    $agent.StandardInput.BaseStream.Dispose()
     if (!$agent.WaitForExit(12000)) {
       $agent.Kill()
       throw 'AGENT_TIMEOUT'
