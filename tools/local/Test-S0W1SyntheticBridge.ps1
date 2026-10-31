@@ -109,7 +109,7 @@ try {
     if ($stderrText.Trim() -ne '{"suprachat":"stdio-ready","schema":"suprachat-jsonrpc/v1"}') {
       throw 'AGENT_STDERR_UNEXPECTED'
     }
-    $lines = @($stdoutText -split "\\r?\\n" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+    $lines = @($stdoutText -split "\r?\n" | Where-Object { ![string]::IsNullOrWhiteSpace($_) })
     if ($lines.Count -ne 1) { throw 'AGENT_RESPONSE_COUNT_INVALID' }
     $reply = $lines[0] | ConvertFrom-Json
   } finally {
