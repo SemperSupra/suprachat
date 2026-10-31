@@ -99,7 +99,7 @@ public partial class WorkbenchView : UserControl
             else await RefreshAsync("Create refused: " + outcome.Status);
         }
         catch (ArgumentException) { W0Status.Text = "INVALID_SESSION_METADATA: nothing created."; }
-        catch (Exception) { W0Status.Text = "OWNER_UNAVAILABLE: no session created."; }
+        catch (Exception) { W0Status.Text = "OUTCOME_UNKNOWN: create may have committed; reconnect and refresh before retrying."; }
     }
 
     private async void W0Rename_Click(object? sender, RoutedEventArgs e)
@@ -124,7 +124,7 @@ public partial class WorkbenchView : UserControl
             await RefreshAsync(outcome.Applied ? "Ledger title updated" : "Update refused: " + outcome.Status);
         }
         catch (ArgumentException) { W0Status.Text = "INVALID_SESSION_TITLE: no change."; }
-        catch (Exception) { W0Status.Text = "OWNER_UNAVAILABLE: no local fallback."; }
+        catch (Exception) { W0Status.Text = "OUTCOME_UNKNOWN: rename may have committed; reconnect and refresh before retrying."; }
     }
 
     private async Task PreviewAsync(string format)
