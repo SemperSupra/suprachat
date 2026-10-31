@@ -296,7 +296,13 @@ internal sealed class SharedDesktopHost : IDisposable
                 result = result.GetProperty("result");
             }
             var reply = result.Deserialize<Reply>(WireOptions)!;
-            var expected = mode == "revoke" ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
+            var expected = mode == "replay" ? n switch
+            {
+                1 or 2 => "APPLIED",
+                3 => "IDEMPOTENCY_KEY_PAYLOAD_CONFLICT",
+                4 => "VERSION_CONFLICT",
+                _ => "OBSERVED"
+            } : mode == "revoke" ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
                 n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : n == 4 ? "CONSENT_OFF" : "OBSERVED";
             if (reply.Status != expected || mode == "mutate" && n is 1 or 2 && reply.Version != version + 1) return 72;
         }
