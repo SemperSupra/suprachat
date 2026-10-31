@@ -1,0 +1,51 @@
+name: Qualify S0 W1 GUI CLI and agent synthetic bridge
+
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/**'
+      - 'SupraChat.Automation/**'
+      - 'tools/local/Test-S0W1SyntheticBridge.ps1'
+      - '.github/workflows/qualify-s0-w1-synthetic-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  w1-gui-cli-agent:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build normal W1 desktop and independent CLI/agent
+        shell: pwsh
+        run: |
+          dotnet build SupraChat/SupraChat.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_GUI_BUILD_FAILED' }
+          dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_CLI_BUILD_FAILED' }
+      - name: Qualify real W1 native UIA and independent CLI plus agent processes
+        shell: pwsh
+        run: |
+          ./tools/local/Test-S0W1SyntheticBridge.ps1 -ReceiptPath "$env:RUNNER_TEMP/s0-w1-bridge.json"
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_BRIDGE_SCRIPT_FAILED' }
+          $receipt=Get-Content -LiteralPath "$env:RUNNER_TEMP/s0-w1-bridge.json" -Raw | ConvertFrom-Json
+          if ($receipt.schema -ne 'suprachat-s0-w1-bridge/v1' -or
+              !$receipt.passed -or $receipt.phase -ne 'PASS' -or
+              ($receipt.same_session_versions -join ',') -ne '0,1,2' -or
+              !$receipt.synthetic_only -or $receipt.authenticated_principals -or
+              $receipt.production_storage -or $receipt.provider_actions) {
+            throw 'S0_W1_NATIVE_RECEIPT_INVALID'
+          }
+      - name: Preserve metadata-only sanitized receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s0-w1-synthetic-bridge-receipt
+          path: ${{ runner.temp }}/s0-w1-bridge.json
+          if-no-files-found: ignore
+          retention-days: 7
