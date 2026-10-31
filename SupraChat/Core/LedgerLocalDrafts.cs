@@ -46,6 +46,8 @@ public sealed class LedgerLocalDrafts : IDisposable
     public LedgerDraftReview Prepare(string direction, string input)
     {
         ThrowIfDisposed();
+        // Even a refused new review attempt invalidates the previous token.
+        _pending = null;
         var state = RequireSelected();
         if (direction is not ("chat-to-terminal" or "terminal-to-chat"))
             throw new ArgumentException("INVALID_TRANSFER_DIRECTION", nameof(direction));
