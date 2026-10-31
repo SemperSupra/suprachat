@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SupraChat.WorkbenchView"
+             AutomationProperties.AutomationId="Sessions.WorkbenchView"
+             AutomationProperties.Name="Local session workbench">
+  <ScrollViewer>
+    <StackPanel Margin="20" Spacing="10" MaxWidth="1100">
+      <TextBlock Text="Local session workbench" FontSize="22" FontWeight="SemiBold"
+                 AutomationProperties.ControlTypeOverride="Header"
+                 AutomationProperties.HeadingLevel="1"
+                 AutomationProperties.AutomationId="Sessions.Heading" />
+      <TextBlock TextWrapping="Wrap"
+                 Text="The existing in-process ledger owns all session metadata and IDs. No ChatGPT message read/send, remote actor admission, command execution, terminal process, or persistence is created." />
+      <WrapPanel Orientation="Horizontal">
+        <TextBox x:Name="W0NewTitle" Width="200" MaxLength="80" Margin="0,0,8,8"
+                 Watermark="Title for new or selected session"
+                 AutomationProperties.AutomationId="Sessions.NewTitle"
+                 AutomationProperties.Name="Local session title" />
+        <TextBox x:Name="W0Conversation" Width="340" Margin="0,0,8,8"
+                 Watermark="ChatGPT conversation URL (optional)"
+                 AutomationProperties.AutomationId="Sessions.NewConversation"
+                 AutomationProperties.Name="Read-only conversation reference" />
+        <TextBox x:Name="W0Workspace" Width="265" Margin="0,0,8,8"
+                 Watermark="Workspace reference (optional)"
+                 AutomationProperties.AutomationId="Sessions.NewWorkspace"
+                 AutomationProperties.Name="Workspace collision reference" />
+      </WrapPanel>
+      <WrapPanel Orientation="Horizontal">
+        <Button Content="Create local session" Click="W0Create_Click" Margin="0,0,8,8"
+                AutomationProperties.AutomationId="Sessions.Create"
+                AutomationProperties.HelpText="Creates only a local nonexecuting ledger record." />
+        <Button Content="Rename selected" Click="W0Rename_Click" Margin="0,0,8,8"
+                AutomationProperties.AutomationId="Sessions.Rename"
+                AutomationProperties.HelpText="Compare-and-swap title change through the same ledger." />
+      </WrapPanel>
+      <ListBox x:Name="W0Sessions" MinHeight="130" MaxHeight="240"
+               SelectionChanged="W0Sessions_SelectionChanged"
+               AutomationProperties.AutomationId="Sessions.List"
+               AutomationProperties.Name="Local ledger session list">
+        <ListBox.ItemTemplate>
+          <DataTemplate><TextBlock Text="{Binding Title}" /></DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <TextBlock x:Name="W0Status" TextWrapping="Wrap"
+                 Text="No local sessions. Terminal execution and chat submission disabled."
+                 AutomationProperties.AutomationId="Sessions.Status"
+                 AutomationProperties.LiveSetting="Polite"
+                 AutomationProperties.Name="Session state and workspace collision status" />
+      <Separator Margin="0,6,0,6" />
+      <TextBlock Text="Metadata-only export preview" FontSize="18" FontWeight="SemiBold"
+                 AutomationProperties.ControlTypeOverride="Header"
+                 AutomationProperties.HeadingLevel="2"
+                 AutomationProperties.AutomationId="Sessions.ExportHeading" />
+      <TextBlock TextWrapping="Wrap"
+                 Text="Preview requires an explicit click. No file, transcript, or credential is read or written. Titles, URLs and workspace names themselves may be sensitive." />
+      <WrapPanel Orientation="Horizontal">
+        <Button Content="Preview JSON" Click="W0PreviewJson_Click" Margin="0,0,8,8"
+                AutomationProperties.AutomationId="Sessions.ExportJsonPreview" />
+        <Button Content="Preview Markdown" Click="W0PreviewMarkdown_Click"
+                AutomationProperties.AutomationId="Sessions.ExportMarkdownPreview" />
+      </WrapPanel>
+      <TextBox x:Name="W0Output" IsReadOnly="True" MinHeight="115"
+               AcceptsReturn="True" TextWrapping="Wrap"
+               AutomationProperties.AutomationId="Sessions.ExportPreview"
+               AutomationProperties.Name="Unsaved metadata preview" />
+      <TextBlock TextWrapping="Wrap"
+                 Text="W1 boundary: ephemeral local metadata with a logical inactive terminal slot only. Cross-process auth, durable storage, explicit transfer staging, full transcript export, GUI and CLI agent sync require separate qualification." />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

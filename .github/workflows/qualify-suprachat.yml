@@ -5,6 +5,8 @@ on:
     branches:
       - 'migration/extracted-qualified-20261002'
       - 'main'
+    tags:
+      - 'v0.0.1'
   pull_request:
   workflow_dispatch:
 
@@ -23,19 +25,25 @@ jobs:
         include:
           - os: windows-2025
             rid: win-x64
+            platform: windows-x64
             artifact: suprachat-windows-x64
+            release_artifact: suprachat-release-windows-x64
             codex_asset: codex-x86_64-pc-windows-msvc.exe
             codex_sha256: 57e1bdab42c0559a74558ca17e85d5c7893caa5f1e582f67e9ddd6d97fa705a7
             codex_archive: false
           - os: ubuntu-24.04
             rid: linux-x64
+            platform: linux-x64
             artifact: suprachat-linux-x64
+            release_artifact: suprachat-release-linux-x64
             codex_asset: codex-x86_64-unknown-linux-musl.tar.gz
             codex_sha256: b48ca1b2d6b1bf42b944e02c3d937c898e24651916684cdc35fdedf31b291bcb
             codex_archive: true
           - os: macos-26
             rid: osx-arm64
+            platform: macos-arm64
             artifact: suprachat-macos-arm64
+            release_artifact: suprachat-release-macos-arm64
             codex_asset: codex-aarch64-apple-darwin.tar.gz
             codex_sha256: 51de50a39ea592b5b0a64ae0474548c282181cb6b96d9bd08965a682ae12774c
             codex_archive: true
@@ -58,6 +66,15 @@ jobs:
 
       - name: Run contract checks
         run: dotnet run --project SupraChat.ContractTests/SupraChat.ContractTests.csproj -c Release
+
+      - name: Run ledger projection and workbench contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet run --project SupraChat.LedgerProjectionTests/SupraChat.LedgerProjectionTests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ledger projection contracts failed.' }
+          dotnet run --project SupraChat.WorkbenchContractTests/SupraChat.WorkbenchContractTests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Session workbench contracts failed.' }
 
       - name: Build automation and agent shell
         run: dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
@@ -708,7 +725,8 @@ jobs:
           set -euo pipefail
           chmod +x packaging/macos/package.sh
           stage="$PWD/out/macos-package"
-          packaging/macos/package.sh "$PWD/out/osx-arm64" "$stage"
+          version="$(dotnet msbuild SupraChat/SupraChat.csproj -nologo -getProperty:Version)"
+          packaging/macos/package.sh "$PWD/out/osx-arm64" "$stage" "$version"
           cp packaging/macos/install.sh "$stage/install.sh"
           chmod +x "$stage/install.sh"
 
@@ -716,6 +734,8 @@ jobs:
           test -x "$stage/SupraChat.app/Contents/MacOS/SupraChat.Automation"
           test -x "$stage/SupraChat.app/Contents/MacOS/runtime/codex/codex"
           plutil -extract CFBundleIdentifier raw "$stage/SupraChat.app/Contents/Info.plist" | grep -qx 'com.sempersupra.suprachat'
+          plutil -extract CFBundleShortVersionString raw "$stage/SupraChat.app/Contents/Info.plist" | grep -qx '0.0.1'
+          plutil -extract CFBundleVersion raw "$stage/SupraChat.app/Contents/Info.plist" | grep -qx '0.0.1'
           plutil -p "$stage/SupraChat.app/Contents/Info.plist" | grep -q 'suprachat'
           codesign --verify --strict "$stage/SupraChat.app"
 
@@ -1168,7 +1188,7 @@ jobs:
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
                 $script:uiaTransientRetries = 0
-                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 3) {
+                function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 15) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
                   $automationId)
@@ -1200,7 +1220,7 @@ jobs:
                     # RPC_E_CALL_REJECTED (0x80010001) and
                     # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
                     # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
-                    if ($_.Exception.HResult -notin @(-2147418111, -2147417846)) { throw }
+                    if ($_.Exception.HResult -notin @(-2147418113, -2147418111, -2147417846)) { throw }
                     $script:uiaTransientRetries++
                     $element = $null
                   }
@@ -1209,7 +1229,9 @@ jobs:
                 if (-not $element) {
                   # Fixed declarative IDs only; do not export names, document text or web content.
                   $knownIds = @('RootTabs', 'Tab.ChatGPT', 'Tab.AgentLab', 'Tab.AutomationAgents',
-                    'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output')
+                    'Tab.Sessions', 'Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status', 'Trace.Start', 'Trace.Output',
+                    'Sessions.Heading', 'Sessions.NewTitle', 'Sessions.Create', 'Sessions.List', 'Sessions.Status',
+                    'Sessions.ExportJsonPreview', 'Sessions.ExportPreview')
                   $visibleIds = @()
                   if ($window) {
                     $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -1233,14 +1255,61 @@ jobs:
                   $null = Require-SemanticControl $automationId
                 }
                 foreach ($area in @(
+                  # Run the bounded W1 fixture first so its independent evidence
+                  # is retained even if a later legacy tab hits the known UIA flake.
+                  @{ tab = 'Tab.Sessions'; controls = @('Sessions.Heading', 'Sessions.NewTitle', 'Sessions.NewConversation', 'Sessions.NewWorkspace', 'Sessions.Create', 'Sessions.Rename', 'Sessions.List', 'Sessions.Status', 'Sessions.ExportJsonPreview', 'Sessions.ExportMarkdownPreview', 'Sessions.ExportPreview') },
                   @{ tab = 'Tab.AgentLab'; controls = @('Auth.SignIn', 'AgentLab.Prompt', 'Auth.Status') },
                   @{ tab = 'Tab.AutomationAgents'; controls = @('Accessibility.Status', 'Trace.Start', 'Trace.Stop', 'Trace.Read', 'Trace.Export', 'Trace.Status', 'Trace.Output', 'Control.Streams', 'Control.Refresh', 'Control.Preview', 'Control.Confirm', 'Control.Status') }
                 )) {
                   $tab = Require-SemanticControl $area.tab
                   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                   $selection.Select()
-                  if (-not $selection.Current.IsSelected) {
-                    throw "UI Automation tab SelectionItem did not select: $($area.tab)"
+                  $selected = $false
+                  $selectionDeadline = (Get-Date).AddSeconds(12)
+                  do {
+                    # Reacquire the element and pattern while Avalonia's UIA
+                    # provider publishes the selection change asynchronously.
+                    $tab = Require-SemanticControl $area.tab
+                    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+                    if ($selection.Current.IsSelected) {
+                      $selected = $true
+                      break
+                    }
+                    Start-Sleep -Milliseconds 100
+                  } while ((Get-Date) -lt $selectionDeadline)
+                  if (-not $selected) {
+                    # Reacquire and revalidate the declared process root for
+                    # diagnostics; a remounted window must not leave a stale root.
+                    $diagnosticWindow = $null
+                    $rootAvailable = $false
+                    $tabCount = 0
+                    $isEnabled = $false
+                    $diagnosticReadSucceeded = $false
+                    try {
+                      $p.Refresh()
+                      if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+                        $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                        if ($candidate.Current.ProcessId -eq $p.Id -and
+                            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                          $diagnosticWindow = $candidate
+                          $rootAvailable = $true
+                          $tabs = $diagnosticWindow.FindAll(
+                            [System.Windows.Automation.TreeScope]::Descendants,
+                            [System.Windows.Automation.PropertyCondition]::new(
+                              [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                              $area.tab))
+                          $tabCount = $tabs.Count
+                          if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
+                          $diagnosticReadSucceeded = $true
+                        }
+                      }
+                    } catch {
+                      # Do not let a transient provider error mask the bounded
+                      # selection failure, and never include exception text.
+                    }
+                    $isSelected = $false
+                    try { $isSelected = $selection.Current.IsSelected } catch {}
+                    throw "UI Automation tab selection timed out: id=$($area.tab); root_available=$rootAvailable; read_succeeded=$diagnosticReadSucceeded; count=$tabCount; enabled=$isEnabled; selected=$isSelected"
                   }
                   # A successful SelectionItem.Select is not proof that the
                   # newly selected tab's child provider has finished attaching.
@@ -1291,6 +1360,98 @@ jobs:
                       if (-not $traceModeObserved) { throw 'Accessible trace control did not change semantic capture state.' }
                     }
                   }
+                  if ($area.tab -eq 'Tab.Sessions') {
+                    # Exercise only a fresh, ephemeral in-process fixture record.
+                    # This proves the accessible W1 vertical slice without touching
+                    # ChatGPT submission, credentials, files, terminals, or persistence.
+                    $titleInput = Require-SemanticControl 'Sessions.NewTitle'
+                    $titleValue = $titleInput.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    $titleValue.SetValue('SupraChat UIA fixture')
+                    (Require-SemanticControl 'Sessions.Create').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+
+                    $createDeadline = (Get-Date).AddSeconds(5)
+                    $created = $false
+                    $createReadbackListItemCount = 0
+                    $createReadbackExpectedNameMatch = $false
+                    $createReadbackSelectedItemPatternMatch = $false
+                    $listItemCondition = New-Object System.Windows.Automation.PropertyCondition(
+                      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                      [System.Windows.Automation.ControlType]::ListItem)
+                    while ((Get-Date) -lt $createDeadline) {
+                      $sessionList = Require-SemanticControl 'Sessions.List'
+                      $listItems = $sessionList.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
+                      $createReadbackListItemCount = $listItems.Count
+                      $createReadbackExpectedNameMatch = $false
+                      $createReadbackSelectedItemPatternMatch = $false
+                      foreach ($listItem in $listItems) {
+                        if ($listItem.Current.Name -eq 'SupraChat UIA fixture') {
+                          $createReadbackExpectedNameMatch = $true
+                          $selectionItemPattern = $null
+                          if ($listItem.TryGetCurrentPattern(
+                              [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                              [ref]$selectionItemPattern) -and $selectionItemPattern.Current.IsSelected) {
+                            $createReadbackSelectedItemPatternMatch = $true
+                          }
+                        }
+                      }
+                      if ($createReadbackListItemCount -eq 1 -and
+                          $createReadbackExpectedNameMatch -and
+                          $createReadbackSelectedItemPatternMatch) {
+                        $created = $true
+                        break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $created) {
+                      throw "W1 UIA create readback failed; list_item_count=$createReadbackListItemCount; expected_name_match=$createReadbackExpectedNameMatch; selected_item_pattern_match=$createReadbackSelectedItemPatternMatch."
+                    }
+
+                    $titleValue.SetValue('SupraChat UIA renamed fixture')
+                    (Require-SemanticControl 'Sessions.Rename').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $renameDeadline = (Get-Date).AddSeconds(5)
+                    $renamed = $false
+                    while ((Get-Date) -lt $renameDeadline) {
+                      $sessionList = Require-SemanticControl 'Sessions.List'
+                      $listItems = $sessionList.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants, $listItemCondition)
+                      foreach ($listItem in $listItems) {
+                        if ($listItem.Current.Name -eq 'SupraChat UIA renamed fixture') {
+                          $selectionItemPattern = $null
+                          if ($listItem.TryGetCurrentPattern(
+                              [System.Windows.Automation.SelectionItemPattern]::Pattern,
+                              [ref]$selectionItemPattern) -and $selectionItemPattern.Current.IsSelected) {
+                            $renamed = $true
+                            break
+                          }
+                        }
+                      }
+                      if ($renamed) { break }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $renamed) { throw 'W1 UIA rename did not update the selected ledger fixture.' }
+
+                    (Require-SemanticControl 'Sessions.ExportJsonPreview').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $previewDeadline = (Get-Date).AddSeconds(5)
+                    $previewed = $false
+                    while ((Get-Date) -lt $previewDeadline) {
+                      $preview = Require-SemanticControl 'Sessions.ExportPreview'
+                      $previewValue = $null
+                      if ($preview.TryGetCurrentPattern(
+                          [System.Windows.Automation.ValuePattern]::Pattern, [ref]$previewValue) -and
+                          $previewValue.Current.Value -match 'SupraChat UIA renamed fixture' -and
+                          $previewValue.Current.Value -match 'suprachat-workbench-metadata-export/v1') {
+                        $previewed = $true
+                        break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $previewed) { throw 'W1 UIA did not expose the expected metadata-only JSON preview.' }
+                    Write-Host 'Windows W1 Sessions UIA create/rename/metadata-preview smoke PASS.'
+                  }
                 }
 
                 # Check actual provider action + independent UIA state readback,
@@ -1336,14 +1497,348 @@ jobs:
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
           }
 
+      - name: Qualify synthetic secret UIA boundary for v0.0.1
+        if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build SupraChat.UiaSecurityProbe/SupraChat.UiaSecurityProbe.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic UIA security probe build failed.' }
+          dotnet build SupraChat.UiaComObserver/SupraChat.UiaComObserver.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Native UIA observer build failed.' }
+          ./tools/local/Test-SupraChatSecretUiaProbe.ps1 `
+            -Executable (Join-Path $PWD 'SupraChat.UiaSecurityProbe/bin/Release/net10.0-windows/SupraChat.UiaSecurityProbe.exe') `
+            -ObserverExecutable (Join-Path $PWD 'SupraChat.UiaComObserver/bin/Release/net10.0-windows/SupraChat.UiaComObserver.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic UIA secret boundary failed.' }
+
+      - name: Build and smoke Windows release archive
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $PWD 'out/win-x64'
+          $appVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo(
+            (Join-Path $source 'SupraChat.exe')).FileVersion
+          if ($appVersion -ne '0.0.1.0') { throw "Windows app version mismatch: $appVersion" }
+          $isReleaseTag = $env:GITHUB_REF -eq 'refs/tags/v0.0.1'
+          if ($isReleaseTag) {
+            foreach ($required in @('LICENSE', 'THIRD-PARTY-NOTICES.md', 'RELEASE_NOTES-v0.0.1.md')) {
+              if (!(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Release notice missing: $required" }
+              Copy-Item -LiteralPath $required -Destination $source
+            }
+          }
+          $provenance = @{
+            schema = 'suprachat-platform-build/v1'
+            platform = '${{ matrix.platform }}'
+            source_commit = '${{ github.sha }}'
+            workflow_run_id = '${{ github.run_id }}'
+            workflow_run_attempt = '${{ github.run_attempt }}'
+            dotnet_sdk = (& dotnet --version).Trim()
+            runner_image_os = $env:ImageOS
+            runner_image_version = $env:ImageVersion
+          } | ConvertTo-Json -Depth 5
+          $provenance | Set-Content -LiteralPath (Join-Path $source 'build-provenance.json') -Encoding UTF8
+
+          $sbomTool = Join-Path $env:RUNNER_TEMP 'sbom-tool.exe'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/sbom-tool/releases/download/v4.1.5/sbom-tool-win-x64.exe' -OutFile $sbomTool
+          $sbomToolHash = (Get-FileHash -Algorithm SHA256 -Path $sbomTool).Hash.ToLowerInvariant()
+          if ($sbomToolHash -ne '625767b371b7fdd58f40f618b8a86da0247a33c89e419039c86b4edba1dad4b5') {
+            throw "Microsoft SBOM tool digest mismatch: $sbomToolHash"
+          }
+          & $sbomTool generate -b $source -bc $PWD -pn SupraChat -pv 0.0.1 -ps 'SemperSupra' -nsb 'https://github.com/SemperSupra/suprachat' -li true -pm true
+          if ($LASTEXITCODE -ne 0) { throw "SPDX SBOM generation failed with $LASTEXITCODE" }
+          $manifest = Get-Content -LiteralPath (Join-Path $source '_manifest/spdx_2.2/manifest.spdx.json') -Raw | ConvertFrom-Json
+          $licensedPackages = @($manifest.packages | Where-Object {
+            $name = if ($_.name -is [string]) { $_.name.Trim() } else { '' }
+            $license = if ($_.licenseDeclared -is [string]) { $_.licenseDeclared.Trim() } else { '' }
+            $name.Length -gt 0 -and $name -ne 'SupraChat' -and $license.Length -gt 0 -and
+              $license -notin @('NOASSERTION', 'NONE')
+          })
+          if ($licensedPackages.Count -eq 0) { throw 'SPDX SBOM contains no declared third-party package licenses.' }
+          & $sbomTool validate -b $source -o (Join-Path $env:RUNNER_TEMP 'sbom-validation-source.json') -mi SPDX:2.2
+          if ($LASTEXITCODE -ne 0) { throw "SPDX source-tree validation failed with $LASTEXITCODE" }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $nameVersion = if ($isReleaseTag) { 'v0.0.1' } else { "qualification-$($env:GITHUB_SHA.Substring(0, 12))" }
+          $archive = Join-Path $env:RUNNER_TEMP "SupraChat-$nameVersion-${{ matrix.platform }}.zip"
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            $source, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+          $extract = Join-Path $env:RUNNER_TEMP 'suprachat-windows-archive-smoke'
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          & $sbomTool validate -b $extract -o (Join-Path $env:RUNNER_TEMP 'sbom-validation-archive.json') -mi SPDX:2.2
+          if ($LASTEXITCODE -ne 0) { throw "SPDX extracted-archive validation failed with $LASTEXITCODE" }
+          if (!(Test-Path -LiteralPath (Join-Path $extract '.playwright/package/cli.js'))) { throw 'Archive omitted Playwright runtime.' }
+          if (!(Test-Path -LiteralPath (Join-Path $extract 'install.ps1'))) { throw 'Archive omitted Windows installer script.' }
+          $cli = Join-Path $extract 'SupraChat.Automation.exe'
+          $capabilities = & $cli capabilities | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $capabilities.ok) { throw 'Extracted Windows archive CLI smoke failed.' }
+          $browser = & $cli browser-snapshot --url 'https://example.com/' | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $browser.ok -or [string]::IsNullOrWhiteSpace($browser.value.aria_snapshot)) {
+            throw 'Extracted Windows archive browser runtime smoke failed.'
+          }
+
+      - name: Upload SPDX SBOM for inspection (Windows)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-spdx
+          path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload bundled license texts for review (Windows)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-license-review
+          path: |
+            out/${{ matrix.rid }}/**/*[Ll][Ii][Cc][Ee][Nn][Ss][Ee]*
+            out/${{ matrix.rid }}/**/*[Nn][Oo][Tt][Ii][Cc][Ee]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Ii][Nn][Gg]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Rr][Ii][Gg][Hh][Tt]*
+            out/${{ matrix.rid }}/**/*[Tt][Hh][Ii][Rr][Dd][Pp][Aa][Rr][Tt][Yy]*
+            out/${{ matrix.rid }}/**/*[Pp][Aa][Tt][Ee][Nn][Tt][Ss]*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows release archive
+        if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.release_artifact }}
+          path: ${{ runner.temp }}/SupraChat-v0.0.1-${{ matrix.platform }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Build and smoke Unix release archive
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="out/${{ matrix.rid }}"
+          if [[ "$GITHUB_REF" == 'refs/tags/v0.0.1' ]]; then
+            cp LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md "$source/"
+            name_version='v0.0.1'
+          else
+            name_version="qualification-${GITHUB_SHA:0:12}"
+          fi
+          dotnet_sdk="$(dotnet --version)"
+          jq -n \
+            --arg platform '${{ matrix.platform }}' \
+            --arg source_commit '${{ github.sha }}' \
+            --arg workflow_run_id '${{ github.run_id }}' \
+            --arg workflow_run_attempt '${{ github.run_attempt }}' \
+            --arg dotnet_sdk "$dotnet_sdk" \
+            --arg runner_image_os "${ImageOS:-unknown}" \
+            --arg runner_image_version "${ImageVersion:-unknown}" \
+            '{schema:"suprachat-platform-build/v1",platform:$platform,source_commit:$source_commit,workflow_run_id:$workflow_run_id,workflow_run_attempt:$workflow_run_attempt,dotnet_sdk:$dotnet_sdk,runner_image_os:$runner_image_os,runner_image_version:$runner_image_version}' \
+            > "$source/build-provenance.json"
+          tool="$RUNNER_TEMP/sbom-tool"
+          if [[ "$RUNNER_OS" == 'macOS' ]]; then
+            curl --fail --location --silent --show-error 'https://github.com/microsoft/sbom-tool/releases/download/v4.1.5/sbom-tool-osx-arm64' --output "$tool"
+            echo 'bb25842fd707fbe78d3ac9de0d2b27ee2f4a97764f3b8a5c2068c826e75f3535  '"$tool" | shasum -a 256 --check --status
+          else
+            curl --fail --location --silent --show-error 'https://github.com/microsoft/sbom-tool/releases/download/v4.1.5/sbom-tool-linux-x64' --output "$tool"
+            echo 'bf5d4f99bc98c119d549d08fc02ae92598a7a42772f17317c01031a92632e05b  '"$tool" | sha256sum --check --status
+          fi
+          chmod +x "$tool"
+          "$tool" generate -b "$source" -bc "$PWD" -pn SupraChat -pv 0.0.1 -ps SemperSupra -nsb https://github.com/SemperSupra/suprachat -li true -pm true
+          manifest="$source/_manifest/spdx_2.2/manifest.spdx.json"
+          jq -e '[.packages[]
+            | select((.name | type) == "string")
+            | (.name | gsub("^\\s+|\\s+$"; "")) as $name
+            | select($name != "" and $name != "SupraChat")
+            | select((.licenseDeclared | type) == "string")
+            | (.licenseDeclared | gsub("^\\s+|\\s+$"; "")) as $license
+            | select($license != "" and $license != "NOASSERTION" and $license != "NONE")
+          ] | length > 0' "$manifest" >/dev/null || { echo 'SPDX SBOM contains no declared third-party package licenses.' >&2; exit 1; }
+          "$tool" validate -b "$source" -o "$RUNNER_TEMP/sbom-validation-source.json" -mi SPDX:2.2
+          archive="$RUNNER_TEMP/SupraChat-$name_version-${{ matrix.platform }}.tar.gz"
+          tar -czf "$archive" -C "$source" .
+          extract="$RUNNER_TEMP/suprachat-${{ matrix.rid }}-archive-smoke"
+          mkdir -p "$extract"
+          tar -xzf "$archive" -C "$extract"
+          "$tool" validate -b "$extract" -o "$RUNNER_TEMP/sbom-validation-archive.json" -mi SPDX:2.2
+          test -f "$extract/build-provenance.json"
+          if [[ '${{ matrix.platform }}' == 'macos-arm64' ]]; then
+            cli="$extract/SupraChat.app/Contents/MacOS/SupraChat.Automation"
+            test -L "$extract/SupraChat.app/Contents/MacOS/.playwright"
+            test -x "$extract/SupraChat.app/Contents/MacOS/SupraChat"
+            test -x "$extract/install.sh"
+          else
+            cli="$extract/SupraChat.Automation"
+            test -f "$extract/.playwright/package/cli.js"
+            test -x "$cli"
+            test -x "$extract/install.sh"
+          fi
+          capabilities="$("$cli" capabilities)"
+          jq -e '.ok == true' <<<"$capabilities" >/dev/null
+          browser="$("$cli" browser-snapshot --url https://example.com/)"
+          jq -e '.ok == true and (.value.aria_snapshot | length > 0)' <<<"$browser" >/dev/null
+
+      - name: Upload SPDX SBOM for inspection (Unix)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-spdx
+          path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload bundled license texts for review (Unix)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-license-review
+          path: |
+            out/${{ matrix.rid }}/**/*[Ll][Ii][Cc][Ee][Nn][Ss][Ee]*
+            out/${{ matrix.rid }}/**/*[Nn][Oo][Tt][Ii][Cc][Ee]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Ii][Nn][Gg]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Rr][Ii][Gg][Hh][Tt]*
+            out/${{ matrix.rid }}/**/*[Tt][Hh][Ii][Rr][Dd][Pp][Aa][Rr][Tt][Yy]*
+            out/${{ matrix.rid }}/**/*[Pp][Aa][Tt][Ee][Nn][Tt][Ss]*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Unix release archive
+        if: github.ref == 'refs/tags/v0.0.1' && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.release_artifact }}
+          path: ${{ runner.temp }}/SupraChat-v0.0.1-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload self-contained application
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: out/${{ matrix.rid }}/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+  draft-release:
+    if: github.event_name == 'push' && github.ref == 'refs/tags/v0.0.1'
+    name: Stage v0.0.1 draft GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      SOURCE_SHA: ${{ github.sha }}
+      WORKFLOW_RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require release metadata and distribution notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" == "v0.0.1" ]] || { echo "Unexpected release tag: $RELEASE_TAG" >&2; exit 1; }
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$tagged_sha" == "$SOURCE_SHA" ]] || { echo 'Remote release tag moved away from the triggering source commit.' >&2; exit 1; }
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_SHA" FETCH_HEAD || { echo 'Release tag must target a commit contained in main.' >&2; exit 1; }
+          test -s LICENSE
+          test -s THIRD-PARTY-NOTICES.md
+          test -s RELEASE_NOTES-v0.0.1.md
+          if grep -Eiq 'TODO|TBD|PLACEHOLDER|CHOOSE A LICENSE' LICENSE THIRD-PARTY-NOTICES.md; then
+            echo 'Release license or third-party notices contain an unresolved placeholder.' >&2
+            exit 1
+          else
+            grep_status=$?
+            if [[ "$grep_status" -ne 1 ]]; then
+              echo 'Could not verify release license or third-party notices.' >&2
+              exit "$grep_status"
+            fi
+          fi
+          grep -q '<Version>0.0.1</Version>' Directory.Build.props
+
+      - name: Download platform-native release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: suprachat-release-*
+          path: release-stage/archives
+          merge-multiple: false
+
+      - name: Stage exact platform archives and release provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/suprachat-release"
+          mkdir -p "$stage"
+          find release-stage/archives -type f \( -name 'SupraChat-v0.0.1-windows-x64.zip' -o -name 'SupraChat-v0.0.1-linux-x64.tar.gz' -o -name 'SupraChat-v0.0.1-macos-arm64.tar.gz' \) -exec cp {} "$stage/" \;
+          test -s "$stage/SupraChat-v0.0.1-windows-x64.zip"
+          test -s "$stage/SupraChat-v0.0.1-linux-x64.tar.gz"
+          test -s "$stage/SupraChat-v0.0.1-macos-arm64.tar.gz"
+          cp LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md "$stage/"
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg source_commit "$SOURCE_SHA" \
+            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
+            --arg build_provenance "Each platform archive contains build-provenance.json with the producer SDK, runner image, source commit and run attempt." \
+            '{schema:"suprachat-release-provenance/v1",tag:$tag,source_commit:$source_commit,workflow_run_id:$workflow_run_id,build_provenance:$build_provenance,platforms:["windows-x64","linux-x64","macos-arm64"]}' \
+            > "$stage/release-provenance.json"
+          (cd "$stage" && sha256sum SupraChat-* LICENSE THIRD-PARTY-NOTICES.md RELEASE_NOTES-v0.0.1.md release-provenance.json > SHA256SUMS)
+          (cd "$stage" && sha256sum -c SHA256SUMS)
+          echo "RELEASE_ASSET_DIR=$stage" >> "$GITHUB_ENV"
+
+      - name: Create draft GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$tagged_sha" == "$SOURCE_SHA" ]] || { echo 'Remote release tag moved during staging; refusing draft update.' >&2; exit 1; }
+          expected_names="$(find "$RELEASE_ASSET_DIR" -maxdepth 1 -type f -printf '%f\n' | sort)"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+            existing_names="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | .[]')"
+            while IFS= read -r existing_name; do
+              [[ -z "$existing_name" ]] && continue
+              grep -Fxq -- "$existing_name" <<<"$expected_names" || {
+                echo "Draft release has an unexpected asset outside this manifest: $existing_name" >&2
+                exit 1
+              }
+            done <<<"$existing_names"
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "SupraChat $RELEASE_TAG" \
+              --notes-file RELEASE_NOTES-v0.0.1.md
+            gh release upload "$RELEASE_TAG" "$RELEASE_ASSET_DIR"/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" "$RELEASE_ASSET_DIR"/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "SupraChat $RELEASE_TAG" \
+              --notes-file RELEASE_NOTES-v0.0.1.md \
+              --verify-tag
+          fi
+          final_names="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | .[]')"
+          [[ "$final_names" == "$expected_names" ]] || {
+            echo 'Draft release asset set does not match the generated SHA256SUMS inventory.' >&2
+            exit 1
+          }
+          readback="$RUNNER_TEMP/suprachat-release-readback"
+          mkdir -p "$readback"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$readback"
+          cmp "$RELEASE_ASSET_DIR/SHA256SUMS" "$readback/SHA256SUMS"
+          (cd "$readback" && sha256sum -c SHA256SUMS)
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          tagged_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$tagged_sha" == "$SOURCE_SHA" ]] || { echo 'Remote release tag moved during asset verification.' >&2; exit 1; }
 
 
   linux-desktop-oracle-census:

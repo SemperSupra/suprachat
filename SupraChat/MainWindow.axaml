@@ -67,8 +67,12 @@
                        Text="Use your authorized ChatGPT plan through supported Responses and Codex interfaces. Account, credential portability, and runtime controls stay separate from the first-party ChatGPT product tab." />
 
             <WrapPanel Orientation="Horizontal">
+              <Button x:Name="SubscriptionSignInButton" Margin="0,0,8,8"
+                      Content="Use ChatGPT Subscription" Click="SubscriptionSignIn_Click"
+                      AutomationProperties.AutomationId="Auth.SubscriptionSignIn"
+                      AutomationProperties.HelpText="Use active ChatGPT subscription from Codex or local subscription session." />
               <Button x:Name="SignInButton" Margin="0,0,8,8"
-                      Content="Continue with ChatGPT" Click="SignIn_Click"
+                      Content="Sign in with ChatGPT (SIWC)" Click="SignIn_Click"
                       AutomationProperties.AutomationId="Auth.SignIn"
                       AutomationProperties.HelpText="Open the system browser for interactive ChatGPT authorization." />
               <Button Margin="0,0,8,8" Content="Enable plan usage" Click="EnablePlanUsage_Click"

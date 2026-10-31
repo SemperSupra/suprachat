@@ -359,6 +359,14 @@ public partial class MainWindow : Window
                     ? $"Saved Agent Lab session loaded for {Short(_credential.Subject)}; ChatGPT-plan scope granted."
                     : $"Saved identity session loaded for {Short(_credential.Subject)}; plan usage is not granted.";
             }
+            else
+            {
+                var authStatus = await _core.GetAuthStatusAsync();
+                if (authStatus.Present)
+                {
+                    AuthStatus.Text = $"Active {authStatus.AuthMode} session loaded ({authStatus.PrincipalLabel}); ChatGPT-plan usage ready.";
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -401,6 +409,29 @@ public partial class MainWindow : Window
     private void OpenExternal_Click(object? sender, RoutedEventArgs e)
     {
         Process.Start(new ProcessStartInfo("https://chatgpt.com/") { UseShellExecute = true });
+    }
+
+    private async void SubscriptionSignIn_Click(object? sender, RoutedEventArgs e)
+    {
+        var sub = SubscriptionCredentialStore.TryLoadFromCodex();
+        if (sub is not null)
+        {
+            await SubscriptionCredentialStore.SaveAsync(sub);
+            var policy = await AuthPolicyStore.LoadAsync();
+            var order = AuthPolicy.NormalizeOrder(new[] { AuthModes.Subscription }.Concat(policy.Order));
+            await AuthPolicyStore.SaveAsync(policy with { Order = order });
+            AuthStatus.Text = $"ChatGPT subscription connected from ~/.codex/auth.json ({sub.DisplayLabel}). Plan usage ready.";
+            return;
+        }
+
+        var local = await SubscriptionCredentialStore.TryLoadAsync();
+        if (local is not null)
+        {
+            AuthStatus.Text = $"ChatGPT subscription session loaded ({local.DisplayLabel}). Plan usage ready.";
+            return;
+        }
+
+        AuthStatus.Text = "No active ChatGPT subscription detected in ~/.codex/auth.json. Run 'suprachat-cli auth-login --device-auth' or 'codex login' to connect your subscription.";
     }
 
     private async void SignIn_Click(object? sender, RoutedEventArgs e) =>

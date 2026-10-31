@@ -157,13 +157,21 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             }
         });
 
+    public static Task<CodexAppServerClient> StartAsync(
+        string accessToken,
+        CancellationToken cancellationToken = default,
+        OwnedTransportTrace? trace = null,
+        LocalOwnedStreamControls? controls = null) =>
+        StartAsync(accessToken, useNativeSubscription: false, cancellationToken, trace, controls);
+
     public static async Task<CodexAppServerClient> StartAsync(
         string accessToken,
+        bool useNativeSubscription,
         CancellationToken cancellationToken = default,
         OwnedTransportTrace? trace = null,
         LocalOwnedStreamControls? controls = null)
     {
-        var process = CodexAppServer.Start(accessToken);
+        var process = CodexAppServer.Start(accessToken, useNativeSubscription);
         var client = new CodexAppServerClient(process, trace, controls);
         try
         {

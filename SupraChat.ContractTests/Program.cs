@@ -28,6 +28,7 @@ static void Require(bool condition, string message)
 }
 
 BrokerContractTests.Run();
+SupraChat.ContractTests.SharedSessionAdversarialChecks.Run();
 
 var attempt = SiwcProtocol.CreateAuthorization(
     "urn:uuid:11111111-2222-3333-4444-555555555555",
@@ -651,5 +652,6 @@ await DurableCancellationChecks.RunAsync();
 await DurableTransportCancellationChecks.RunAsync();
 await SharedSessionAdmissionChecks.RunAsync();
 await MetadataConsentChecks.RunAsync();
+ConsentCapacityChecks.Run();
 await NativeConsentChecks.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");

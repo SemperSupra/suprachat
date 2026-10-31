@@ -8,7 +8,10 @@ public sealed record SupraChatAuthStatus(
     int ScopeCount,
     long CredentialGeneration,
     string? ClientIdSuffix,
-    bool EarliestRefreshMetadataPresent);
+    bool EarliestRefreshMetadataPresent,
+    string AuthMode = AuthModes.Siwc,
+    string[]? ConfiguredAuthOrder = null,
+    string? PrincipalLabel = null);
 
 public sealed record CredentialBundleReceipt(
     string Schema,
@@ -37,8 +40,68 @@ public sealed class SupraChatCore
 
     public async Task<SupraChatAuthStatus> GetAuthStatusAsync()
     {
-        var credential = await CredentialStore.TryLoadAsync().ConfigureAwait(false);
-        return DescribeCredential(credential);
+        var policy = await AuthPolicyStore.LoadAsync().ConfigureAwait(false);
+        var eval = await AuthResolver.EvaluateAsync(policy, requirePlanUsage: false, siwcClient: _siwc).ConfigureAwait(false);
+
+        if (eval.Resolved is { } resolved)
+        {
+            if (resolved.SiwcBacking is { } siwc)
+            {
+                var baseDesc = DescribeCredential(siwc);
+                return baseDesc with
+                {
+                    AuthMode = AuthModes.Siwc,
+                    ConfiguredAuthOrder = policy.Order,
+                    PrincipalLabel = resolved.PrincipalLabel
+                };
+            }
+
+            return new SupraChatAuthStatus(
+                Schema,
+                Present: true,
+                PlanUsage: resolved.HasPlanUsage,
+                ExpiresAt: resolved.ExpiresAt,
+                ScopeCount: resolved.HasPlanUsage ? 1 : 0,
+                CredentialGeneration: 1,
+                ClientIdSuffix: resolved.AuthMode == AuthModes.ApiKey ? "api-key" : "subscription",
+                EarliestRefreshMetadataPresent: false,
+                AuthMode: resolved.AuthMode,
+                ConfiguredAuthOrder: policy.Order,
+                PrincipalLabel: resolved.PrincipalLabel);
+        }
+
+        var siwcStored = await CredentialStore.TryLoadAsync().ConfigureAwait(false);
+        var unauthenticated = DescribeCredential(siwcStored);
+        return unauthenticated with
+        {
+            AuthMode = policy.Order.Length > 0 ? AuthModes.NormalizeMode(policy.Order[0]) : AuthModes.Subscription,
+            ConfiguredAuthOrder = policy.Order,
+            PrincipalLabel = null
+        };
+    }
+
+    public async Task<ResolvedAuthCredential> GetUsableAuthAsync(
+        bool requirePlanUsage = false,
+        AuthPolicy? policy = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await AuthResolver.ResolveAsync(
+            policy: policy,
+            requirePlanUsage: requirePlanUsage,
+            siwcClient: _siwc,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<AuthResolutionReport> GetAuthEvaluationAsync(
+        AuthPolicy? policy = null,
+        bool requirePlanUsage = false,
+        CancellationToken cancellationToken = default)
+    {
+        return await AuthResolver.EvaluateAsync(
+            policy: policy,
+            requirePlanUsage: requirePlanUsage,
+            siwcClient: _siwc,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<SiwcCredential> GetUsableCredentialAsync(
@@ -99,13 +162,14 @@ public sealed class SupraChatCore
 
     public async Task<IReadOnlyList<ModelChoice>> ListModelsAsync(
         string? correlationId = null,
+        AuthPolicy? policy = null,
         CancellationToken cancellationToken = default)
     {
-        var credential = await GetUsableCredentialAsync(
-            requirePlanUsage: true,
-            correlationId: correlationId,
+        var auth = await GetUsableAuthAsync(
+            requirePlanUsage: false,
+            policy: policy,
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        return await _responses.ListModelsAsync(credential.AccessToken).ConfigureAwait(false);
+        return await _responses.ListModelsAsync(auth.AccessToken).ConfigureAwait(false);
     }
 
     public async Task<CredentialBundleReceipt> ExportCredentialAsync(
@@ -178,7 +242,9 @@ public sealed class SupraChatCore
                 ScopeCount: credential.Scopes.Length,
                 CredentialGeneration: Math.Max(1, credential.Generation),
                 ClientIdSuffix: Suffix(credential.ClientId),
-                EarliestRefreshMetadataPresent: !string.IsNullOrWhiteSpace(credential.EarliestRefreshAtRaw));
+                EarliestRefreshMetadataPresent: !string.IsNullOrWhiteSpace(credential.EarliestRefreshAtRaw),
+                AuthMode: AuthModes.Siwc,
+                PrincipalLabel: credential.Email ?? credential.Subject);
 
     private static CredentialBundleReceipt Receipt(
         string operation,
@@ -197,5 +263,4 @@ public sealed class SupraChatCore
 
     private static string Suffix(string value) =>
         value[^Math.Min(value.Length, 12)..];
-
 }
