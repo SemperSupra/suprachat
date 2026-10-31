@@ -32,15 +32,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'S0_W1_GUI_BUILD_FAILED' }
           dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'S0_W1_CLI_BUILD_FAILED' }
-      - name: Qualify real W1 native UIA and independent CLI plus agent processes
-        shell: ${{ matrix.shell }}
+      - name: Qualify W1 GUI CLI agent using native Windows PowerShell 5.1
+        if: matrix.shell == 'powershell'
+        shell: powershell
         run: |
           ./tools/local/Test-S0W1SyntheticBridge.ps1 -ReceiptPath "$env:RUNNER_TEMP/s0-w1-bridge.json"
-          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_BRIDGE_SCRIPT_FAILED' }
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_PS51_BRIDGE_SCRIPT_FAILED' }
+      - name: Qualify W1 GUI CLI agent using PowerShell 7
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
+        run: |
+          ./tools/local/Test-S0W1SyntheticBridge.ps1 -ReceiptPath "$env:RUNNER_TEMP/s0-w1-bridge.json"
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_PWSH_BRIDGE_SCRIPT_FAILED' }
+      - name: Validate exact synthetic three-audience native receipt and shell identity
+        shell: pwsh
+        run: |
           $receipt=Get-Content -LiteralPath "$env:RUNNER_TEMP/s0-w1-bridge.json" -Raw | ConvertFrom-Json
           $expectedMajor=if ('${{ matrix.shell }}' -eq 'powershell') { 5 } else { 7 }
-          if ($PSVersionTable.PSVersion.Major -ne $expectedMajor -or
-              $receipt.powershell_major -ne $expectedMajor -or
+          if ($receipt.powershell_major -ne $expectedMajor -or
               $receipt.schema -ne 'suprachat-s0-w1-bridge/v1' -or
               !$receipt.passed -or $receipt.phase -ne 'PASS' -or
               ($receipt.same_session_versions -join ',') -ne '0,1,2' -or
