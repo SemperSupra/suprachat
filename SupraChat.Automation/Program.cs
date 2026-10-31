@@ -1699,6 +1699,50 @@ internal static class Program
         Option(args, name)
         ?? throw new MachineException(2, "USAGE", $"Missing required option {name}.");
 
+    // Reused from the previously qualified W6 experiment. No automatic owner
+    // startup, credential provider, browser interaction, or remote binding.
+    private static int ParseLedgerPort(string? input)
+    {
+        if (!int.TryParse(input, NumberStyles.None, CultureInfo.InvariantCulture, out var port) ||
+            port is < 1024 or > 65535)
+            throw new MachineException(2, "INVALID_PARAMS", "Explicit synthetic loopback port must be 1024..65535.");
+        return port;
+    }
+
+    private static async Task<int> RunSessionLedgerHostAsync(string[] args)
+    {
+        await SessionLedgerHost.RunAsync(ParseLedgerPort(Option(args, "--port")));
+        return 0;
+    }
+
+    private static async Task<JsonElement> ReadLedgerStdinAsync()
+    {
+        var input = await Console.In.ReadToEndAsync();
+        if (input.Length is 0 or > 8192)
+            throw new MachineException(2, "INVALID_PARAMS", "Synthetic metadata JSON must be 1..8192 characters.");
+        using var document = JsonDocument.Parse(input);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new MachineException(2, "INVALID_PARAMS", "Metadata request must be a JSON object.");
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<object> RpcLedgerAsync(JsonElement? parameters, string operation)
+    {
+        var p = RequireObject(parameters);
+        if (!p.TryGetProperty("port", out var el) ||
+            el.ValueKind != JsonValueKind.Number || !el.TryGetInt32(out var port))
+            throw new MachineException(2, "INVALID_PARAMS", "Ledger params.port integer required.");
+        JsonElement? request = null;
+        if (operation != "list")
+        {
+            if (!p.TryGetProperty("request", out var body) || body.ValueKind != JsonValueKind.Object)
+                throw new MachineException(2, "INVALID_PARAMS", "Ledger params.request JSON object required.");
+            request = body;
+        }
+        return await SessionLedgerClient.RequestAsync(
+            ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)), operation, request);
+    }
+
     private static string? Option(string[] args, string name)
     {
         for (var i = 0; i < args.Length; i++)
