@@ -153,6 +153,11 @@ internal static class Program
             new { name = "codex-rpc", description = "Invoke one Codex app-server RPC.", syntax = "codex-rpc --method <name> [--params <json>]" },
             new { name = "trace-status", description = "Read this process's metadata trace status; capture starts OFF." },
             new { name = "trace-session", description = "Run persistent JSON-line automation commands: trace status/start/stop/read/export and owned respond/responses-raw/codex-rpc actions." },
+            new { name = "session-ledger-contract", description = "Read synthetic W6 session core limits; no external authority qualification." },
+            new { name = "session-ledger-host", description = "Explicitly run a disposable loopback-only W6 ledger; requires synthetic-mode environment gate." },
+            new { name = "session-ledger-list", description = "Inspect the running synthetic W6 ledger; requires explicit port and token." },
+            new { name = "session-ledger-open", description = "Create synthetic ledger metadata from stdin; not an authenticated principal." },
+            new { name = "session-ledger-change", description = "CAS synthetic ledger metadata from stdin; not a provider action." },
             new { name = "stdio", description = "Serve line-delimited JSON-RPC 2.0 for agent clients with sessionful Codex events." }
         },
         auth_boundary = "Interactive authorization is completed by a human through the GUI. Machine shells reuse the same protected local credential store."
@@ -178,6 +183,10 @@ internal static class Program
         },
         machine_methods = new[]
         {
+            "session/ledger/read",
+            "session/ledger/list",
+            "session/ledger/open",
+            "session/ledger/change",
             "capabilities/read",
             "accessibility/read",
             "accessibility/preferences/read",
