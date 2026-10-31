@@ -32,6 +32,7 @@ internal sealed class SharedDesktopHost : IDisposable
     public bool ConsentEnabled => _consent is not null;
     private readonly string[] _ownerGrants;
     private readonly string[] _peerGrants;
+    private readonly string _sameSessionAgentGrant;
     private readonly CancellationTokenSource _closing = new(TimeSpan.FromSeconds(90));
     private readonly ConcurrentBag<Task> _workers = new();
     private static readonly JsonSerializerOptions WireOptions = new(TraceNormalizer.JsonOptions)
@@ -59,6 +60,9 @@ internal sealed class SharedDesktopHost : IDisposable
             ["session.read", "session.mutate"], TimeSpan.FromMinutes(2))).ToArray();
         _peerGrants = _sessions.Select((id, i) => _issuer.Issue(i == 0 ? "automation-fixture" : "agent-fixture",
             i == 0 ? "automation" : "agent", id, ["session.read", "session.mutate"], TimeSpan.FromMinutes(2))).ToArray();
+        // Independent agent, distinct actor/grant, targets the *same* session as GUI and automation.
+        _sameSessionAgentGrant = _issuer.Issue("agent-shared-fixture", "agent", _sessions[0],
+            ["session.read", "session.mutate"], TimeSpan.FromMinutes(2));
         foreach (var cap in _traceCaps)
         {
             if (requireConsent) continue;
@@ -158,6 +162,12 @@ internal sealed class SharedDesktopHost : IDisposable
         var b = Task.Run(() => ServeAsync(1, revoke: false));
         _workers.Add(a); _workers.Add(b);
         await Task.WhenAll(a, b);
+        // After the automation client commits session A, a separate agent process
+        // reads the resulting version and performs its own CAS mutation on A.
+        // This is a real cross-process same-session rep, not a second ledger.
+        var sharedAgent = Task.Run(() => ServeAsync(0, revoke: false, sameSessionAgent: true));
+        _workers.Add(sharedAgent);
+        await sharedAgent;
         ClientsComplete = true;
     }
 
@@ -170,15 +180,15 @@ internal sealed class SharedDesktopHost : IDisposable
         AgentRevoked = true;
     }
 
-    private async Task ServeAsync(int index, bool revoke)
+    private async Task ServeAsync(int index, bool revoke, bool sameSessionAgent = false)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         var pipeName = "suprachat-shared-lab-" + Guid.NewGuid().ToString("N");
         using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
             PipeOptions.CurrentUserOnly | PipeOptions.Asynchronous);
-        var audience = index == 0 ? "automation" : "agent";
-        var actor = index == 0 ? "automation-fixture" : "agent-fixture";
+        var audience = sameSessionAgent || index == 1 ? "agent" : "automation";
+        var actor = sameSessionAgent ? "agent-shared-fixture" : index == 0 ? "automation-fixture" : "agent-fixture";
         using var child = Program.Spawn("--shared-client", pipeName, audience, revoke ? "revoke" : "mutate");
         try
         {
@@ -207,7 +217,7 @@ internal sealed class SharedDesktopHost : IDisposable
                 SessionLedgerAdmission Admit()
                 {
                     if (!Program.ObservePeer(pipe, pid, started)) return new(false, null, null, null, null);
-                    var grant = _issuer.Validate(_peerGrants[index], request.SessionId,
+                    var grant = _issuer.Validate(sameSessionAgent ? _sameSessionAgentGrant : _peerGrants[index], request.SessionId,
                         operation == "inspect" ? "session.read" : "session.mutate", actor, audience);
                     return new(grant.Allowed, grant.ActorId, grant.Audience, grant.SessionId, grant.GrantId);
                 }
@@ -279,7 +289,7 @@ internal sealed class SharedDesktopHost : IDisposable
 
     public object VerifyAndRecover()
     {
-        if (!ClientsComplete || !AgentRevoked || GuiMutations < 1 || _peers != 3) throw new InvalidOperationException("LAB_INCOMPLETE");
+        if (!ClientsComplete || !AgentRevoked || GuiMutations < 1 || _peers != 4) throw new InvalidOperationException("LAB_INCOMPLETE");
         var before = new[] { Read(0), Read(1) };
         _store.Dispose(); _store = OpenStore(create: false); _ledger = new(_store.Load(), _store.Save);
         var after = new[] { Read(0), Read(1) };
@@ -290,7 +300,7 @@ internal sealed class SharedDesktopHost : IDisposable
             session => { copied = true; return session.Version; });
         if (!grant.Allowed || !_ledger.IsGrantRevoked(grant.GrantId!) || !before.SequenceEqual(after) ||
             recoveredRead.Admission.Status != "GRANT_REVOKED" || copied ||
-            after[0].Version < 2 || after[1].Version != 1 || after.Any(p => p.TraceEvents != 1))
+            after[0].Version != 3 || after[1].Version != 1 || after.Any(p => p.TraceEvents != 1))
             throw new InvalidOperationException("LAB_RECOVERY_REFUSED");
         var consent = ConsentEnabled ? new[] { ConsentStatus(0), ConsentStatus(1) } : null;
         if (consent is not null && (consent.Any(s => s.CaptureActive || s.RetainedEvents != 1) ||
@@ -300,7 +310,8 @@ internal sealed class SharedDesktopHost : IDisposable
         return new
         {
             shared_sessions = 2, gui_mutations = GuiMutations, enrolled_peer_runs = _peers,
-            automation_and_agent_protocols = true, wrong_session_refused = true, revoked_read_refused = true,
+            automation_and_agent_protocols = true, same_session_agent_after_automation = true,
+            wrong_session_refused = true, revoked_read_refused = true,
             versions = after.Select(p => p.Version).ToArray(), common_cursor = after.Select(p => p.Cursor).Distinct().Count() == 1,
             durable_revocation_recovered = true, metadata_recovered = true, trace_session_routing = true,
             consent = consent is null ? null : new { synthetic_only = true, stopped = true, preview_cancelled = true,
