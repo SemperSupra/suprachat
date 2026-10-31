@@ -38,7 +38,13 @@ try {
     $desktop.Refresh()
     if ($desktop.HasExited) { throw 'GUI_EXITED' }
     if ($desktop.MainWindowHandle -ne [intptr]::Zero) {
-      try { $window=[System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle) } catch {}
+      try {
+        $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle)
+        if ($candidate.Current.ProcessId -eq $desktop.Id -and
+            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+          $window = $candidate
+        }
+      } catch {}
     }
     if (!$window) { Start-Sleep -Milliseconds 150 }
   } while (!$window -and [datetime]::UtcNow -lt $deadline)
@@ -49,8 +55,17 @@ try {
     $deadline=[datetime]::UtcNow.AddSeconds(18)
     while ([datetime]::UtcNow -lt $deadline) {
       try {
-        $control=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
-        if ($control) { return $control }
+        # Native WebView remounts on tab switches can recreate the window UIA
+        # provider tree; reacquire the current declared main HWND each poll.
+        $desktop.Refresh()
+        if ($desktop.MainWindowHandle -ne [intptr]::Zero) {
+          $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($desktop.MainWindowHandle)
+          if ($candidate.Current.ProcessId -eq $desktop.Id -and
+              $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+            $control=$candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
+            if ($control) { return $control }
+          }
+        }
       } catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
       } catch [System.Windows.Automation.ElementNotAvailableException] {}
@@ -58,7 +73,16 @@ try {
     }
     throw "UIA_MISSING:$id"
   }
-  (Get-Control 'Tab.Sessions').GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  $tabSelected = $false
+  $tabDeadline = [datetime]::UtcNow.AddSeconds(10)
+  while ([datetime]::UtcNow -lt $tabDeadline) {
+    $tab = Get-Control 'Tab.Sessions'
+    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    if ($selection.Current.IsSelected) { $tabSelected = $true; break }
+    $selection.Select()
+    Start-Sleep -Milliseconds 150
+  }
+  if (!$tabSelected) { throw 'UIA_TAB_SELECT_FAILED:Tab.Sessions' }
   $entry=Get-Control 'Sessions.NewTitle'
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic W1')
   (Get-Control 'Sessions.Create').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -139,6 +163,7 @@ try {
   if (!$reply.result.payload.session) { throw 'AGENT_RPC_SESSION_MISSING' }
   if ($reply.result.payload.session.version -ne 1) { throw 'AGENT_RPC_VERSION_MISMATCH' }
   $phase='GUI_AGAIN'
+  $entry = Get-Control 'Sessions.NewTitle'
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic final')
   (Get-Control 'Sessions.Rename').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   $final=$null; $deadline=[datetime]::UtcNow.AddSeconds(15)
@@ -160,5 +185,5 @@ try {
     synthetic_only=$true;authenticated_principals=$false;production_storage=$false;
     provider_actions=$false}
   [IO.File]::WriteAllText([IO.Path]::GetFullPath($ReceiptPath),($result|ConvertTo-Json -Depth 4 -Compress))
-  Remove-Item Env:SUPRACHAT_W6_GUI_PORT,Env:SUPRACHAT_LEDGER_TOKEN,Env:SUPRACHAT_W6_DISPOSABLE_ONLY -ErrorAction SilentlyContinue
+  Remove-Item Env:SUPRACHAT_W6_GUI_PORT,Env:SUPRACHAT_W6_LEDGER_TOKEN,Env:SUPRACHAT_LEDGER_TOKEN,Env:SUPRACHAT_W6_DISPOSABLE_ONLY -ErrorAction SilentlyContinue
 }
