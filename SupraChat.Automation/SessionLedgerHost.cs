@@ -54,6 +54,27 @@ public static class SessionLedgerHost
             durableStore?.Load(),
             durableStore is null ? null : (Action<SessionLedgerCheckpoint>)durableStore.Save);
 
+        var scopedWrites = Environment.GetEnvironmentVariable("SUPRACHAT_W12_SCOPED_WRITES")
+            == "synthetic";
+        if (scopedWrites && durableStore is null)
+            throw new InvalidOperationException("W12_REQUIRES_ADMITTED_DISPOSABLE_DURABLE_HOST");
+        var secretText = Environment.GetEnvironmentVariable("SUPRACHAT_W12_SIGNING_KEY");
+        if (scopedWrites && string.IsNullOrEmpty(secretText))
+            throw new InvalidOperationException("W12_SIGNING_KEY_REQUIRED");
+        var secret = scopedWrites ? Convert.FromBase64String(secretText!) : Array.Empty<byte>();
+        try
+        {
+            if (scopedWrites && secret.Length != 32)
+                throw new InvalidOperationException("W12_SIGNING_KEY_256_BIT_REQUIRED");
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(secret);
+            throw;
+        }
+        using var grantAuthority = scopedWrites ? new W12ScopedGrantAuthority(secret) : null;
+        if (secret.Length != 0) CryptographicOperations.ZeroMemory(secret);
+
         var app = builder.Build();
         app.Use(async (context, next) =>
         {
@@ -87,14 +108,12 @@ public static class SessionLedgerHost
             port, audience_identity_authenticated = false,
             durable_recovery_available = durableStore is not null,
             chat_submission_allowed = false,
-            terminal_execution_allowed = false
+            terminal_execution_allowed = false,
+            synthetic_scoped_write_enforcement = scopedWrites,
+            authenticated_os_peer_identity = false,
+            common_bearer_grants_mutation = !scopedWrites
         }));
-        app.MapGet("/v1/sessions", () => Results.Json(
-            ledger.InspectAll() with
-            {
-                DurableAcrossProcessRestart = durableStore is not null,
-                CrossProcessTransportAvailable = true
-            }));
+        app.MapGet("/v1/sessions", () => Results.Json(ledger.InspectAll()));
         app.MapGet("/v1/sessions/{sessionId}", (string sessionId) =>
         {
             var snapshot = ledger.Inspect(sessionId);
@@ -106,9 +125,19 @@ public static class SessionLedgerHost
             {
                 var body = await context.Request.ReadFromJsonAsync<OpenPayload>();
                 if (body is null) return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
+                W12Admission? grant = null;
+                if (grantAuthority is not null)
+                {
+                    grant = grantAuthority.Validate(
+                        context.Request.Headers["X-SupraChat-Actor-Capability"].ToString(),
+                        "create-only", "session.create", claimedAudience: body.Audience);
+                    if (!grant.Allowed) return ScopedDenied(grant.Status);
+                }
                 return ToHttpResult(ledger.Open(
-                    body.IdempotencyKey!, body.Audience!, body.Title!,
-                    body.ConversationUrl, body.WorkspaceKey));
+                    grant is null ? body.IdempotencyKey! :
+                        ScopeOperationKey(grant.ActorId!, body.IdempotencyKey!),
+                    grant?.Audience ?? body.Audience!, body.Title!,
+                    body.ConversationUrl, body.WorkspaceKey, grant?.GrantId));
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
             catch (JsonException) { return Results.BadRequest(new {error = "INVALID_JSON"}); }
@@ -119,12 +148,60 @@ public static class SessionLedgerHost
             {
                 var body = await context.Request.ReadFromJsonAsync<ChangePayload>();
                 if (body is null) return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
+                W12Admission? grant = null;
+                if (grantAuthority is not null)
+                {
+                    grant = grantAuthority.Validate(
+                        context.Request.Headers["X-SupraChat-Actor-Capability"].ToString(),
+                        body.SessionId, "session.mutate", claimedAudience: body.Audience);
+                    if (!grant.Allowed) return ScopedDenied(grant.Status);
+                }
                 return ToHttpResult(ledger.Change(
-                    body.IdempotencyKey!, body.Audience!, body.SessionId!,
-                    body.ExpectedVersion, body.Operation!, body.Value));
+                    grant is null ? body.IdempotencyKey! :
+                        ScopeOperationKey(grant.ActorId!, body.IdempotencyKey!),
+                    grant?.Audience ?? body.Audience!, body.SessionId!,
+                    body.ExpectedVersion, body.Operation!, body.Value, grant?.GrantId));
             }
             catch (ArgumentException) { return Results.BadRequest(new {error = "INVALID_METADATA"}); }
             catch (JsonException) { return Results.BadRequest(new {error = "INVALID_JSON"}); }
+        });
+
+        app.MapPost("/v1/grants/revoke-self", async (HttpContext context) =>
+        {
+            if (grantAuthority is null) return Results.NotFound();
+            try
+            {
+                var body = await context.Request.ReadFromJsonAsync<RevokeOwnPayload>();
+                if (body is null || string.IsNullOrWhiteSpace(body.SessionId))
+                    return Results.BadRequest(new {error = "INVALID_REQUEST_BODY"});
+                var token = context.Request.Headers["X-SupraChat-Actor-Capability"].ToString();
+                var grant = grantAuthority.Validate(token, body.SessionId,
+                    body.SessionId == "create-only" ? "session.create" : "session.mutate",
+                    claimedAudience: body.Audience);
+                if (!grant.Allowed) return ScopedDenied(grant.Status);
+                var changed = ledger.RevokeOwnGrant(
+                    grant.GrantId!, grant.SessionId!, grant.Audience!);
+                return Results.Json(new
+                {
+                    status = changed ? "REVOKED" : "ALREADY_REVOKED",
+                    durable_in_existing_w11_checkpoint = durableStore is not null,
+                    actor_os_identity_verified = false,
+                    owner_cross_actor_revocation_available = false
+                });
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new {error = "INVALID_REVOCATION_METADATA"});
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.Json(new {error = "REVOCATION_CAPACITY_REACHED"},
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest(new {error = "INVALID_JSON"});
+            }
         });
 
         await app.StartAsync().ConfigureAwait(false);
@@ -136,10 +213,27 @@ public static class SessionLedgerHost
             authenticated_audience_identity = false,
             cross_process_transport_available = true,
             persistent_recovery_available = durableStore is not null,
-            provider_prompt_submission_available = false
+            provider_prompt_submission_available = false,
+            synthetic_scoped_write_enforcement = scopedWrites,
+            authenticated_os_peer_identity = false,
+            common_bearer_grants_mutation = !scopedWrites
         }));
         Console.Out.Flush();
         await app.WaitForShutdownAsync().ConfigureAwait(false);
+    }
+
+    private static IResult ScopedDenied(string reason) =>
+        Results.Json(new {error = "W12_SCOPED_WRITE_DENIED", reason},
+            statusCode: StatusCodes.Status403Forbidden);
+
+    private static string ScopeOperationKey(string actorId, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key) || key.Length is < 12 or > 128 ||
+            key.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or ':' or '.')))
+            throw new ArgumentException("INVALID_IDEMPOTENCY_KEY");
+        var material = Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(new[] {"W12_OP_V1", actorId, key}));
+        return "w12-" + Convert.ToHexString(SHA256.HashData(material));
     }
 
     private static IResult ToHttpResult(SessionLedgerResult result)
@@ -149,6 +243,7 @@ public static class SessionLedgerHost
             "SESSION_NOT_FOUND" => StatusCodes.Status404NotFound,
             "IDEMPOTENCY_CAPACITY_REACHED" => StatusCodes.Status429TooManyRequests,
             "SESSION_CAPACITY_REACHED" => StatusCodes.Status429TooManyRequests,
+            "GRANT_REVOKED" => StatusCodes.Status403Forbidden,
             _ => StatusCodes.Status409Conflict
         };
         return Results.Json(result, statusCode: status);
@@ -161,4 +256,6 @@ public static class SessionLedgerHost
     public sealed record ChangePayload(
         string? IdempotencyKey, string? Audience, string? SessionId,
         long ExpectedVersion, string? Operation, string? Value);
+
+    public sealed record RevokeOwnPayload(string? SessionId, string? Audience);
 }

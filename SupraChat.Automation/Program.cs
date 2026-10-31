@@ -99,6 +99,8 @@ internal static class Program
                     ParseLedgerPort(Option(args[1..], "--port")), "open", await ReadLedgerStdinAsync())),
                 "session-ledger-change" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "change", await ReadLedgerStdinAsync())),
+                "session-ledger-revoke-own" => WriteSuccess(await SessionLedgerClient.RequestAsync(
+                    ParseLedgerPort(Option(args[1..], "--port")), "revoke-own", await ReadLedgerStdinAsync())),
                 "stdio" => await RunStdioAsync(),
                 _ => WriteFailure(2, "USAGE", $"Unknown command: {args[0]}", Help())
             };
@@ -170,6 +172,7 @@ internal static class Program
             new { name = "session-ledger-list", description = "Inspect the running synthetic W6 ledger; requires explicit port and token." },
             new { name = "session-ledger-open", description = "Create synthetic ledger metadata from stdin; not an authenticated principal." },
             new { name = "session-ledger-change", description = "CAS synthetic ledger metadata from stdin; not a provider action." },
+            new { name = "session-ledger-revoke-own", description = "W13 synthetic: explicitly revoke the currently signed actor grant, durably; cannot revoke another actor.", syntax = "session-ledger-revoke-own --port <host-port> < request.json" },
             new { name = "stdio", description = "Serve line-delimited JSON-RPC 2.0 for agent clients with sessionful Codex events." }
         },
         auth_boundary = "Interactive authorization is completed by a human through the GUI. Machine shells reuse the same protected local credential store."
@@ -199,6 +202,7 @@ internal static class Program
             "session/ledger/list",
             "session/ledger/open",
             "session/ledger/change",
+            "session/ledger/revoke-own",
             "capabilities/read",
             "accessibility/read",
             "accessibility/preferences/read",
@@ -1052,6 +1056,7 @@ internal static class Program
             "session/ledger/list" => await RpcLedgerAsync(parameters, "list"),
             "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
             "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
+            "session/ledger/revoke-own" => await RpcLedgerAsync(parameters, "revoke-own"),
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),

@@ -22,7 +22,7 @@ public static class W6SyntheticSessionTransport
             throw new InvalidOperationException("W6_SYNTHETIC_DISPOSABLE_ONLY");
         if (port is < 1024 or > 65535)
             throw new ArgumentException("INVALID_EXPLICIT_LEDGER_PORT", nameof(port));
-        if (operation is not ("list" or "open" or "change"))
+        if (operation is not ("list" or "open" or "change" or "revoke-own"))
             throw new ArgumentException("INVALID_LEDGER_CLIENT_OPERATION", nameof(operation));
 
         var bearer = Environment.GetEnvironmentVariable(TokenEnvironment);
@@ -35,6 +35,7 @@ public static class W6SyntheticSessionTransport
             "list" => "/v1/sessions",
             "open" => "/v1/sessions/open",
             "change" => "/v1/sessions/change",
+            "revoke-own" => "/v1/grants/revoke-self",
             _ => throw new InvalidOperationException("UNREACHABLE_OPERATION")
         };
         var body = input?.GetRawText();
@@ -54,6 +55,14 @@ public static class W6SyntheticSessionTransport
             operation == "list" ? HttpMethod.Get : HttpMethod.Post,
             new Uri($"http://127.0.0.1:{port}{path}"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        var actorGrant = Environment.GetEnvironmentVariable("SUPRACHAT_W12_ACTOR_GRANT");
+        if (!string.IsNullOrEmpty(actorGrant) && operation is "open" or "change" or "revoke-own")
+        {
+            if (actorGrant.Length > 2048 ||
+                actorGrant.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
+                throw new ArgumentException("INVALID_ACTOR_GRANT_FORMAT");
+            request.Headers.TryAddWithoutValidation("X-SupraChat-Actor-Capability", actorGrant);
+        }
         if (body is not null)
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
