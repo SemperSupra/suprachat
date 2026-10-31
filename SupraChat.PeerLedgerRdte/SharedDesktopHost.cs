@@ -48,16 +48,24 @@ internal sealed class SharedDesktopHost : IDisposable
         _issuer = material.CreateAuthority();
         _store = OpenStore(create: true);
         _ledger = new(_store.Load(), _store.Save);
+        var createOwnerGrant = _issuer.Issue("local-owner-fixture", "human", "create-only",
+            ["session.create", "session.approve"], TimeSpan.FromMinutes(2));
         _sessions = new[] { "Session A", "Session B" }.Select((title, i) =>
-            _ledger.Open("shared-lab-open-session-" + i, "automation", title).Session!.Id).ToArray();
+            _ledger.ExecuteAdmitted(new("open", "create-only", "shared-lab-open-session-" + i, 0, title), () =>
+            {
+                var grant = _issuer.Validate(createOwnerGrant, "create-only", "session.create", "local-owner-fixture", "human");
+                var approve = _issuer.Validate(createOwnerGrant, "create-only", "session.approve", "local-owner-fixture", "human");
+                return new(grant.Allowed && approve.Allowed, grant.ActorId, grant.Audience, grant.SessionId, grant.GrantId,
+                    HumanBootstrapVerified: approve.Allowed && grant.Audience == "human");
+            }).Session!.Id).ToArray();
         _traceCaps = _sessions.Select(id => _trace.CreateSession(Guid.ParseExact(id, "N"))).ToArray();
         if (requireConsent)
         {
             _consent = new(_trace, _consentTime);
             _consentBindings = _traceCaps.Select((cap, i) => _consent.Register(cap, _consentViews[i])).ToArray();
         }
-        _ownerGrants = _sessions.Select(id => _issuer.Issue("local-owner-fixture", "automation", id,
-            ["session.read", "session.mutate"], TimeSpan.FromMinutes(2))).ToArray();
+        _ownerGrants = _sessions.Select(id => _issuer.Issue("local-owner-fixture", "human", id,
+            ["session.read", "session.mutate", "session.approve"], TimeSpan.FromMinutes(2))).ToArray();
         _peerGrants = _sessions.Select((id, i) => _issuer.Issue(i == 0 ? "automation-fixture" : "agent-fixture",
             i == 0 ? "automation" : "agent", id, ["session.read", "session.mutate"], TimeSpan.FromMinutes(2))).ToArray();
         // Independent agent, distinct actor/grant, targets the *same* session as GUI and automation.
@@ -128,8 +136,10 @@ internal sealed class SharedDesktopHost : IDisposable
 
     private SessionLedgerAdmission OwnerAdmission(int index, string action)
     {
-        var grant = _issuer.Validate(_ownerGrants[index], _sessions[index], action, "local-owner-fixture", "automation");
-        return new(grant.Allowed, grant.ActorId, grant.Audience, grant.SessionId, grant.GrantId);
+        var grant = _issuer.Validate(_ownerGrants[index], _sessions[index], action, "local-owner-fixture", "human");
+        var approve = _issuer.Validate(_ownerGrants[index], _sessions[index], "session.approve", "local-owner-fixture", "human");
+        return new(grant.Allowed && approve.Allowed, grant.ActorId, grant.Audience, grant.SessionId, grant.GrantId,
+            HumanBootstrapVerified: approve.Allowed && grant.Audience == "human");
     }
 
     public Projection Read(int index)

@@ -77,6 +77,47 @@ internal static class SharedSessionAdmissionChecks
         Require(recovered.ExecuteAdmitted(changeA, AdmitA).Status == "GRANT_REVOKED");
         Require(recovered.ExecuteAdmitted(changeA, () => AdmitA() with { GrantId = Guid.NewGuid().ToString("N") }).IsReplay);
         Require(recovered.Inspect(a)!.Version == 1 && recovered.Inspect(b)!.Version == 1);
+        var humanGrant = Guid.NewGuid().ToString("N");
+        var humanInventoryGrant = Guid.NewGuid().ToString("N");
+        Require(ledger.ExecuteAdmitted(changeA, () => new(true, "actor-a", "automation", a, grantA, HumanBootstrapVerified: true)).Status == "ADMISSION_REFUSED");
+        Require(ledger.ExecuteAdmitted(changeA, () => new(true, "human-owner", "human", a, humanGrant, HumanBootstrapVerified: false)).Status == "ADMISSION_REFUSED");
+        var humanOpen = ledger.ExecuteAdmitted(
+            new("open", "create-only", "human-bootstrap-open-001", 0, "Human bootstrap session",
+                "https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000", "Human/Workspace"),
+            () => new(true, "human-owner", "human", "create-only", humanGrant, HumanBootstrapVerified: true));
+        Require(humanOpen.Applied && humanOpen.Session is { Version: 0, Title: "Human bootstrap session", WorkspaceKey: "Human/Workspace" });
+        var humanSessionId = humanOpen.Session!.Id;
+        var humanRename = ledger.ExecuteAdmitted(
+            new("set-title", humanSessionId, "human-bootstrap-rename-001", 0, "Human renamed"),
+            () => new(true, "human-owner", "human", humanSessionId, humanGrant, HumanBootstrapVerified: true));
+        Require(humanRename.Applied && humanRename.Session is { Version: 1, Title: "Human renamed" });
+        var invAllowed = ledger.InspectInventoryAdmitted(() => new(true, "human-owner", "human", "inventory", humanInventoryGrant, HumanBootstrapVerified: true));
+        Require(invAllowed.Admission.Status == "OBSERVED" && invAllowed.Inventory is not null && invAllowed.Inventory.Sessions.Count == 3);
+        var invWrongSession = ledger.InspectInventoryAdmitted(() => new(true, "human-owner", "human", humanSessionId, humanInventoryGrant, HumanBootstrapVerified: true));
+        Require(invWrongSession.Admission.Status == "ADMISSION_REFUSED" && invWrongSession.Inventory is null);
+
+        var capLedger = new SharedSessionLedger();
+        for (var i = 0; i < SharedSessionLedger.MaxWorkbenchVisibleSessions; i++)
+        {
+            var capRes = capLedger.ExecuteAdmitted(
+                new("open", "create-only", $"cap-session-open-{i:D3}", 0, $"Session {i + 1}"),
+                () => new(true, "human-owner", "human", "create-only", humanGrant, HumanBootstrapVerified: true));
+            Require(capRes.Applied);
+        }
+        var overflow = capLedger.ExecuteAdmitted(
+            new("open", "create-only", "cap-session-open-overflow", 0, "Session 17"),
+            () => new(true, "human-owner", "human", "create-only", humanGrant, HumanBootstrapVerified: true));
+        Require(!overflow.Applied && !overflow.IsReplay && overflow.Status == "SESSION_CAPACITY_REACHED");
+        var overflowReplay = capLedger.ExecuteAdmitted(
+            new("open", "create-only", "cap-session-open-overflow", 0, "Session 17"),
+            () => new(true, "human-owner", "human", "create-only", humanGrant, HumanBootstrapVerified: true));
+        Require(!overflowReplay.Applied && overflowReplay.IsReplay && overflowReplay.Status == "SESSION_CAPACITY_REACHED");
+        var overflowConflict = capLedger.ExecuteAdmitted(
+            new("open", "create-only", "cap-session-open-overflow", 0, "Session 17 altered"),
+            () => new(true, "human-owner", "human", "create-only", humanGrant, HumanBootstrapVerified: true));
+        Require(!overflowConflict.Applied && overflowConflict.Status == "IDEMPOTENCY_KEY_PAYLOAD_CONFLICT");
+        Require(LedgerWorkbenchProjection.Read(capLedger).Status == "OBSERVED");
+
         Console.WriteLine("Peer/session admission checks PASS (shared gate, scoped replay, revocation, isolated trace projection)");
     }
 }
