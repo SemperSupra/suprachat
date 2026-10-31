@@ -781,6 +781,10 @@ internal static class Program
     {
         return method switch
         {
+            "session/ledger/read" => SharedSessionLedger.DescribeContract(),
+            "session/ledger/list" => await RpcLedgerAsync(parameters, "list"),
+            "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
+            "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
