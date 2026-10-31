@@ -27,7 +27,7 @@ public static class W6SyntheticSessionTransport
 
         var bearer = Environment.GetEnvironmentVariable(TokenEnvironment);
         if (bearer is null || bearer.Length is < 32 or > 128 ||
-            bearer.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and '_'))
+            bearer.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
             throw new InvalidOperationException("LEDGER_CLIENT_TOKEN_REQUIRED");
 
         var path = operation switch

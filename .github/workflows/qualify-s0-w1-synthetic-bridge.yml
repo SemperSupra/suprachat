@@ -16,6 +16,10 @@ jobs:
   w1-gui-cli-agent:
     runs-on: windows-2025
     timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v5
@@ -28,13 +32,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'S0_W1_GUI_BUILD_FAILED' }
           dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'S0_W1_CLI_BUILD_FAILED' }
-      - name: Qualify real W1 native UIA and independent CLI plus agent processes
+      - name: Qualify W1 GUI CLI agent using native Windows PowerShell 5.1
+        if: matrix.shell == 'powershell'
+        shell: powershell
+        run: |
+          ./tools/local/Test-S0W1SyntheticBridge.ps1 -ReceiptPath "$env:RUNNER_TEMP/s0-w1-bridge.json"
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_PS51_BRIDGE_SCRIPT_FAILED' }
+      - name: Qualify W1 GUI CLI agent using PowerShell 7
+        if: matrix.shell == 'pwsh'
         shell: pwsh
         run: |
           ./tools/local/Test-S0W1SyntheticBridge.ps1 -ReceiptPath "$env:RUNNER_TEMP/s0-w1-bridge.json"
-          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_BRIDGE_SCRIPT_FAILED' }
+          if ($LASTEXITCODE -ne 0) { throw 'S0_W1_PWSH_BRIDGE_SCRIPT_FAILED' }
+      - name: Validate exact synthetic three-audience native receipt and shell identity
+        shell: pwsh
+        run: |
           $receipt=Get-Content -LiteralPath "$env:RUNNER_TEMP/s0-w1-bridge.json" -Raw | ConvertFrom-Json
-          if ($receipt.schema -ne 'suprachat-s0-w1-bridge/v1' -or
+          $expectedMajor=if ('${{ matrix.shell }}' -eq 'powershell') { 5 } else { 7 }
+          if ($receipt.powershell_major -ne $expectedMajor -or
+              $receipt.schema -ne 'suprachat-s0-w1-bridge/v1' -or
               !$receipt.passed -or $receipt.phase -ne 'PASS' -or
               ($receipt.same_session_versions -join ',') -ne '0,1,2' -or
               !$receipt.synthetic_only -or $receipt.authenticated_principals -or
@@ -45,7 +61,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: s0-w1-synthetic-bridge-receipt
+          name: s0-w1-synthetic-bridge-receipt-${{ matrix.shell }}
           path: ${{ runner.temp }}/s0-w1-bridge.json
           if-no-files-found: ignore
           retention-days: 7

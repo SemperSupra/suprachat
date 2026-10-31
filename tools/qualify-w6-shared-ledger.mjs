@@ -10,7 +10,8 @@ import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const automationDll = path.join(root, 'SupraChat.Automation','bin','Release','net10.0','SupraChat.Automation.dll');
-const token = randomBytes(32).toString('base64url');
+// Exercise the valid '_' token character deterministically on every OS.
+const token = '_' + randomBytes(31).toString('base64url');
 const env = {...process.env, SUPRACHAT_LEDGER_TOKEN: token, SUPRACHAT_W6_DISPOSABLE_ONLY: 'yes'};
 const timeoutMs = 15000;
 const prefix = 'http://127.0.0.1:';
@@ -19,10 +20,10 @@ let host;
 let outputSeen = '';
 
 function record(name) { stages.push({name, status: 'PASS'}); }
-function runCli(command, input) {
+function runCli(command, input, environmentOverride = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('dotnet', [automationDll,...command], {
-      cwd: root, env, stdio: ['pipe','pipe','pipe'], windowsHide: true,
+      cwd: root, env: {...env, ...environmentOverride}, stdio: ['pipe','pipe','pipe'], windowsHide: true,
     });
     let stdout = '', stderr = '';
     const guard = setTimeout(() => child.kill(), timeoutMs);
@@ -138,6 +139,14 @@ try {
   assert.equal((await http(port,'/v1/sessions','GET',undefined,'wrong-token')).status,401);
   assert.equal((await http(port,'/v1/sessions','GET',undefined,token,'https://attacker.invalid')).status,403);
   record('missing-wrong-token-and-browser-origin-denied');
+
+  // A forbidden punctuation character must be refused locally, not passed
+  // through the transport to the host as a superficially valid bearer.
+  await assert.rejects(
+    runCli(['session-ledger-list','--port',String(port)], undefined,
+      {SUPRACHAT_LEDGER_TOKEN: token + '!'}),
+    /CLI_EXIT_NONZERO_session-ledger-list/);
+  record('strict-token-character-whitelist');
 
   const openReq={idempotencyKey:'w6-human-open-00000001',audience:'human',title:'Shared work',conversationUrl:'https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174000'};
   const open=cliValue(await runCli(['session-ledger-open','--port',String(port)],JSON.stringify(openReq)));
