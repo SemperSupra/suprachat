@@ -1431,6 +1431,90 @@ jobs:
                     }
                     if (-not $previewed) { throw 'W1 UIA did not expose the expected metadata-only JSON preview.' }
                     Write-Host 'Windows W1 Sessions UIA create/rename/metadata-preview smoke PASS.'
+                    # W2 controlled, nonsecret synthetic text only. Never read browser,
+                    # clipboard, credential fields, files or terminal processes.
+                    $w2Ids = @(
+                      'Sessions.DraftHeading', 'Sessions.DraftInput',
+                      'Sessions.ReviewToTerminal', 'Sessions.ReviewToChat',
+                      'Sessions.StageDraft', 'Sessions.DraftReview',
+                      'Sessions.DraftStatus', 'Sessions.TerminalDraft',
+                      'Sessions.ChatDraft', 'Sessions.DiscardDrafts')
+                    foreach ($id in $w2Ids) { $null = Require-SemanticControl $id }
+
+                    function Read-W2Value([string]$id) {
+                      $control = Require-SemanticControl $id
+                      $value = $control.GetCurrentPattern(
+                        [System.Windows.Automation.ValuePattern]::Pattern)
+                      return $value.Current.Value
+                    }
+                    $input = Require-SemanticControl 'Sessions.DraftInput'
+                    $inputValue = $input.GetCurrentPattern(
+                      [System.Windows.Automation.ValuePattern]::Pattern)
+                    $inputValue.SetValue('W2_SYNTHETIC_TERMINAL_ONLY')
+                    (Require-SemanticControl 'Sessions.ReviewToTerminal').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $reviewSeen = $false
+                    $deadline = (Get-Date).AddSeconds(5)
+                    while ((Get-Date) -lt $deadline) {
+                      if ((Read-W2Value 'Sessions.DraftReview') -eq 'W2_SYNTHETIC_TERMINAL_ONLY') {
+                        $reviewSeen = $true; break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $reviewSeen) { throw 'W2 native UIA review did not show exact proposed text.' }
+                    if ((Read-W2Value 'Sessions.TerminalDraft') -ne '') {
+                      throw 'W2 terminal draft unexpectedly changed before explicit staging.'
+                    }
+                    (Require-SemanticControl 'Sessions.StageDraft').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $staged = $false
+                    $deadline = (Get-Date).AddSeconds(5)
+                    while ((Get-Date) -lt $deadline) {
+                      if ((Read-W2Value 'Sessions.TerminalDraft') -eq 'W2_SYNTHETIC_TERMINAL_ONLY') {
+                        $staged = $true; break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $staged -or (Read-W2Value 'Sessions.ChatDraft') -ne '') {
+                      throw 'W2 stage not isolated to the selected terminal draft.'
+                    }
+                    $inputValue.SetValue('W2_SYNTHETIC_CHAT_ONLY')
+                    (Require-SemanticControl 'Sessions.ReviewToChat').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $chatReviewSeen = $false
+                    $deadline = (Get-Date).AddSeconds(5)
+                    while ((Get-Date) -lt $deadline) {
+                      if ((Read-W2Value 'Sessions.DraftReview') -eq 'W2_SYNTHETIC_CHAT_ONLY') {
+                        $chatReviewSeen = $true; break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $chatReviewSeen) { throw 'W2 chat draft review not visible.' }
+                    (Require-SemanticControl 'Sessions.StageDraft').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $chatStaged = $false
+                    $deadline = (Get-Date).AddSeconds(5)
+                    while ((Get-Date) -lt $deadline) {
+                      if ((Read-W2Value 'Sessions.ChatDraft') -eq 'W2_SYNTHETIC_CHAT_ONLY') {
+                        $chatStaged = $true; break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $chatStaged) { throw 'W2 chat draft did not stage locally.' }
+                    (Require-SemanticControl 'Sessions.DiscardDrafts').GetCurrentPattern(
+                      [System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                    $cleared = $false
+                    $deadline = (Get-Date).AddSeconds(5)
+                    while ((Get-Date) -lt $deadline) {
+                      if ((Read-W2Value 'Sessions.TerminalDraft') -eq '' -and
+                          (Read-W2Value 'Sessions.ChatDraft') -eq '') {
+                        $cleared = $true; break
+                      }
+                      Start-Sleep -Milliseconds 100
+                    }
+                    if (-not $cleared) { throw 'W2 discard did not clear both local draft buffers.' }
+                    Write-Host 'Windows W2 local review/stage/discard native UIA PASS; no remote effects requested.'
+
                   }
                 }
 
