@@ -60,10 +60,16 @@ internal static class Program
                 "trace-session" => await RunTraceSessionAsync(),
                 "diagnostics-export" => WriteSuccess(await DiagnosticsExportAsync(args[1..])),
                 "auth-status" => WriteSuccess(await AuthStatusAsync()),
+                "auth-policy" => WriteSuccess(await AuthPolicyAsync()),
+                "auth-policy-set" => WriteSuccess(await AuthPolicySetAsync(args[1..])),
+                "auth-login" => WriteSuccess(await AuthLoginAsync(args[1..])),
+                "auth-set-api-key" => WriteSuccess(await AuthSetApiKeyAsync(args[1..])),
+                "auth-clear-api-key" => WriteSuccess(await AuthClearApiKeyAsync()),
+                "auth-clear" => WriteSuccess(await AuthClearAsync(args[1..])),
                 "auth-bundle-inspect" => WriteSuccess(await AuthBundleInspectAsync(args[1..])),
                 "auth-export" => WriteSuccess(await AuthExportAsync(args[1..])),
                 "auth-import" => WriteSuccess(await AuthImportAsync(args[1..])),
-                "models" => WriteSuccess(await ModelsAsync()),
+                "models" => WriteSuccess(await ModelsAsync(args[1..])),
                 "voices" => WriteSuccess(await CodexRpcAsync(new[] { "--method", "thread/realtime/listVoices", "--params", "{}" })),
                 "remote-status" => WriteSuccess(await CodexRpcAsync(new[] { "--method", "remoteControl/status/read" })),
                 "remote-enable" => WriteSuccess(await RemoteEnableAsync(args[1..])),
@@ -126,6 +132,12 @@ internal static class Program
             new { name = "diagnostics", description = "Read privacy-safe dogfood observability metadata, trace IDs, and local log paths." },
             new { name = "diagnostics-export", description = "Export a privacy-safe diagnostics bundle.", syntax = "diagnostics-export --output <path.zip>" },
             new { name = "auth-status", description = "Read redacted local ChatGPT-plan authorization state." },
+            new { name = "auth-policy", description = "Read effective authentication priority order and provider readiness." },
+            new { name = "auth-policy-set", description = "Configure authentication priority order (e.g. subscription,api_key,siwc).", syntax = "auth-policy-set --order <csv> [--prefer-codex <true|false>] [--custom-api-key-env <name>]" },
+            new { name = "auth-login", description = "Login via subscription (device-auth, token, or existing Codex session), SIWC, or API key.", syntax = "auth-login [--subscription|--device-auth|--api-key <key>|--token <token>|--manual]" },
+            new { name = "auth-set-api-key", description = "Save an OpenAI API key in local protected storage.", syntax = "auth-set-api-key --key <api-key>" },
+            new { name = "auth-clear-api-key", description = "Clear saved OpenAI API key from local protected storage." },
+            new { name = "auth-clear", description = "Clear all saved local session tokens." },
             new { name = "auth-bundle-inspect", description = "Inspect redacted metadata from an encrypted portable SIWC credential bundle.", syntax = "auth-bundle-inspect --input <path>" },
             new { name = "auth-export", description = "Export the active renewable SIWC credential to an encrypted portable bundle.", syntax = "auth-export --confirm --output <path> --passphrase-env <ENV_VAR>" },
             new { name = "auth-import", description = "Import an encrypted portable SIWC credential bundle while preserving this host's identity.", syntax = "auth-import --confirm --input <path> --passphrase-env <ENV_VAR>" },
@@ -457,15 +469,260 @@ internal static class Program
         }
     }
 
-    private static async Task<object> ModelsAsync()
+    private static async Task<object> ModelsAsync(string[]? args = null)
     {
-        var models = await Core.ListModelsAsync();
+        var requestedMode = Option(args ?? Array.Empty<string>(), "--auth-mode");
+        var requestedOrder = Option(args ?? Array.Empty<string>(), "--auth-order");
+
+        AuthPolicy? policy = null;
+        if (!string.IsNullOrWhiteSpace(requestedMode))
+            policy = new AuthPolicy(new[] { AuthModes.NormalizeMode(requestedMode) });
+        else if (!string.IsNullOrWhiteSpace(requestedOrder))
+            policy = new AuthPolicy(AuthPolicy.NormalizeOrder(requestedOrder.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+
+        var models = await Core.ListModelsAsync(policy: policy);
+        var auth = await Core.GetAuthStatusAsync();
         return new
         {
             schema = Schema,
             binding = "siwc-responses",
+            auth_mode = auth.AuthMode,
             models = models.Select(x => new { id = x.Slug, display_name = x.DisplayName }).ToArray()
         };
+    }
+
+    private static async Task<object> AuthPolicyAsync()
+    {
+        var policy = await AuthPolicyStore.LoadAsync();
+        var report = await Core.GetAuthEvaluationAsync(policy);
+        return new
+        {
+            schema = "suprachat-auth-policy/v1",
+            configured_order = report.ConfiguredOrder,
+            prefer_codex_auth_json = policy.PreferCodexAuthJson,
+            custom_api_key_env = policy.CustomApiKeyEnv,
+            active_mode = report.Resolved?.AuthMode,
+            active_label = report.Resolved?.PrincipalLabel,
+            has_plan_usage = report.Resolved?.HasPlanUsage ?? false,
+            evaluations = report.Evaluations.Select(e => new
+            {
+                auth_mode = e.AuthMode,
+                available = e.Available,
+                reason = e.Reason,
+                principal = e.PrincipalLabel
+            }).ToArray()
+        };
+    }
+
+    private static async Task<object> AuthPolicySetAsync(string[] args)
+    {
+        var orderStr = Option(args, "--order");
+        var preferCodexStr = Option(args, "--prefer-codex");
+        var customEnv = Option(args, "--custom-api-key-env");
+
+        var current = await AuthPolicyStore.LoadAsync();
+        var order = !string.IsNullOrWhiteSpace(orderStr)
+            ? AuthPolicy.NormalizeOrder(orderStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            : current.Order;
+
+        var preferCodex = !string.IsNullOrWhiteSpace(preferCodexStr)
+            ? bool.Parse(preferCodexStr)
+            : current.PreferCodexAuthJson;
+
+        var updated = current with
+        {
+            Order = order,
+            PreferCodexAuthJson = preferCodex,
+            CustomApiKeyEnv = customEnv ?? current.CustomApiKeyEnv
+        };
+
+        await AuthPolicyStore.SaveAsync(updated);
+        return await AuthPolicyAsync();
+    }
+
+    private static async Task<object> AuthSetApiKeyAsync(string[] args)
+    {
+        var key = RequiredOption(args, "--key");
+        await ApiKeyStore.SaveAsync(key);
+        var cred = await ApiKeyStore.TryLoadAsync();
+        return new
+        {
+            schema = Schema,
+            operation = "set-api-key",
+            status = "saved",
+            key = cred?.RedactedKey,
+            source = cred?.Source
+        };
+    }
+
+    private static async Task<object> AuthClearApiKeyAsync()
+    {
+        ApiKeyStore.Clear();
+        return new
+        {
+            schema = Schema,
+            operation = "clear-api-key",
+            status = "cleared"
+        };
+    }
+
+    private static async Task<object> AuthClearAsync(string[] args)
+    {
+        SubscriptionCredentialStore.Clear();
+        ApiKeyStore.Clear();
+        CredentialStore.Clear();
+        return new
+        {
+            schema = Schema,
+            operation = "clear-all-auth",
+            status = "cleared"
+        };
+    }
+
+    private static async Task<object> AuthLoginAsync(string[] args)
+    {
+        var token = Option(args, "--token");
+        var apiKey = Option(args, "--api-key");
+        var isDeviceAuth = HasFlag(args, "--device-auth");
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            await ApiKeyStore.SaveAsync(apiKey);
+            return new
+            {
+                schema = Schema,
+                auth_mode = AuthModes.ApiKey,
+                status = "saved",
+                source = "protected-api-key"
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            var cred = new SubscriptionCredential(token, Source: "direct-token");
+            await SubscriptionCredentialStore.SaveAsync(cred);
+            return new
+            {
+                schema = Schema,
+                auth_mode = AuthModes.Subscription,
+                status = "saved",
+                source = "direct-token"
+            };
+        }
+
+        if (isDeviceAuth)
+        {
+            return await RunDeviceAuthAsync();
+        }
+
+        var codexAuth = SubscriptionCredentialStore.TryLoadFromCodex();
+        if (codexAuth is not null)
+        {
+            return new
+            {
+                schema = Schema,
+                auth_mode = AuthModes.Subscription,
+                status = "linked",
+                source = "codex-auth-json",
+                email = codexAuth.Email,
+                account_id = codexAuth.AccountId,
+                message = "Linked active ChatGPT subscription from ~/.codex/auth.json"
+            };
+        }
+
+        throw new MachineException(2, "LOGIN_METHOD_REQUIRED",
+            "No active Codex subscription found in ~/.codex/auth.json. Specify --device-auth for headless device code login, --token <access_token> to supply a token directly, or --api-key <key>.");
+    }
+
+    private static async Task<object> RunDeviceAuthAsync()
+    {
+        using var client = new HttpClient();
+        var initContent = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["client_id"] = "pdlLIX2Y72MIl2rhLhTE9VV9bN905kBh",
+            ["scope"] = "openid profile email offline_access model.request",
+            ["audience"] = "https://api.openai.com/v1"
+        });
+
+        using var initResp = await client.PostAsync("https://auth0.openai.com/oauth/device/code", initContent);
+        if (!initResp.IsSuccessStatusCode)
+        {
+            var err = await initResp.Content.ReadAsStringAsync();
+            throw new MachineException(3, "DEVICE_AUTH_FAILED", $"Failed to initiate device authentication: {err}");
+        }
+
+        var initJson = await initResp.Content.ReadAsStringAsync();
+        using var initDoc = JsonDocument.Parse(initJson);
+        var root = initDoc.RootElement;
+
+        var deviceCode = root.GetProperty("device_code").GetString()!;
+        var userCode = root.GetProperty("user_code").GetString()!;
+        var verificationUri = root.GetProperty("verification_uri").GetString()!;
+        var interval = root.TryGetProperty("interval", out var intProp) ? intProp.GetInt32() : 5;
+        var expiresIn = root.TryGetProperty("expires_in", out var expProp) ? expProp.GetInt32() : 900;
+
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("=================================================================");
+        Console.Error.WriteLine($"Open in your browser: {verificationUri}");
+        Console.Error.WriteLine($"Enter one-time code:  {userCode}");
+        Console.Error.WriteLine("Waiting for authorization...");
+        Console.Error.WriteLine("=================================================================");
+        Console.Error.WriteLine();
+
+        var pollDeadline = DateTime.UtcNow.AddSeconds(expiresIn);
+        while (DateTime.UtcNow < pollDeadline)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(Math.Max(5, interval)));
+
+            var pollContent = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+                ["device_code"] = deviceCode,
+                ["client_id"] = "pdlLIX2Y72MIl2rhLhTE9VV9bN905kBh"
+            });
+
+            using var pollResp = await client.PostAsync("https://auth0.openai.com/oauth/token", pollContent);
+            var pollBody = await pollResp.Content.ReadAsStringAsync();
+
+            if (pollResp.IsSuccessStatusCode)
+            {
+                using var pollDoc = JsonDocument.Parse(pollBody);
+                var pRoot = pollDoc.RootElement;
+                var accessToken = pRoot.GetProperty("access_token").GetString()!;
+                var refreshToken = pRoot.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
+                var idToken = pRoot.TryGetProperty("id_token", out var it) ? it.GetString() : null;
+
+                var sub = new SubscriptionCredential(
+                    accessToken,
+                    refreshToken,
+                    idToken,
+                    ExpiresAt: DateTimeOffset.UtcNow.AddSeconds(pRoot.TryGetProperty("expires_in", out var ei) ? ei.GetInt32() : 3600),
+                    Source: "device-auth");
+
+                await SubscriptionCredentialStore.SaveAsync(sub);
+                return new
+                {
+                    schema = Schema,
+                    auth_mode = AuthModes.Subscription,
+                    status = "authorized",
+                    source = "device-auth",
+                    expires_at = sub.ExpiresAt
+                };
+            }
+
+            if (pollBody.Contains("authorization_pending", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (pollBody.Contains("slow_down", StringComparison.OrdinalIgnoreCase))
+            {
+                interval += 5;
+                continue;
+            }
+
+            throw new MachineException(3, "DEVICE_AUTH_FAILED", $"Device auth polling error: {pollBody}");
+        }
+
+        throw new MachineException(3, "DEVICE_AUTH_EXPIRED", "Device authentication expired before user authorization was received.");
     }
 
     private static void RequireExplicitConfirmation(string[] args, string operation)
@@ -572,10 +829,10 @@ internal static class Program
             }
         }
 
-        var credential = await RequireCredentialAsync();
+        var auth = await RequireAuthAsync(args);
 
         var result = await TracedResponses.StreamAsync(
-            credential.AccessToken,
+            auth.AccessToken,
             model,
             input,
             attachments,
@@ -608,9 +865,9 @@ internal static class Program
         if (string.IsNullOrWhiteSpace(raw))
             throw new MachineException(2, "USAGE", "Provide --body <json> or JSON on stdin.");
 
-        var credential = await RequireCredentialAsync();
+        var auth = await RequireAuthAsync(args);
         var result = await TracedResponses.StreamRawAsync(
-            credential.AccessToken,
+            auth.AccessToken,
             model,
             raw);
 
@@ -629,7 +886,7 @@ internal static class Program
     {
         var method = RequiredOption(args, "--method");
         var rawParams = Option(args, "--params");
-        var credential = await RequireCredentialAsync();
+        var auth = await RequireAuthAsync(args);
 
         JsonElement? parameters = null;
         if (!string.IsNullOrWhiteSpace(rawParams))
@@ -638,7 +895,8 @@ internal static class Program
             parameters = document.RootElement.Clone();
         }
 
-        await using var client = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
+        var useNative = auth.AuthMode == AuthModes.Subscription && string.Equals(auth.Source, "codex-auth-json", StringComparison.Ordinal);
+        await using var client = await CodexAppServerClient.StartAsync(auth.AccessToken, useNativeSubscription: useNative, trace: Trace.Binding, controls: Trace.Controls);
         var result = await client.RequestAsync(method, parameters);
         return new
         {
@@ -1341,8 +1599,8 @@ internal static class Program
             return _agentResponsesSocket;
 
         await StopAgentResponsesAsync();
-        var credential = await RequireCredentialAsync();
-        _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(credential.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
+        var auth = await RequireAuthAsync();
+        _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(auth.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
         _agentResponsesCts = new CancellationTokenSource();
         var socket = _agentResponsesSocket;
         var token = _agentResponsesCts.Token;
@@ -1510,8 +1768,9 @@ internal static class Program
             return _agentCodex;
 
         await StopAgentCodexAsync();
-        var credential = await RequireCredentialAsync();
-        _agentCodex = await CodexAppServerClient.StartAsync(credential.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
+        var auth = await RequireAuthAsync();
+        var useNative = auth.AuthMode == AuthModes.Subscription && string.Equals(auth.Source, "codex-auth-json", StringComparison.Ordinal);
+        _agentCodex = await CodexAppServerClient.StartAsync(auth.AccessToken, useNativeSubscription: useNative, trace: Trace.Binding, controls: Trace.Controls);
         _agentCodexCts = new CancellationTokenSource();
         _agentCodexEvents = _agentCodex.SubscribeEvents();
         var subscription = _agentCodexEvents;
@@ -1619,23 +1878,38 @@ internal static class Program
         };
     }
 
-    private static async Task<SiwcCredential> RequireCredentialAsync()
+    private static async Task<ResolvedAuthCredential> RequireAuthAsync(string[]? args = null, bool requirePlanUsage = false)
     {
+        var requestedMode = Option(args ?? Array.Empty<string>(), "--auth-mode");
+        var requestedOrder = Option(args ?? Array.Empty<string>(), "--auth-order");
+
+        AuthPolicy? policy = null;
+        if (!string.IsNullOrWhiteSpace(requestedMode))
+        {
+            policy = new AuthPolicy(new[] { AuthModes.NormalizeMode(requestedMode) });
+        }
+        else if (!string.IsNullOrWhiteSpace(requestedOrder))
+        {
+            var parts = requestedOrder.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            policy = new AuthPolicy(AuthPolicy.NormalizeOrder(parts));
+        }
+
         try
         {
-            return await Core.GetUsableCredentialAsync(requirePlanUsage: true);
+            return await Core.GetUsableAuthAsync(requirePlanUsage: requirePlanUsage, policy: policy);
         }
-        catch (InvalidOperationException ex) when (
-            ex.Message.Contains("No local ChatGPT authorization", StringComparison.Ordinal))
+        catch (AuthResolutionException ex)
         {
             throw new MachineException(3, "AUTH_REQUIRED", ex.Message);
         }
-        catch (InvalidOperationException ex) when (
-            ex.Message.Contains(SiwcProtocol.RequiredPlanScope, StringComparison.Ordinal))
+        catch (InvalidOperationException ex)
         {
-            throw new MachineException(3, "PLAN_SCOPE_REQUIRED", ex.Message);
+            throw new MachineException(3, "AUTH_REQUIRED", ex.Message);
         }
     }
+
+    private static async Task<ResolvedAuthCredential> RequireCredentialAsync(string[]? args = null) =>
+        await RequireAuthAsync(args);
 
     private static object CredentialSummary(SiwcCredential? credential) =>
         SupraChatCore.DescribeCredential(credential);

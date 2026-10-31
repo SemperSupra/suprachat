@@ -40,7 +40,7 @@ public static class CodexAppServer
         return name;
     }
 
-    public static Process Start(string accessToken)
+    public static Process Start(string accessToken, bool useNativeSubscription = false)
     {
         var psi = new ProcessStartInfo(ResolveExecutable())
         {
@@ -50,9 +50,19 @@ public static class CodexAppServer
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        foreach (var arg in Arguments)
-            psi.ArgumentList.Add(arg);
-        psi.Environment["ACCESS_TOKEN"] = accessToken;
+
+        if (useNativeSubscription)
+        {
+            psi.ArgumentList.Add("app-server");
+            psi.ArgumentList.Add("--listen");
+            psi.ArgumentList.Add("stdio://");
+        }
+        else
+        {
+            foreach (var arg in Arguments)
+                psi.ArgumentList.Add(arg);
+            psi.Environment["ACCESS_TOKEN"] = accessToken;
+        }
 
         return Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start codex app-server.");

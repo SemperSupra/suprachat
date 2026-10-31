@@ -175,6 +175,55 @@ static class Program
         var rounded = AccessibilityPreferencesStore.Normalize(new(AccessibilityPreferencesStore.Schema, 1.24, false));
         Check(Math.Abs(rounded.InterfaceScale - 1.2) < 0.001, "a11y_round_to_nearest_tenth");
 
+        // Multi-Provider Authentication & Order Configuration Contract Tests
+        // 1. AuthModes Normalization
+        Check(AuthModes.NormalizeMode("subscription") == AuthModes.Subscription, "auth_mode_sub");
+        Check(AuthModes.NormalizeMode("chatgpt") == AuthModes.Subscription, "auth_mode_chatgpt");
+        Check(AuthModes.NormalizeMode("sub") == AuthModes.Subscription, "auth_mode_sub_alias");
+        Check(AuthModes.NormalizeMode("siwc") == AuthModes.Siwc, "auth_mode_siwc");
+        Check(AuthModes.NormalizeMode("chatgpt_plan") == AuthModes.Siwc, "auth_mode_chatgpt_plan");
+        Check(AuthModes.NormalizeMode("plan") == AuthModes.Siwc, "auth_mode_plan");
+        Check(AuthModes.NormalizeMode("api_key") == AuthModes.ApiKey, "auth_mode_api_key");
+        Check(AuthModes.NormalizeMode("apikey") == AuthModes.ApiKey, "auth_mode_apikey_alias");
+        Check(AuthModes.NormalizeMode("key") == AuthModes.ApiKey, "auth_mode_key_alias");
+        MustRefuse(() => AuthModes.NormalizeMode("unsupported_auth_mode"), "auth_mode_unknown_refused");
+
+        // 2. AuthPolicy Normalization & Order Preservation
+        var defOrder = AuthPolicy.NormalizeOrder(null);
+        Check(defOrder.Length == 3 && defOrder[0] == AuthModes.Subscription && defOrder[1] == AuthModes.Siwc && defOrder[2] == AuthModes.ApiKey, "auth_order_default");
+        var emptyOrder = AuthPolicy.NormalizeOrder(Array.Empty<string>());
+        Check(emptyOrder.Length == 3 && emptyOrder[0] == AuthModes.Subscription, "auth_order_empty_fallback");
+        var customOrder = AuthPolicy.NormalizeOrder(new[] { "api-key", "subscription" });
+        Check(customOrder.Length == 2 && customOrder[0] == AuthModes.ApiKey && customOrder[1] == AuthModes.Subscription, "auth_order_custom");
+        var dedupOrder = AuthPolicy.NormalizeOrder(new[] { "chatgpt", "api_key", "sub", "siwc", "api-key" });
+        Check(dedupOrder.Length == 3 && dedupOrder[0] == AuthModes.Subscription && dedupOrder[1] == AuthModes.ApiKey && dedupOrder[2] == AuthModes.Siwc, "auth_order_dedup");
+
+        // 3. SubscriptionCredential Display & Expiry
+        var subWithEmail = new SubscriptionCredential("tok-1", Email: "test@example.com");
+        Check(subWithEmail.DisplayLabel.Contains("test@example.com"), "sub_display_email");
+        var subWithAccount = new SubscriptionCredential("tok-2", AccountId: "acc-12345");
+        Check(subWithAccount.DisplayLabel.Contains("acc-12345"), "sub_display_account");
+        var subFallback = new SubscriptionCredential("tok-3");
+        Check(subFallback.DisplayLabel == "ChatGPT subscription", "sub_display_fallback");
+        var expiredSub = new SubscriptionCredential("tok-4", ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(-5));
+        Check(expiredSub.IsExpired, "sub_is_expired");
+        var activeSub = new SubscriptionCredential("tok-5", ExpiresAt: DateTimeOffset.UtcNow.AddHours(1));
+        Check(!activeSub.IsExpired, "sub_is_active");
+
+        // 4. ApiKeyCredential Redaction
+        var normalKey = new ApiKeyCredential("sk-1234567890abcdef");
+        Check(normalKey.RedactedKey == "sk-1...cdef", "api_key_redacted_normal");
+        var shortKey = new ApiKeyCredential("sk-1234");
+        Check(shortKey.RedactedKey == "sk-...", "api_key_redacted_short");
+        var emptyKey = new ApiKeyCredential("");
+        Check(emptyKey.RedactedKey == "(empty)", "api_key_redacted_empty");
+
+        // 5. AuthResolution Evaluation Contract
+        var dummyPolicy = new AuthPolicy(new[] { AuthModes.ApiKey });
+        var report = AuthResolver.EvaluateAsync(dummyPolicy, requirePlanUsage: true).GetAwaiter().GetResult();
+        Check(report.ConfiguredOrder.Length == 1 && report.ConfiguredOrder[0] == AuthModes.ApiKey, "auth_eval_configured_order");
+        Check(report.Evaluations.Count == 1 && report.Evaluations[0].AuthMode == AuthModes.ApiKey, "auth_eval_evaluations_count");
+
         Console.WriteLine($"WORKBENCH_SOURCE_ONLY_CONTRACT_PASS cases={_cases} provider_contact=false terminal_execution=false browser_submission=false persistent_state=false");
         return 0;
     }
