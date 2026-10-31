@@ -13,7 +13,8 @@ $owner = $null; $desktop = $null; $passed = $false; $phase = 'START'
 try {
   $pi = [Diagnostics.ProcessStartInfo]::new()
   $pi.FileName = (Get-Command dotnet).Source; $pi.UseShellExecute = $false
-  foreach ($v in @($cli,'session-ledger-host','--port',[string]$port)) { $pi.ArgumentList.Add($v) }
+  # ProcessStartInfo.ArgumentList is unavailable in Windows PowerShell 5.1.
+  $pi.Arguments = ('"{0}" session-ledger-host --port {1}' -f $cli,$port)
   $owner = [Diagnostics.Process]::Start($pi)
   if (!$owner) { throw 'HOST_START_FAILED' }
   $deadline=[datetime]::UtcNow.AddSeconds(20)
@@ -26,7 +27,11 @@ try {
   }
   if (!$h -or $h.schema -ne 'suprachat-w6-loopback-session-host/v1') { throw 'HOST_NOT_READY' }
   $phase = 'UIA'
-  $desktop = [Diagnostics.Process]::Start((Get-Command dotnet).Source,$gui)
+  $desktopInfo = [Diagnostics.ProcessStartInfo]::new()
+  $desktopInfo.FileName = (Get-Command dotnet).Source
+  $desktopInfo.UseShellExecute = $false
+  $desktopInfo.Arguments = ('"{0}"' -f $gui)
+  $desktop = [Diagnostics.Process]::Start($desktopInfo)
   if (!$desktop) { throw 'GUI_START_FAILED' }
   $window = $null; $deadline=[datetime]::UtcNow.AddSeconds(20)
   do {
@@ -93,9 +98,10 @@ try {
   'S0 normal W1 GUI, CLI and agent share one disposable session owner: PASS'
 } finally {
   foreach ($p in @($desktop,$owner)) {
-    if ($p) { if (!$p.HasExited) { $p.Kill($true); $null=$p.WaitForExit(4000) }; $p.Dispose() }
+    if ($p) { if (!$p.HasExited) { $p.Kill(); $null=$p.WaitForExit(4000) }; $p.Dispose() }
   }
   $result=@{schema='suprachat-s0-w1-bridge/v1';passed=$passed;phase=$phase;
+    powershell_major=$PSVersionTable.PSVersion.Major;
     same_session_versions=$(if($passed){@(0,1,2)}else{@()});
     synthetic_only=$true;authenticated_principals=$false;production_storage=$false;
     provider_actions=$false}
