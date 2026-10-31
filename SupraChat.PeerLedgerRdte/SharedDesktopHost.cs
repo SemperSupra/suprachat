@@ -201,7 +201,10 @@ internal sealed class SharedDesktopHost : IDisposable
             var initial = Read(index);
             await Program.WriteFrameAsync(pipe, JsonSerializer.SerializeToUtf8Bytes(new
             { session_id = _sessions[index], other_session_id = _sessions[1 - index], version = initial.Version, consent_protocol = ConsentEnabled }), timeout.Token);
-            var methods = revoke ? new[] { "session/revoke-self", "session/inspect" } :
+            var methods = sameSessionAgent
+                ? new[] { "session/inspect", "session/change", "session/change",
+                    "session/change", "session/change", "trace/read", "session/inspect" }
+                : revoke ? new[] { "session/revoke-self", "session/inspect" } :
                 ConsentEnabled ? new[] { "session/inspect", "session/change", "trace/read", "session/inspect", "consent/status" } :
                 new[] { "session/inspect", "session/change", "trace/read", "session/inspect" };
             for (var n = 0; n < methods.Length; n++)
