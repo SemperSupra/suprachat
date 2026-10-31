@@ -238,9 +238,16 @@ internal sealed class SharedDesktopHost : IDisposable
                     var result = _ledger.ExecuteAdmitted(new(operation, request.SessionId, request.Key, request.Version, request.Value), Admit);
                     reply = new(result.Status, result.Session?.Version ?? -1, result.Sequence, 0, result.IsReplay);
                 }
-                var expected = revoke ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
+                var expected = sameSessionAgent ? n switch
+                {
+                    1 or 2 => "APPLIED",
+                    3 => "IDEMPOTENCY_KEY_PAYLOAD_CONFLICT",
+                    4 => "VERSION_CONFLICT",
+                    _ => "OBSERVED"
+                } : revoke ? (n == 0 ? "REVOKED" : "GRANT_REVOKED") :
                     n == 1 ? "APPLIED" : n == 3 ? "ADMISSION_REFUSED" : n == 4 ? "CONSENT_OFF" : "OBSERVED";
-                if (reply.Status != expected) throw new InvalidOperationException("LAB_PROTOCOL_OUTCOME_REFUSED");
+                if (reply.Status != expected || (sameSessionAgent && reply.Replayed != (n == 2)))
+                    throw new InvalidOperationException("LAB_PROTOCOL_OUTCOME_REFUSED");
                 var response = audience == "agent"
                     ? JsonSerializer.SerializeToUtf8Bytes(new { jsonrpc = "2.0", id = envelope.Id, result = reply }, WireOptions)
                     : JsonSerializer.SerializeToUtf8Bytes(reply, WireOptions);
