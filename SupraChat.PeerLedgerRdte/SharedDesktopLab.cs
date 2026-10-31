@@ -112,7 +112,7 @@ internal sealed class SharedDesktopApp : Application
                 status.Text = result == "APPLIED" ? "Title saved" : result == "VERSION_CONFLICT" ? "Session changed; refresh and try again" : "Change refused";
                 Render(); return Task.CompletedTask;
             });
-            clients.Click += async (_, _) => await Action(async () => { await model.RunClientsAsync(); Render(); status.Text = "Both clients completed"; });
+            clients.Click += async (_, _) => await Action(async () => { await model.RunClientsAsync(); Render(); status.Text = "All enrolled clients completed"; });
             revoke.Click += async (_, _) => await Action(async () => { await model.RevokeAgentAsync(); Render(); status.Text = "Agent revoked; later read refused"; });
             verify.Click += async (_, _) => await Action(() =>
             {
