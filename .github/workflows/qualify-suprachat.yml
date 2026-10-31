@@ -1545,8 +1545,16 @@ jobs:
           if ($sbomToolHash -ne '625767b371b7fdd58f40f618b8a86da0247a33c89e419039c86b4edba1dad4b5') {
             throw "Microsoft SBOM tool digest mismatch: $sbomToolHash"
           }
-          & $sbomTool generate -b $source -bc $PWD -pn SupraChat -pv 0.0.1 -ps 'SemperSupra' -nsb 'https://github.com/SemperSupra/suprachat'
+          & $sbomTool generate -b $source -bc $PWD -pn SupraChat -pv 0.0.1 -ps 'SemperSupra' -nsb 'https://github.com/SemperSupra/suprachat' -li true -pm true
           if ($LASTEXITCODE -ne 0) { throw "SPDX SBOM generation failed with $LASTEXITCODE" }
+          $manifest = Get-Content -LiteralPath (Join-Path $source '_manifest/spdx_2.2/manifest.spdx.json') -Raw | ConvertFrom-Json
+          $licensedPackages = @($manifest.packages | Where-Object {
+            $name = if ($_.name -is [string]) { $_.name.Trim() } else { '' }
+            $license = if ($_.licenseDeclared -is [string]) { $_.licenseDeclared.Trim() } else { '' }
+            $name.Length -gt 0 -and $name -ne 'SupraChat' -and $license.Length -gt 0 -and
+              $license -notin @('NOASSERTION', 'NONE')
+          })
+          if ($licensedPackages.Count -eq 0) { throw 'SPDX SBOM contains no declared third-party package licenses.' }
           & $sbomTool validate -b $source -o (Join-Path $env:RUNNER_TEMP 'sbom-validation-source.json') -mi SPDX:2.2
           if ($LASTEXITCODE -ne 0) { throw "SPDX source-tree validation failed with $LASTEXITCODE" }
 
@@ -1619,7 +1627,16 @@ jobs:
             echo 'bf5d4f99bc98c119d549d08fc02ae92598a7a42772f17317c01031a92632e05b  '"$tool" | sha256sum --check --status
           fi
           chmod +x "$tool"
-          "$tool" generate -b "$source" -bc "$PWD" -pn SupraChat -pv 0.0.1 -ps SemperSupra -nsb https://github.com/SemperSupra/suprachat
+          "$tool" generate -b "$source" -bc "$PWD" -pn SupraChat -pv 0.0.1 -ps SemperSupra -nsb https://github.com/SemperSupra/suprachat -li true -pm true
+          manifest="$source/_manifest/spdx_2.2/manifest.spdx.json"
+          jq -e '[.packages[]
+            | select((.name | type) == "string")
+            | (.name | gsub("^\\s+|\\s+$"; "")) as $name
+            | select($name != "" and $name != "SupraChat")
+            | select((.licenseDeclared | type) == "string")
+            | (.licenseDeclared | gsub("^\\s+|\\s+$"; "")) as $license
+            | select($license != "" and $license != "NOASSERTION" and $license != "NONE")
+          ] | length > 0' "$manifest" >/dev/null || { echo 'SPDX SBOM contains no declared third-party package licenses.' >&2; exit 1; }
           "$tool" validate -b "$source" -o "$RUNNER_TEMP/sbom-validation-source.json" -mi SPDX:2.2
           archive="$RUNNER_TEMP/SupraChat-$name_version-${{ matrix.platform }}.tar.gz"
           tar -czf "$archive" -C "$source" .
