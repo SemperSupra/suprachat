@@ -1586,6 +1586,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Upload bundled license texts for review (Windows)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-license-review
+          path: |
+            out/${{ matrix.rid }}/**/*[Ll][Ii][Cc][Ee][Nn][Ss][Ee]*
+            out/${{ matrix.rid }}/**/*[Nn][Oo][Tt][Ii][Cc][Ee]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Ii][Nn][Gg]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Rr][Ii][Gg][Hh][Tt]*
+            out/${{ matrix.rid }}/**/*[Tt][Hh][Ii][Rr][Dd][Pp][Aa][Rr][Tt][Yy]*
+            out/${{ matrix.rid }}/**/*[Pp][Aa][Tt][Ee][Nn][Tt][Ss]*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Windows release archive
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -1667,6 +1683,22 @@ jobs:
         with:
           name: ${{ matrix.artifact }}-spdx
           path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload bundled license texts for review (Unix)
+        if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-license-review
+          path: |
+            out/${{ matrix.rid }}/**/*[Ll][Ii][Cc][Ee][Nn][Ss][Ee]*
+            out/${{ matrix.rid }}/**/*[Nn][Oo][Tt][Ii][Cc][Ee]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Ii][Nn][Gg]*
+            out/${{ matrix.rid }}/**/*[Cc][Oo][Pp][Yy][Rr][Ii][Gg][Hh][Tt]*
+            out/${{ matrix.rid }}/**/*[Tt][Hh][Ii][Rr][Dd][Pp][Aa][Rr][Tt][Yy]*
+            out/${{ matrix.rid }}/**/*[Pp][Aa][Tt][Ee][Nn][Tt][Ss]*
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
