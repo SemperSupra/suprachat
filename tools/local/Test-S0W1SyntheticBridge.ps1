@@ -37,9 +37,10 @@ try {
   do {
     $desktop.Refresh()
     if ($desktop.HasExited) { throw 'GUI_EXITED' }
-    if ($desktop.MainWindowHandle -ne [intptr]::Zero) {
+    $hwnd = $desktop.MainWindowHandle
+    if ($hwnd -and $hwnd -ne [intptr]::Zero) {
       try {
-        $candidate=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$desktop.MainWindowHandle)
+        $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
         if ($candidate.Current.ProcessId -eq $desktop.Id -and
             $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
           $window = $candidate
@@ -58,8 +59,9 @@ try {
         # Native WebView remounts on tab switches can recreate the window UIA
         # provider tree; reacquire the current declared main HWND each poll.
         $desktop.Refresh()
-        if ($desktop.MainWindowHandle -ne [intptr]::Zero) {
-          $candidate=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$desktop.MainWindowHandle)
+        $hwnd = $desktop.MainWindowHandle
+        if ($hwnd -and $hwnd -ne [intptr]::Zero) {
+          $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
           if ($candidate.Current.ProcessId -eq $desktop.Id -and
               $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
             $control=$candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
@@ -96,7 +98,7 @@ try {
   $phase = 'CLI'; $session=$null; $deadline=[datetime]::UtcNow.AddSeconds(15)
   while ([datetime]::UtcNow -lt $deadline) {
     $v=Inventory
-    if ($v.sessions.Count -eq 1) { $session=@($v.sessions)[0]; break }
+    if ($v.sessions -and $v.sessions.Count -eq 1) { $session=@($v.sessions)[0]; break }
     Start-Sleep -Milliseconds 150
   }
   if (!$session -or $session.version -ne 0) { throw 'GUI_CLI_MISMATCH' }
@@ -169,7 +171,7 @@ try {
   $final=$null; $deadline=[datetime]::UtcNow.AddSeconds(15)
   while ([datetime]::UtcNow -lt $deadline) {
     $v=Inventory
-    if ($v.sessions.Count -eq 1 -and $v.sessions[0].version -eq 2) { $final=$v.sessions[0]; break }
+    if ($v.sessions -and $v.sessions.Count -eq 1 -and $v.sessions[0].version -eq 2) { $final=$v.sessions[0]; break }
     Start-Sleep -Milliseconds 150
   }
   if (!$final -or $final.id -ne $session.id) { throw 'THREE_AUDIENCE_CONVERGENCE_FAILED' }
