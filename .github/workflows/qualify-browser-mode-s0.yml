@@ -1,0 +1,20 @@
+name: Qualify browser mode candidate S0
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.BrowserCampaign.ModeFixtures/**'
+      - '.github/workflows/qualify-browser-mode-s0.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-mode-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Execute offline policy and adversarial fixture suite
+        run: node --test SupraChat.BrowserCampaign.ModeFixtures/*.test.mjs
