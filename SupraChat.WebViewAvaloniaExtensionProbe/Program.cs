@@ -51,7 +51,7 @@ internal static class Program
         var data = JsonSerializer.Serialize(value, new JsonSerializerOptions {
             WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
         });
-        using var output = new FileStream(Receipt, FileMode.CreateNew);
+        using var output = new FileStream(Receipt, FileMode.Create);
         using var writer = new StreamWriter(output);
         writer.Write(data);
     }
@@ -158,3 +158,5 @@ internal sealed class ProbeApp : Application
         }
     }
 }
+
+
