@@ -571,6 +571,13 @@
           </StackPanel>
         </ScrollViewer>
       </TabItem>
+
+      <TabItem Header="Sessions"
+               AutomationProperties.AutomationId="Tab.Sessions"
+               AutomationProperties.AcceleratorKey="Command+4 / Control+4"
+               AutomationProperties.HelpText="Session workbench for human, automation, and agent coordination.">
+        <local:WorkbenchView />
+      </TabItem>
     </TabControl>
   </Grid>
 </Window>
