@@ -42,59 +42,26 @@ try {
   }
   if (!$h -or $h.schema -ne 'suprachat-w6-loopback-session-host/v1') { throw 'HOST_NOT_READY' }
   $phase = 'UIA'
-  $desktopInfo = [Diagnostics.ProcessStartInfo]::new()
   if (Test-Path $guiExe) {
-    $desktopInfo.FileName = $guiExe
-    $desktopInfo.Arguments = ''
+    $desktop = Start-Process -FilePath $guiExe -PassThru
   } else {
-    $desktopInfo.FileName = $dotnet
-    $desktopInfo.Arguments = ('"{0}"' -f $gui)
+    $desktop = Start-Process -FilePath $dotnet -ArgumentList ('"{0}"' -f $gui) -PassThru
   }
-  $desktopInfo.UseShellExecute = $false
-  $desktop = [Diagnostics.Process]::Start($desktopInfo)
   if (!$desktop) { throw 'GUI_START_FAILED' }
-  $script:window = $null; $deadline=[datetime]::UtcNow.AddSeconds(20)
-  $mainWinCond = [System.Windows.Automation.PropertyCondition]::new(
-    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-    'SupraChat.MainWindow')
-  $procCond = [System.Windows.Automation.PropertyCondition]::new(
+  $window = $null
+  $deadline = [datetime]::UtcNow.AddSeconds(20)
+  $procCond = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
     $desktop.Id)
-  do {
-    $desktop.Refresh()
-    if ($desktop.HasExited) { throw 'GUI_EXITED' }
-    $hwnd = $desktop.MainWindowHandle
-    if ($hwnd -and $hwnd -ne [intptr]::Zero) {
-      try {
-        $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-        if ($candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-          $script:window = $candidate
-        }
-      } catch {}
-    }
-    if (!$script:window) {
-      try {
-        $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-          [System.Windows.Automation.TreeScope]::Children,
-          $procCond)
-        if ($candidate -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-          $script:window = $candidate
-        }
-      } catch {}
-    }
-    if (!$script:window) {
-      try {
-        $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-          [System.Windows.Automation.TreeScope]::Children,
-          $mainWinCond)
-        if ($candidate -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-          $script:window = $candidate
-        }
-      } catch {}
-    }
-    if (!$script:window) { Start-Sleep -Milliseconds 150 }
-  } while (!$script:window -and [datetime]::UtcNow -lt $deadline)
-  if (!$script:window) { throw 'GUI_UIA_ROOT_UNAVAILABLE' }
+  while ([datetime]::UtcNow -lt $deadline -and !$window) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $procCond)
+    } catch {}
+  }
+  if (!$window) { throw 'GUI_UIA_ROOT_UNAVAILABLE' }
   function Get-Control([string]$id) {
     $predicate = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
@@ -104,21 +71,13 @@ try {
     $element = $null
     while ([datetime]::UtcNow -lt $deadline -and !$element) {
       try {
-        if (!$script:window) {
-          $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children,
+        if (!$window) {
+          $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
             $procCondition)
-          if (!$candidate) {
-            $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-              [System.Windows.Automation.TreeScope]::Descendants,
-              $procCondition)
-          }
-          if ($candidate -and $candidate.Current.ProcessId -eq $desktop.Id -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-            $script:window = $candidate
-          }
         }
-        if ($script:window) {
-          $element = $script:window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $predicate)
+        if ($window) {
+          $element = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $predicate)
         }
       } catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
@@ -130,15 +89,15 @@ try {
       Start-Sleep -Milliseconds 100
     }
     $visible = @()
-    if ($script:window) {
+    if ($window) {
       try {
-        $visible = @($script:window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        $visible = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
           [System.Windows.Automation.Condition]::TrueCondition) |
           ForEach-Object { $_.Current.AutomationId } |
           Where-Object { ![string]::IsNullOrWhiteSpace($_) })
       } catch {}
     }
-    throw "UIA_MISSING:$id; window_found=$($script:window -ne $null); visible_ids=$($visible -join ',')"
+    throw "UIA_MISSING:$id; window_found=$($window -ne $null); visible_ids=$($visible -join ',')"
   }
   $null = Get-Control 'RootTabs'
   $tab = Get-Control 'Tab.Sessions'
