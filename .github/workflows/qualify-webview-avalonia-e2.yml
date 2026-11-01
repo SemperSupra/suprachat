@@ -1,0 +1,32 @@
+name: Qualify Avalonia explicit WebView2 extension environment E2
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.WebViewAvaloniaExtensionProbe/**'
+      - '.github/workflows/qualify-webview-avalonia-e2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-avalonia-e2:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build synthetic Avalonia environment bridge
+        run: dotnet build SupraChat.WebViewAvaloniaExtensionProbe/SupraChat.WebViewAvaloniaExtensionProbe.csproj -c Release
+      - name: Qualify disposable Avalonia/native environment and extension inventory
+        shell: pwsh
+        run: |
+          dotnet run --project SupraChat.WebViewAvaloniaExtensionProbe/SupraChat.WebViewAvaloniaExtensionProbe.csproj -c Release --no-build -- --receipt "$env:RUNNER_TEMP/avalonia-e2.json"
+          if ($LASTEXITCODE -ne 0) { throw 'E2 unsupported or unknown: see sanitized receipt; do not promote.' }
+      - name: Preserve only synthetic receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-avalonia-webview-e2
+          path: ${{ runner.temp }}/avalonia-e2.json
+          if-no-files-found: ignore
