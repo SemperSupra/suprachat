@@ -35,5 +35,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: synthetic-avalonia-webview-e2
-          path: ${{ runner.temp }}/avalonia-e2.json
+          path: |\n            ${{ runner.temp }}/avalonia-e2.json\n            ${{ runner.temp }}/avalonia-e2.phase.txt
           if-no-files-found: ignore
