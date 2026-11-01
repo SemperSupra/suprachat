@@ -34,6 +34,9 @@ try {
   $desktop = [Diagnostics.Process]::Start($desktopInfo)
   if (!$desktop) { throw 'GUI_START_FAILED' }
   $window = $null; $deadline=[datetime]::UtcNow.AddSeconds(20)
+  $mainWinCond = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+    'SupraChat.MainWindow')
   do {
     $desktop.Refresh()
     if ($desktop.HasExited) { throw 'GUI_EXITED' }
@@ -41,27 +44,22 @@ try {
     if ($hwnd -and $hwnd -ne [intptr]::Zero) {
       try {
         $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-        if ($candidate.Current.ProcessId -eq $desktop.Id -and
-            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+        if ($candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
           $window = $candidate
         }
       } catch {}
     }
     if (!$window) {
       try {
-        $procCond = [System.Windows.Automation.PropertyCondition]::new(
-          [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
-          $desktop.Id)
         $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
           [System.Windows.Automation.TreeScope]::Children,
-          $procCond)
+          $mainWinCond)
         if (!$candidate) {
           $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
             [System.Windows.Automation.TreeScope]::Descendants,
-            $procCond)
+            $mainWinCond)
         }
-        if ($candidate -and $candidate.Current.ProcessId -eq $desktop.Id -and
-            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+        if ($candidate -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
           $window = $candidate
         }
       } catch {}
@@ -72,6 +70,8 @@ try {
   function Get-Control([string]$id) {
     $predicate=[System.Windows.Automation.PropertyCondition]::new(
       [System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
+    $mainWinCond=[System.Windows.Automation.PropertyCondition]::new(
+      [System.Windows.Automation.AutomationElement]::AutomationIdProperty,'SupraChat.MainWindow')
     $deadline=[datetime]::UtcNow.AddSeconds(18)
     while ([datetime]::UtcNow -lt $deadline) {
       try {
@@ -84,27 +84,22 @@ try {
         if ($hwnd -and $hwnd -ne [intptr]::Zero) {
           try {
             $c = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-            if ($c.Current.ProcessId -eq $desktop.Id -and
-                $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+            if ($c.Current.AutomationId -eq 'SupraChat.MainWindow') {
               $candidate = $c
             }
           } catch {}
         }
         if (!$candidate) {
           try {
-            $procCond = [System.Windows.Automation.PropertyCondition]::new(
-              [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
-              $desktop.Id)
             $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
               [System.Windows.Automation.TreeScope]::Children,
-              $procCond)
+              $mainWinCond)
             if (!$c) {
               $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
                 [System.Windows.Automation.TreeScope]::Descendants,
-                $procCond)
+                $mainWinCond)
             }
-            if ($c -and $c.Current.ProcessId -eq $desktop.Id -and
-                $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+            if ($c -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
               $candidate = $c
             }
           } catch {}
@@ -120,8 +115,9 @@ try {
     }
     throw "UIA_MISSING:$id"
   }
+  $null = Get-Control 'RootTabs'
   $tabSelected = $false
-  $tabDeadline = [datetime]::UtcNow.AddSeconds(10)
+  $tabDeadline = [datetime]::UtcNow.AddSeconds(12)
   while ([datetime]::UtcNow -lt $tabDeadline) {
     $tab = Get-Control 'Tab.Sessions'
     $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
