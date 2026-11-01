@@ -15,8 +15,19 @@ public partial class WorkbenchView : UserControl
     private string? _selectedId;
     private int _refreshGeneration;
 
-    public WorkbenchView() : this(new ExperimentalLocalWorkbenchSessionAuthority())
+    public WorkbenchView() : this(CreateDefaultAuthority())
     {
+    }
+
+    private static IWorkbenchSessionAuthority CreateDefaultAuthority()
+    {
+        var portText = Environment.GetEnvironmentVariable("SUPRACHAT_W6_GUI_PORT");
+        if (portText is null)
+            return new ExperimentalLocalWorkbenchSessionAuthority();
+        if (Environment.GetEnvironmentVariable("SUPRACHAT_W6_DISPOSABLE_ONLY") != "yes" ||
+            !int.TryParse(portText, out var port) || port is < 1024 or > 65535)
+            throw new InvalidOperationException("W6_SYNTHETIC_GUI_PORT_ADMISSION_REFUSED");
+        return new W6SyntheticWorkbenchSessionAuthority(port);
     }
 
     public WorkbenchView(IWorkbenchSessionAuthority authority)

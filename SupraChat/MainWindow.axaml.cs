@@ -93,6 +93,10 @@ public partial class MainWindow : Window
                 RootTabs.SelectedIndex = 2;
                 e.Handled = true;
                 break;
+            case Key.D4:
+                RootTabs.SelectedIndex = 3;
+                e.Handled = true;
+                break;
             case Key.L:
                 RootTabs.SelectedIndex = 1;
                 PromptBox.Focus();
