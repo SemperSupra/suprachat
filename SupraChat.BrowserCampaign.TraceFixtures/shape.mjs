@@ -12,7 +12,7 @@ function sameOrigin(url,origin){
  }catch{return false;}
 }
 export class SyntheticTraceShape {
- #key=randomBytes(32);#owner=new WeakMap();#states=new Set();
+ #owner=new WeakMap();#states=new Set();
  constructor(origin="https://chatgpt.com",limit=32) {
   this.origin=new URL(origin);
   if(limit<2||limit>128||!Number.isInteger(limit))throw new RangeError("limit");
@@ -21,7 +21,7 @@ export class SyntheticTraceShape {
  session(){
   if(this.#states.size>=4)throw new RangeError("session capacity");
   const handle=Object.freeze({});
-  const state={active:new Map(),events:[],gaps:0,enabled:false};
+  const state={key:randomBytes(32),active:new Map(),events:[],gaps:0,enabled:false};
   this.#owner.set(handle,state);this.#states.add(state);return handle;
  }
  #state(cap){const s=this.#owner.get(cap);if(!s)throw new TypeError("unknown capability");return s;}
@@ -41,7 +41,7 @@ export class SyntheticTraceShape {
    const u=name==="requestWillBeSent"?e?.request?.url:e?.url;
    if(!sameOrigin(u,this.origin)){s.active.delete(id);return "IGNORED";}
    if(s.active.size>=32&&!s.active.has(id)){this.#gap(s);return "GAP";}
-   s.active.set(id,createHmac("sha256",this.#key).update(id).digest("hex").slice(0,20));
+   s.active.set(id,createHmac("sha256",s.key).update(id).digest("hex").slice(0,20));
   }
   const alias=s.active.get(id);if(!alias)return "IGNORED";
   if(name==="responseReceived"&&!sameOrigin(e?.response?.url,this.origin)){
