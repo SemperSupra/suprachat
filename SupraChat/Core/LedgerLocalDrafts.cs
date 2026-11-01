@@ -162,8 +162,9 @@ public sealed class LedgerLocalDrafts : IDisposable
     public LedgerDraftBuffers ReadSelected()
     {
         ThrowIfDisposed();
-        var current = RequireSelected();
-        return _drafts.TryGetValue(current.Id, out var buffers)
+        if (_selectedId is null)
+            throw new InvalidOperationException("SESSION_SELECTION_REQUIRED");
+        return _drafts.TryGetValue(_selectedId, out var buffers)
             ? buffers : new(string.Empty, string.Empty);
     }
 

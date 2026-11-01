@@ -1200,17 +1200,39 @@ jobs:
                   try {
                     # Native WebView remounts can recreate the provider tree on
                     # tab selection. Reacquire the current, declared main HWND
-                    # on every attempt; never reuse a stale identity as fallback.
+                    # on every attempt; fall back to root process search if HWND is zero.
                     $p.Refresh()
                     $window = $null
                     if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
-                      $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
-                      if ($candidate.Current.ProcessId -eq $p.Id -and
+                      try {
+                        $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                        if ($candidate.Current.ProcessId -eq $p.Id -and
+                            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                          $window = $candidate
+                        }
+                      }
+                      catch [System.Windows.Automation.ElementNotAvailableException] {}
+                    }
+                    if (-not $window) {
+                      $procCondition = New-Object System.Windows.Automation.PropertyCondition(
+                        [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                        $p.Id)
+                      $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                        [System.Windows.Automation.TreeScope]::Children,
+                        $procCondition)
+                      if (-not $candidate) {
+                        $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                          [System.Windows.Automation.TreeScope]::Descendants,
+                          $procCondition)
+                      }
+                      if ($candidate -and $candidate.Current.ProcessId -eq $p.Id -and
                           $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
                         $window = $candidate
-                        $element = $candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-                          $idCondition)
                       }
+                    }
+                    if ($window) {
+                      $element = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                        $idCondition)
                     }
                   }
                   catch [System.Windows.Automation.ElementNotAvailableException] {
@@ -1235,6 +1257,16 @@ jobs:
                     'Sessions.Heading', 'Sessions.NewTitle', 'Sessions.Create', 'Sessions.List', 'Sessions.Status',
                     'Sessions.ExportJsonPreview', 'Sessions.ExportPreview')
                   $visibleIds = @()
+                  if (-not $window) {
+                    try {
+                      $procCondition = New-Object System.Windows.Automation.PropertyCondition(
+                        [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                        $p.Id)
+                      $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        $procCondition)
+                    } catch {}
+                  }
                   if ($window) {
                     $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
                       [System.Windows.Automation.Condition]::TrueCondition) |
@@ -1289,21 +1321,44 @@ jobs:
                     $diagnosticReadSucceeded = $false
                     try {
                       $p.Refresh()
+                      $candidate = $null
                       if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
-                        $candidate = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
-                        if ($candidate.Current.ProcessId -eq $p.Id -and
-                            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-                          $diagnosticWindow = $candidate
-                          $rootAvailable = $true
-                          $tabs = $diagnosticWindow.FindAll(
+                        try {
+                          $c = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                          if ($c.Current.ProcessId -eq $p.Id -and
+                              $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                            $candidate = $c
+                          }
+                        } catch {}
+                      }
+                      if (-not $candidate) {
+                        $procCondition = New-Object System.Windows.Automation.PropertyCondition(
+                          [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                          $p.Id)
+                        $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                          [System.Windows.Automation.TreeScope]::Children,
+                          $procCondition)
+                        if (-not $c) {
+                          $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
                             [System.Windows.Automation.TreeScope]::Descendants,
-                            [System.Windows.Automation.PropertyCondition]::new(
-                              [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-                              $area.tab))
-                          $tabCount = $tabs.Count
-                          if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
-                          $diagnosticReadSucceeded = $true
+                            $procCondition)
                         }
+                        if ($c -and $c.Current.ProcessId -eq $p.Id -and
+                            $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                          $candidate = $c
+                        }
+                      }
+                      if ($candidate) {
+                        $diagnosticWindow = $candidate
+                        $rootAvailable = $true
+                        $tabs = $diagnosticWindow.FindAll(
+                          [System.Windows.Automation.TreeScope]::Descendants,
+                          [System.Windows.Automation.PropertyCondition]::new(
+                            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+                            $area.tab))
+                        $tabCount = $tabs.Count
+                        if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
+                        $diagnosticReadSucceeded = $true
                       }
                     } catch {
                       # Do not let a transient provider error mask the bounded

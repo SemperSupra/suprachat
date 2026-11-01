@@ -47,6 +47,25 @@ try {
         }
       } catch {}
     }
+    if (!$window) {
+      try {
+        $procCond = [System.Windows.Automation.PropertyCondition]::new(
+          [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+          $desktop.Id)
+        $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+          [System.Windows.Automation.TreeScope]::Children,
+          $procCond)
+        if (!$candidate) {
+          $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $procCond)
+        }
+        if ($candidate -and $candidate.Current.ProcessId -eq $desktop.Id -and
+            $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+          $window = $candidate
+        }
+      } catch {}
+    }
     if (!$window) { Start-Sleep -Milliseconds 150 }
   } while (!$window -and [datetime]::UtcNow -lt $deadline)
   if (!$window) { throw 'GUI_UIA_ROOT_UNAVAILABLE' }
@@ -57,16 +76,42 @@ try {
     while ([datetime]::UtcNow -lt $deadline) {
       try {
         # Native WebView remounts on tab switches can recreate the window UIA
-        # provider tree; reacquire the current declared main HWND each poll.
+        # provider tree; reacquire the current declared main HWND each poll,
+        # falling back to root process search if HWND is zero.
         $desktop.Refresh()
+        $candidate = $null
         $hwnd = $desktop.MainWindowHandle
         if ($hwnd -and $hwnd -ne [intptr]::Zero) {
-          $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-          if ($candidate.Current.ProcessId -eq $desktop.Id -and
-              $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-            $control=$candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
-            if ($control) { return $control }
-          }
+          try {
+            $c = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+            if ($c.Current.ProcessId -eq $desktop.Id -and
+                $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+              $candidate = $c
+            }
+          } catch {}
+        }
+        if (!$candidate) {
+          try {
+            $procCond = [System.Windows.Automation.PropertyCondition]::new(
+              [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+              $desktop.Id)
+            $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+              [System.Windows.Automation.TreeScope]::Children,
+              $procCond)
+            if (!$c) {
+              $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $procCond)
+            }
+            if ($c -and $c.Current.ProcessId -eq $desktop.Id -and
+                $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+              $candidate = $c
+            }
+          } catch {}
+        }
+        if ($candidate) {
+          $control=$candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
+          if ($control) { return $control }
         }
       } catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
