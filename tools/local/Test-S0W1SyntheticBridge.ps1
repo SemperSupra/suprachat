@@ -96,71 +96,86 @@ try {
   } while (!$window -and [datetime]::UtcNow -lt $deadline)
   if (!$window) { throw 'GUI_UIA_ROOT_UNAVAILABLE' }
   function Get-Control([string]$id) {
-    $predicate=[System.Windows.Automation.PropertyCondition]::new(
-      [System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
-    $deadline=[datetime]::UtcNow.AddSeconds(18)
-    while ([datetime]::UtcNow -lt $deadline) {
+    $predicate = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
+    $procCondition = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $desktop.Id)
+    $mainWinCond = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'SupraChat.MainWindow')
+    $deadline = [datetime]::UtcNow.AddSeconds(18)
+    $element = $null
+    while ([datetime]::UtcNow -lt $deadline -and !$element) {
       try {
-        if ($window) {
-          $control=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
-          if ($control) { return $control }
+        if (!$script:window) {
+          $desktop.Refresh()
+          $candidate = $null
+          $hwnd = $desktop.MainWindowHandle
+          if ($hwnd -and $hwnd -ne [intptr]::Zero) {
+            try {
+              $c = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+              if ($c.Current.ProcessId -eq $desktop.Id -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                $candidate = $c
+              }
+            } catch {}
+          }
+          if (!$candidate) {
+            try {
+              $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                [System.Windows.Automation.TreeScope]::Children,
+                $procCondition)
+              if (!$c) {
+                $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                  [System.Windows.Automation.TreeScope]::Descendants,
+                  $procCondition)
+              }
+              if ($c -and $c.Current.ProcessId -eq $desktop.Id -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                $candidate = $c
+              }
+            } catch {}
+          }
+          if (!$candidate) {
+            try {
+              $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                [System.Windows.Automation.TreeScope]::Children,
+                $mainWinCond)
+              if (!$c) {
+                $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                  [System.Windows.Automation.TreeScope]::Descendants,
+                  $mainWinCond)
+              }
+              if ($c -and $c.Current.ProcessId -eq $desktop.Id -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                $candidate = $c
+              }
+            } catch {}
+          }
+          if ($candidate) {
+            $script:window = $candidate
+          }
+        }
+        if ($script:window) {
+          $element = $script:window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $predicate)
         }
       } catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
-      } catch [System.Windows.Automation.ElementNotAvailableException] {}
-
-      try {
-        $desktop.Refresh()
-        $candidate = $null
-        $hwnd = $desktop.MainWindowHandle
-        if ($hwnd -and $hwnd -ne [intptr]::Zero) {
-          try {
-            $c = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-            if ($c.Current.ProcessId -eq $desktop.Id) {
-              $candidate = $c
-            }
-          } catch {}
-        }
-        if (!$candidate) {
-          try {
-            $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-              [System.Windows.Automation.TreeScope]::Children,
-              $procCond)
-            if ($c -and $c.Current.ProcessId -eq $desktop.Id) {
-              $candidate = $c
-            }
-          } catch {}
-        }
-        if (!$candidate) {
-          try {
-            $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-              [System.Windows.Automation.TreeScope]::Children,
-              $mainWinCond)
-            if ($c -and $c.Current.ProcessId -eq $desktop.Id) {
-              $candidate = $c
-            }
-          } catch {}
-        }
-        if ($candidate) {
-          $window = $candidate
-          $control=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
-          if ($control) { return $control }
-        }
-      } catch [System.Runtime.InteropServices.COMException] {
-        if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
-      } catch [System.Windows.Automation.ElementNotAvailableException] {}
-      Start-Sleep -Milliseconds 150
+        $script:window = $null
+        $element = $null
+      } catch [System.Windows.Automation.ElementNotAvailableException] {
+        $script:window = $null
+        $element = $null
+      }
+      if ($element) { return $element }
+      Start-Sleep -Milliseconds 100
     }
     $visible = @()
-    if ($window) {
+    if ($script:window) {
       try {
-        $visible = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        $visible = @($script:window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
           [System.Windows.Automation.Condition]::TrueCondition) |
           ForEach-Object { $_.Current.AutomationId } |
           Where-Object { ![string]::IsNullOrWhiteSpace($_) })
       } catch {}
     }
-    throw "UIA_MISSING:$id; window_found=$($window -ne $null); visible_ids=$($visible -join ',')"
+    throw "UIA_MISSING:$id; window_found=$($script:window -ne $null); visible_ids=$($visible -join ',')"
   }
   $null = Get-Control 'RootTabs'
   $tab = Get-Control 'Tab.Sessions'
