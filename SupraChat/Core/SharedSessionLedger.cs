@@ -112,8 +112,10 @@ public sealed partial class SharedSessionLedger
                     new(Schema, false, false, "SESSION_CAPACITY_REACHED", null, _sequence));
 
             var id = Guid.NewGuid().ToString("N");
+            var worktree = WorkspaceMetadataDetector.DetectBranch(workspace);
             var session = new SessionLedgerState(id, title.Trim(), normalizedUrl,
-                workspace, 0, "NO_REMOTE_BINDING", false, false);
+                workspace, 0, "NO_REMOTE_BINDING", false, false,
+                "idle", false, worktree, false);
             _sessions.Add(id, session);
             AppendEvent(id, audience, "open", 0);
             return Cache(idempotencyKey, fingerprint,
@@ -135,7 +137,7 @@ public sealed partial class SharedSessionLedger
         if (!Guid.TryParseExact(sessionId, "N", out _))
             throw new ArgumentException("INVALID_SESSION_ID", nameof(sessionId));
         if (expectedVersion < 0) throw new ArgumentOutOfRangeException(nameof(expectedVersion));
-        if (operation is not ("set-title" or "set-conversation" or "set-workspace"))
+        if (operation is not ("set-title" or "set-conversation" or "set-workspace" or "set-status" or "set-unread" or "archive" or "restore"))
             throw new ArgumentException("UNSUPPORTED_LEDGER_OPERATION", nameof(operation));
 
         var normalized = operation switch
@@ -143,6 +145,10 @@ public sealed partial class SharedSessionLedger
             "set-title" => NormalizedTitle(value),
             "set-conversation" => NormalizeConversation(value),
             "set-workspace" => NormalizeWorkspace(value),
+            "set-status" => NormalizeStatus(value),
+            "set-unread" => NormalizeBoolean(value),
+            "archive" => "true",
+            "restore" => "false",
             _ => null
         };
         var fingerprint = Fingerprint(operation, audience, sessionId, expectedVersion, normalized);
@@ -165,7 +171,15 @@ public sealed partial class SharedSessionLedger
             {
                 "set-title" => session with {Title = normalized!, Version = session.Version + 1},
                 "set-conversation" => session with {ConversationUrl = normalized, Version = session.Version + 1},
-                "set-workspace" => session with {WorkspaceKey = normalized, Version = session.Version + 1},
+                "set-workspace" => session with {
+                    WorkspaceKey = normalized,
+                    WorktreeBranch = WorkspaceMetadataDetector.DetectBranch(normalized),
+                    Version = session.Version + 1
+                },
+                "set-status" => session with {SessionState = normalized!, Version = session.Version + 1},
+                "set-unread" => session with {HasUnread = string.Equals(normalized, "true", StringComparison.OrdinalIgnoreCase), Version = session.Version + 1},
+                "archive" => session with {IsArchived = true, Version = session.Version + 1},
+                "restore" => session with {IsArchived = false, Version = session.Version + 1},
                 _ => throw new InvalidOperationException("UNREACHABLE_OPERATION")
             };
             _sessions[sessionId] = next;
@@ -321,6 +335,14 @@ public sealed partial class SharedSessionLedger
             throw new ArgumentException("INVALID_WORKSPACE_REFERENCE");
         return normalized;
     }
+    private static string NormalizeStatus(string? status) =>
+        status is "idle" or "running" or "waiting" or "error" ? status : throw new ArgumentException("INVALID_SESSION_STATUS");
+    private static string NormalizeBoolean(string? val) =>
+        string.Equals(val, "true", StringComparison.OrdinalIgnoreCase)
+            ? "true"
+            : string.Equals(val, "false", StringComparison.OrdinalIgnoreCase)
+                ? "false"
+                : throw new ArgumentException("INVALID_BOOLEAN_VALUE");
 
     private sealed record PriorAction(string Fingerprint, SessionLedgerResult Outcome);
 }
@@ -337,7 +359,8 @@ public sealed record SessionLedgerCheckpointOperation(
 public sealed record SessionLedgerState(
     string Id, string Title, string? ConversationUrl, string? WorkspaceKey,
     long Version, string RemoteBindingState, bool ChatSubmissionAllowed,
-    bool TerminalExecutionAllowed);
+    bool TerminalExecutionAllowed, string SessionState = "idle",
+    bool HasUnread = false, string? WorktreeBranch = null, bool IsArchived = false);
 
 public sealed record SessionLedgerEvent(
     long Sequence, string SessionId, string Audience, string Operation, long SessionVersion);

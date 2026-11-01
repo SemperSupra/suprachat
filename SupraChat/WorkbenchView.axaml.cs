@@ -65,6 +65,7 @@ public partial class WorkbenchView : UserControl
             W0Sessions.ItemsSource = null;
             W0Output.Text = string.Empty;
             W0Status.Text = "Session view refused: " + receipt.Status;
+            W0CollisionBorder.IsVisible = false;
             return;
         }
         _selectedId = receipt.Snapshot.ActiveSessionId;
@@ -89,6 +90,21 @@ public partial class WorkbenchView : UserControl
                 .FirstOrDefault(s => s.Id == _selectedId);
         }
         finally { _refreshing = false; }
+
+        if (receipt.Snapshot.Collisions.Count > 0)
+        {
+            var collisionLines = receipt.Snapshot.Collisions.Select(c =>
+                $"{c.Type}: {c.LeftSessionId} ↔ {c.RightSessionId}" +
+                (string.IsNullOrWhiteSpace(c.Detail) ? "" : $" ({c.Detail})"));
+            W0CollisionText.Text = "Collision alerts detected:\n" + string.Join("\n", collisionLines);
+            W0CollisionBorder.IsVisible = true;
+        }
+        else
+        {
+            W0CollisionText.Text = string.Empty;
+            W0CollisionBorder.IsVisible = false;
+        }
+
         W0Status.Text = (notice ?? receipt.Status) +
             $"; sessions={receipt.Snapshot.Sessions.Count}/{receipt.Snapshot.MaxSessions}" +
             $"; collision warnings={receipt.Snapshot.Collisions.Count}." +
@@ -161,6 +177,65 @@ public partial class WorkbenchView : UserControl
         }
         catch (ArgumentException) { W0Status.Text = "INVALID_SESSION_TITLE: no change."; }
         catch (Exception) { W0Status.Text = "OUTCOME_UNKNOWN: rename may have committed; reconnect and refresh before retrying."; }
+    }
+
+    private async void W0Close_Click(object? sender, RoutedEventArgs e)
+    {
+        var selected = _selectedId;
+        if (selected is null)
+        {
+            W0Status.Text = "SESSION_SELECTION_REQUIRED";
+            return;
+        }
+        try
+        {
+            var existing = await _authority.InspectAsync(selected);
+            if (existing is null || _selectedId != selected)
+            {
+                W0Status.Text = "SESSION_SELECTION_STALE";
+                return;
+            }
+            _drafts.Forget(selected);
+            W2ClearReview();
+            var outcome = await _authority.CloseAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
+                existing.Id, existing.Version);
+            _selectedId = null;
+            W0Output.Text = string.Empty;
+            await RefreshAsync(outcome.Applied ? "Session archived; draft buffers cleared." : "Close refused: " + outcome.Status);
+        }
+        catch (Exception) { W0Status.Text = "OUTCOME_UNKNOWN: close may have committed; reconnect and refresh before retrying."; }
+    }
+
+    private async void W0Restore_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var receipt = await _authority.ReadAsync(_selectedId);
+            if (receipt.Snapshot?.ArchivedSessions is null || receipt.Snapshot.ArchivedSessions.Count == 0)
+            {
+                W0Status.Text = "NO_ARCHIVED_SESSIONS";
+                return;
+            }
+            var toRestore = receipt.Snapshot.ArchivedSessions.Last();
+            var existing = await _authority.InspectAsync(toRestore.Id);
+            if (existing is null)
+            {
+                W0Status.Text = "SESSION_SELECTION_STALE";
+                return;
+            }
+            var outcome = await _authority.RestoreAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
+                existing.Id, existing.Version);
+            if (outcome.Applied && outcome.Session is not null)
+            {
+                _selectedId = outcome.Session.Id;
+                await RefreshAsync("Session restored to active list");
+            }
+            else
+            {
+                await RefreshAsync("Restore refused: " + outcome.Status);
+            }
+        }
+        catch (Exception) { W0Status.Text = "OUTCOME_UNKNOWN: restore may have committed; reconnect and refresh before retrying."; }
     }
 
     private async Task PreviewAsync(string format)
@@ -265,6 +340,16 @@ public partial class WorkbenchView : UserControl
             W2ReviewOutput.Text = review.PreviewText;
             W2Status.Text = "Review valid for two minutes, one use, selected session/version only. " +
                 "Nothing has been staged, submitted or executed.";
+            if (_selectedId is not null)
+            {
+                var s = await _authority.InspectAsync(_selectedId);
+                if (s is not null && s.SessionState == "idle")
+                {
+                    await _authority.SetStatusAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
+                        s.Id, s.Version, "waiting");
+                    await RefreshAsync();
+                }
+            }
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
@@ -293,6 +378,7 @@ public partial class WorkbenchView : UserControl
             W2DraftInput.Text = string.Empty;
             W2ReviewOutput.Text = string.Empty;
             RefreshDraftFields();
+            await ResetWaitingStatusAsync();
             W2Status.Text = receipt.Staged
                 ? "Staged only to this session's local inert text buffer. Nothing transmitted or executed."
                 : "Stage refused.";
@@ -323,6 +409,23 @@ public partial class WorkbenchView : UserControl
         W2ClearReview();
         W2DraftInput.Text = string.Empty;
         RefreshDraftFields();
+        await ResetWaitingStatusAsync();
         W2Status.Text = "Local session draft buffers discarded; no provider or terminal effects.";
+    }
+
+    private async Task ResetWaitingStatusAsync()
+    {
+        if (_selectedId is null) return;
+        try
+        {
+            var s = await _authority.InspectAsync(_selectedId);
+            if (s is not null && s.SessionState == "waiting")
+            {
+                await _authority.SetStatusAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
+                    s.Id, s.Version, "idle");
+                await RefreshAsync();
+            }
+        }
+        catch { }
     }
 }

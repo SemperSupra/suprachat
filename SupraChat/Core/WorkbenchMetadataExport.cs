@@ -42,13 +42,32 @@ public static class WorkbenchMetadataExport
                 workspace_key = s.WorkspaceKey,
                 terminal_state = s.TerminalState,
                 terminal_execution_permitted = false,
-                chat_submission_permitted = false
+                chat_submission_permitted = false,
+                session_state = s.SessionState,
+                has_unread = s.HasUnread,
+                worktree_branch = s.WorktreeBranch,
+                is_archived = s.IsArchived
+            }).ToArray(),
+            archived_sessions = (snapshot.ArchivedSessions ?? Array.Empty<WorkbenchSession>()).Select(s => new
+            {
+                id = s.Id,
+                title = s.Title,
+                conversation_url = s.ConversationUrl,
+                workspace_key = s.WorkspaceKey,
+                terminal_state = s.TerminalState,
+                terminal_execution_permitted = false,
+                chat_submission_permitted = false,
+                session_state = s.SessionState,
+                has_unread = s.HasUnread,
+                worktree_branch = s.WorktreeBranch,
+                is_archived = s.IsArchived
             }).ToArray(),
             collisions = snapshot.Collisions.Select(c => new
             {
                 type = c.Type,
                 left_session_id = c.LeftSessionId,
-                right_session_id = c.RightSessionId
+                right_session_id = c.RightSessionId,
+                detail = c.Detail
             }).ToArray(),
             exported_transcripts = false,
             exported_terminal_output = false,
@@ -65,12 +84,14 @@ public static class WorkbenchMetadataExport
         sb.AppendLine();
         sb.AppendLine("Scope: SESSION_METADATA_ONLY. Not a transcript, terminal log, or executable transfer.");
         sb.AppendLine();
-        sb.AppendLine("| Session | ID | Conversation reference | Workspace reference | Terminal |");
-        sb.AppendLine("| --- | --- | --- | --- | --- |");
+        sb.AppendLine("| Session | ID | Status | Worktree / branch | Conversation reference | Workspace reference | Terminal |");
+        sb.AppendLine("| --- | --- | --- | --- | --- | --- | --- |");
         foreach (var session in snapshot.Sessions)
         {
             sb.Append("| ").Append(Cell(session.Title))
               .Append(" | ").Append(Cell(session.Id))
+              .Append(" | ").Append(Cell(session.DisplayBadge))
+              .Append(" | ").Append(Cell(session.WorktreeBranch ?? "None"))
               .Append(" | ").Append(Cell(session.ConversationUrl ?? "Not connected"))
               .Append(" | ").Append(Cell(session.WorkspaceKey ?? "Not set"))
               .Append(" | ").Append(Cell(session.TerminalState)).AppendLine(" |");
@@ -87,7 +108,10 @@ public static class WorkbenchMetadataExport
             {
                 sb.Append("- ").Append(Cell(collision.Type)).Append(": ")
                   .Append(Cell(collision.LeftSessionId)).Append(" ↔ ")
-                  .Append(Cell(collision.RightSessionId)).AppendLine();
+                  .Append(Cell(collision.RightSessionId));
+                if (!string.IsNullOrWhiteSpace(collision.Detail))
+                    sb.Append(" (").Append(Cell(collision.Detail)).Append(')');
+                sb.AppendLine();
             }
         }
         sb.AppendLine();
