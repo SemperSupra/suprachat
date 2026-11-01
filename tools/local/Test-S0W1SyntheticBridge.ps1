@@ -111,22 +111,8 @@ try {
     $procCondition = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $desktop.Id)
     $andCondition = New-Object System.Windows.Automation.AndCondition($procCondition, $predicate)
-    $nameCondition = if ($id -eq 'Tab.Sessions') {
-      New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty, 'Sessions')
-    } else { $null }
     $deadline = [datetime]::UtcNow.AddSeconds(18)
     while ([datetime]::UtcNow -lt $deadline) {
-      try {
-        if ($window) {
-          $control = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $predicate)
-          if ($control) { return $control }
-          if ($nameCondition) {
-            $control = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCondition)
-            if ($control) { return $control }
-          }
-        }
-      } catch {}
       try {
         $control = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
           [System.Windows.Automation.TreeScope]::Descendants,
@@ -139,16 +125,15 @@ try {
           $predicate)
         if ($control) { return $control }
       } catch {}
+      try {
+        if ($window) {
+          $control = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $predicate)
+          if ($control) { return $control }
+        }
+      } catch {}
       Start-Sleep -Milliseconds 150
     }
-    $diag = @()
-    try {
-      $all = if ($window) { $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) } else { @() }
-      foreach ($e in $all) {
-        $diag += ("id='{0}';name='{1}';type='{2}'" -f $e.Current.AutomationId, $e.Current.Name, $e.Current.ControlType.ProgrammaticName)
-      }
-    } catch {}
-    throw "UIA_MISSING:$id; count=$($diag.Count); elements=$($diag -join ' | ')"
+    throw "UIA_MISSING:$id"
   }
   $rootTabs = Get-Control 'RootTabs'
   $tab = $null
@@ -174,8 +159,6 @@ try {
   $tabSelected = $false
   $tabDeadline = [datetime]::UtcNow.AddSeconds(12)
   while ([datetime]::UtcNow -lt $tabDeadline) {
-    $tab = Get-Control 'Tab.Sessions'
-    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
     if ($selection.Current.IsSelected) { $tabSelected = $true; break }
     Start-Sleep -Milliseconds 100
   }
