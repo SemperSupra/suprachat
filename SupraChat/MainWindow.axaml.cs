@@ -45,6 +45,12 @@ public partial class MainWindow : Window
             _nativeMetadataOwnerLifetime = NativeReviewOwnerLifetime.Attach(this, () => _nativeMetadataWindow as NativeMetadataReviewWindow);
         ShowTrace("status");
         LoadCapabilityCatalog();
+        var initialTab = Environment.GetEnvironmentVariable("SUPRACHAT_INITIAL_TAB");
+        if (string.Equals(initialTab, "Sessions", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(initialTab, "3", StringComparison.OrdinalIgnoreCase))
+        {
+            RootTabs.SelectedIndex = 3;
+        }
         Opened += async (_, _) =>
         {
             var operation = DogfoodObservability.BeginOperation("ui-open");

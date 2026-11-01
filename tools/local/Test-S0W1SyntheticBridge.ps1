@@ -24,6 +24,7 @@ $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $list
 $env:SUPRACHAT_W6_DISPOSABLE_ONLY = 'yes'
 $env:SUPRACHAT_LEDGER_TOKEN = [guid]::NewGuid().ToString('N')+[guid]::NewGuid().ToString('N')
 $env:SUPRACHAT_W6_GUI_PORT = [string]$port
+$env:SUPRACHAT_INITIAL_TAB = 'Sessions'
 $owner = $null; $desktop = $null; $passed = $false; $phase = 'START'
 try {
   $pi = [Diagnostics.ProcessStartInfo]::new()
@@ -162,8 +163,10 @@ try {
     } catch {}
   }
   if (!$tab) { throw 'UIA_MISSING:Tab.Sessions' }
-  $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-  $selection.Select()
+  try {
+    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $selection.Select()
+  } catch {}
   $entry = Get-Control 'Sessions.NewTitle' 20
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic W1')
   (Get-Control 'Sessions.Create').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
