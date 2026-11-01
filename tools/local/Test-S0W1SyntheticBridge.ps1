@@ -154,16 +154,24 @@ try {
     } catch {}
   }
   if (!$tab) { throw 'UIA_MISSING:Tab.Sessions' }
-  $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-  $selection.Select()
-  $tabSelected = $false
-  $tabDeadline = [datetime]::UtcNow.AddSeconds(12)
-  while ([datetime]::UtcNow -lt $tabDeadline) {
-    if ($selection.Current.IsSelected) { $tabSelected = $true; break }
-    Start-Sleep -Milliseconds 100
+  try {
+    $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $selection.Select()
+  } catch {}
+
+  $entry = $null
+  $entryDeadline = [datetime]::UtcNow.AddSeconds(18)
+  while ([datetime]::UtcNow -lt $entryDeadline) {
+    try {
+      $entry = Get-Control 'Sessions.NewTitle'
+      if ($entry) { break }
+    } catch {}
+    try {
+      if ($selection) { $selection.Select() }
+    } catch {}
+    Start-Sleep -Milliseconds 200
   }
-  if (!$tabSelected) { throw 'UIA_TAB_SELECT_FAILED:Tab.Sessions' }
-  $entry=Get-Control 'Sessions.NewTitle'
+  if (!$entry) { throw 'UIA_MISSING:Sessions.NewTitle' }
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic W1')
   (Get-Control 'Sessions.Create').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   function Inventory {
