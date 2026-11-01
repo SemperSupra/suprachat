@@ -53,7 +53,7 @@ try {
   $desktopInfo.UseShellExecute = $false
   $desktop = [Diagnostics.Process]::Start($desktopInfo)
   if (!$desktop) { throw 'GUI_START_FAILED' }
-  $window = $null; $deadline=[datetime]::UtcNow.AddSeconds(20)
+  $script:window = $null; $deadline=[datetime]::UtcNow.AddSeconds(20)
   $mainWinCond = [System.Windows.Automation.PropertyCondition]::new(
     [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
     'SupraChat.MainWindow')
@@ -68,87 +68,52 @@ try {
       try {
         $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
         if ($candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-          $window = $candidate
+          $script:window = $candidate
         }
       } catch {}
     }
-    if (!$window) {
+    if (!$script:window) {
       try {
         $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
           [System.Windows.Automation.TreeScope]::Children,
           $procCond)
         if ($candidate -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-          $window = $candidate
+          $script:window = $candidate
         }
       } catch {}
     }
-    if (!$window) {
+    if (!$script:window) {
       try {
         $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
           [System.Windows.Automation.TreeScope]::Children,
           $mainWinCond)
         if ($candidate -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
-          $window = $candidate
+          $script:window = $candidate
         }
       } catch {}
     }
-    if (!$window) { Start-Sleep -Milliseconds 150 }
-  } while (!$window -and [datetime]::UtcNow -lt $deadline)
-  if (!$window) { throw 'GUI_UIA_ROOT_UNAVAILABLE' }
+    if (!$script:window) { Start-Sleep -Milliseconds 150 }
+  } while (!$script:window -and [datetime]::UtcNow -lt $deadline)
+  if (!$script:window) { throw 'GUI_UIA_ROOT_UNAVAILABLE' }
   function Get-Control([string]$id) {
     $predicate = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $id)
     $procCondition = New-Object System.Windows.Automation.PropertyCondition(
       [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $desktop.Id)
-    $mainWinCond = New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'SupraChat.MainWindow')
     $deadline = [datetime]::UtcNow.AddSeconds(18)
     $element = $null
     while ([datetime]::UtcNow -lt $deadline -and !$element) {
       try {
         if (!$script:window) {
-          $desktop.Refresh()
-          $candidate = $null
-          $hwnd = $desktop.MainWindowHandle
-          if ($hwnd -and $hwnd -ne [intptr]::Zero) {
-            try {
-              $c = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-              if ($c.Current.ProcessId -eq $desktop.Id -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
-                $candidate = $c
-              }
-            } catch {}
-          }
+          $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Children,
+            $procCondition)
           if (!$candidate) {
-            try {
-              $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-                [System.Windows.Automation.TreeScope]::Children,
-                $procCondition)
-              if (!$c) {
-                $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $procCondition)
-              }
-              if ($c -and $c.Current.ProcessId -eq $desktop.Id -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
-                $candidate = $c
-              }
-            } catch {}
+            $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+              [System.Windows.Automation.TreeScope]::Descendants,
+              $procCondition)
           }
-          if (!$candidate) {
-            try {
-              $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-                [System.Windows.Automation.TreeScope]::Children,
-                $mainWinCond)
-              if (!$c) {
-                $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-                  [System.Windows.Automation.TreeScope]::Descendants,
-                  $mainWinCond)
-              }
-              if ($c -and $c.Current.ProcessId -eq $desktop.Id -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
-                $candidate = $c
-              }
-            } catch {}
-          }
-          if ($candidate) {
+          if ($candidate -and $candidate.Current.ProcessId -eq $desktop.Id -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
             $script:window = $candidate
           }
         }
@@ -157,10 +122,8 @@ try {
         }
       } catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
-        $script:window = $null
         $element = $null
       } catch [System.Windows.Automation.ElementNotAvailableException] {
-        $script:window = $null
         $element = $null
       }
       if ($element) { return $element }
