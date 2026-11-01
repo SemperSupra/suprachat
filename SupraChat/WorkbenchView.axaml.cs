@@ -340,16 +340,6 @@ public partial class WorkbenchView : UserControl
             W2ReviewOutput.Text = review.PreviewText;
             W2Status.Text = "Review valid for two minutes, one use, selected session/version only. " +
                 "Nothing has been staged, submitted or executed.";
-            if (_selectedId is not null)
-            {
-                var s = await _authority.InspectAsync(_selectedId);
-                if (s is not null && s.SessionState == "idle")
-                {
-                    await _authority.SetStatusAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
-                        s.Id, s.Version, "waiting");
-                    await RefreshAsync();
-                }
-            }
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
@@ -378,7 +368,6 @@ public partial class WorkbenchView : UserControl
             W2DraftInput.Text = string.Empty;
             W2ReviewOutput.Text = string.Empty;
             RefreshDraftFields();
-            await ResetWaitingStatusAsync();
             W2Status.Text = receipt.Staged
                 ? "Staged only to this session's local inert text buffer. Nothing transmitted or executed."
                 : "Stage refused.";
@@ -409,23 +398,6 @@ public partial class WorkbenchView : UserControl
         W2ClearReview();
         W2DraftInput.Text = string.Empty;
         RefreshDraftFields();
-        await ResetWaitingStatusAsync();
         W2Status.Text = "Local session draft buffers discarded; no provider or terminal effects.";
-    }
-
-    private async Task ResetWaitingStatusAsync()
-    {
-        if (_selectedId is null) return;
-        try
-        {
-            var s = await _authority.InspectAsync(_selectedId);
-            if (s is not null && s.SessionState == "waiting")
-            {
-                await _authority.SetStatusAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
-                    s.Id, s.Version, "idle");
-                await RefreshAsync();
-            }
-        }
-        catch { }
     }
 }
