@@ -13,6 +13,11 @@ internal static class Program
 {
     internal static string Receipt = "";
     internal static int ExitCode = 1;
+    internal static void WritePhase(string phase)
+    {
+        try { File.WriteAllText(Path.ChangeExtension(Receipt, ".phase.txt"), phase); }
+        catch { /* Probe phase logging must never access credentials or mask the original failure. */ }
+    }
     internal static object Data = new { schema = "suprachat-avalonia-extension-e2/v1",
         classification = "NOT_STARTED", evidence = "SYNTHETIC_ONLY",
         production_admitted = false, raw_payload_exported = false };
@@ -66,6 +71,7 @@ internal sealed class ProbeApp : Application
     private static async Task ProbeAsync(Window window)
     {
         var root = Path.Combine(Path.GetTempPath(), "suprachat-avalonia-e2", Guid.NewGuid().ToString("N"));
+        Program.WritePhase("window-opened");
         IntPtr environmentPointer = IntPtr.Zero;
         CoreWebView2Environment? managedEnvironment = null;
         string phase = "create-environment";
@@ -75,6 +81,7 @@ internal sealed class ProbeApp : Application
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+            Program.WritePhase("before-create-environment");
             var options = new CoreWebView2EnvironmentOptions {
                 AreBrowserExtensionsEnabled = true,
                 AdditionalBrowserArguments = "--disable-background-networking"
@@ -83,11 +90,11 @@ internal sealed class ProbeApp : Application
                 Path.Combine(root, "profile"), options).WaitAsync(timeout.Token);
             browserVersion = managedEnvironment.BrowserVersionString;
             extensionsEnabled = true;
-            phase = "acquire-native-environment";
+            phase = "acquire-native-environment"; Program.WritePhase(phase);
             environmentPointer = ComEnvironmentProbe.TryAcquire(managedEnvironment, out bridge);
             if (environmentPointer == IntPtr.Zero)
                 throw new InvalidOperationException("Native environment interface unavailable.");
-            phase = "avalonia-environment-request";
+            phase = "avalonia-environment-request"; Program.WritePhase(phase);
             var view = new NativeWebView();
             view.EnvironmentRequested += (_, request) =>
             {
@@ -100,13 +107,16 @@ internal sealed class ProbeApp : Application
             };
             var created = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             view.AdapterCreated += (_, _) => created.TrySetResult();
+            Program.WritePhase("before-attach-native-view");
             window.Content = view;
+            Program.WritePhase("await-adapter-created");
             await created.Task.WaitAsync(timeout.Token);
             adapterReady = true;
+            Program.WritePhase("adapter-created");
             if (view.TryGetPlatformHandle() is not IWindowsWebView2PlatformHandle handle ||
                 handle.CoreWebView2 == IntPtr.Zero)
                 throw new InvalidOperationException("No native WebView2 handle.");
-            phase = "profile-extension-install";
+            phase = "profile-extension-install"; Program.WritePhase(phase);
             var extensionDir = Path.Combine(root, "extension");
             Directory.CreateDirectory(extensionDir);
             await File.WriteAllTextAsync(Path.Combine(extensionDir, "manifest.json"),
@@ -117,7 +127,7 @@ internal sealed class ProbeApp : Application
             var inventory = await core.Profile.GetBrowserExtensionsAsync().WaitAsync(timeout.Token);
             installed = inventory.Any(x => x.Id == extension.Id);
             if (!installed) throw new InvalidOperationException("Extension inventory mismatch.");
-            phase = "synthetic-e2-complete";
+            phase = "synthetic-e2-complete"; Program.WritePhase(phase);
             Program.ExitCode = 0;
         }
         catch (Exception ex)
@@ -138,8 +148,10 @@ internal sealed class ProbeApp : Application
                 evidence = "SYNTHETIC_ONLY", product_webview_changed = false,
                 production_admitted = false, raw_payload_exported = false
             });
+            Program.WritePhase("before-window-close");
             window.Content = null;
             window.Close();
+            Program.WritePhase("after-window-close");
             if (environmentPointer != IntPtr.Zero) Marshal.Release(environmentPointer);
             GC.KeepAlive(managedEnvironment);
             try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); } catch { }
