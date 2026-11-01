@@ -2,8 +2,23 @@ param([Parameter(Mandatory=$true)][string]$ReceiptPath)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,WindowsBase
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$dotnet = if ($env:DOTNET_ROOT -and (Test-Path (Join-Path $env:DOTNET_ROOT 'dotnet.exe'))) {
+  Join-Path $env:DOTNET_ROOT 'dotnet.exe'
+} elseif (Test-Path (Join-Path $root '_tools/dotnet/dotnet.exe')) {
+  Join-Path $root '_tools/dotnet/dotnet.exe'
+} elseif (Test-Path (Join-Path (Split-Path (Split-Path $root -Parent) -Parent) '_tools/dotnet/dotnet.exe')) {
+  Join-Path (Split-Path (Split-Path $root -Parent) -Parent) '_tools/dotnet/dotnet.exe'
+} else {
+  (Get-Command dotnet).Source
+}
+$dotnetDir = Split-Path $dotnet -Parent
+if ($dotnetDir -and (Test-Path $dotnetDir)) {
+  $env:DOTNET_ROOT = $dotnetDir
+  $env:PATH = "$dotnetDir;$env:PATH"
+}
 $cli = Join-Path $root 'SupraChat.Automation/bin/Release/net10.0/SupraChat.Automation.dll'
 $gui = Join-Path $root 'SupraChat/bin/Release/net10.0/SupraChat.dll'
+$guiExe = Join-Path $root 'SupraChat/bin/Release/net10.0/SupraChat.exe'
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port; $listener.Stop()
 $env:SUPRACHAT_W6_DISPOSABLE_ONLY = 'yes'
@@ -12,7 +27,7 @@ $env:SUPRACHAT_W6_GUI_PORT = [string]$port
 $owner = $null; $desktop = $null; $passed = $false; $phase = 'START'
 try {
   $pi = [Diagnostics.ProcessStartInfo]::new()
-  $pi.FileName = (Get-Command dotnet).Source; $pi.UseShellExecute = $false
+  $pi.FileName = $dotnet; $pi.UseShellExecute = $false
   # ProcessStartInfo.ArgumentList is unavailable in Windows PowerShell 5.1.
   $pi.Arguments = ('"{0}" session-ledger-host --port {1}' -f $cli,$port)
   $owner = [Diagnostics.Process]::Start($pi)
@@ -28,15 +43,23 @@ try {
   if (!$h -or $h.schema -ne 'suprachat-w6-loopback-session-host/v1') { throw 'HOST_NOT_READY' }
   $phase = 'UIA'
   $desktopInfo = [Diagnostics.ProcessStartInfo]::new()
-  $desktopInfo.FileName = (Get-Command dotnet).Source
+  if (Test-Path $guiExe) {
+    $desktopInfo.FileName = $guiExe
+    $desktopInfo.Arguments = ''
+  } else {
+    $desktopInfo.FileName = $dotnet
+    $desktopInfo.Arguments = ('"{0}"' -f $gui)
+  }
   $desktopInfo.UseShellExecute = $false
-  $desktopInfo.Arguments = ('"{0}"' -f $gui)
   $desktop = [Diagnostics.Process]::Start($desktopInfo)
   if (!$desktop) { throw 'GUI_START_FAILED' }
   $window = $null; $deadline=[datetime]::UtcNow.AddSeconds(20)
   $mainWinCond = [System.Windows.Automation.PropertyCondition]::new(
     [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
     'SupraChat.MainWindow')
+  $procCond = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+    $desktop.Id)
   do {
     $desktop.Refresh()
     if ($desktop.HasExited) { throw 'GUI_EXITED' }
@@ -45,6 +68,21 @@ try {
       try {
         $candidate=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
         if ($candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
+          $window = $candidate
+        }
+      } catch {}
+    }
+    if (!$window) {
+      try {
+        $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+          [System.Windows.Automation.TreeScope]::Children,
+          $procCond)
+        if (!$candidate) {
+          $candidate = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $procCond)
+        }
+        if ($candidate -and $candidate.Current.AutomationId -eq 'SupraChat.MainWindow') {
           $window = $candidate
         }
       } catch {}
@@ -72,7 +110,10 @@ try {
       [System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
     $mainWinCond=[System.Windows.Automation.PropertyCondition]::new(
       [System.Windows.Automation.AutomationElement]::AutomationIdProperty,'SupraChat.MainWindow')
+    $procCond=[System.Windows.Automation.PropertyCondition]::new(
+      [System.Windows.Automation.AutomationElement]::ProcessIdProperty,$desktop.Id)
     $deadline=[datetime]::UtcNow.AddSeconds(18)
+    $candidate = $null
     while ([datetime]::UtcNow -lt $deadline) {
       try {
         # Native WebView remounts on tab switches can recreate the window UIA
@@ -85,6 +126,21 @@ try {
           try {
             $c = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
             if ($c.Current.AutomationId -eq 'SupraChat.MainWindow') {
+              $candidate = $c
+            }
+          } catch {}
+        }
+        if (!$candidate) {
+          try {
+            $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+              [System.Windows.Automation.TreeScope]::Children,
+              $procCond)
+            if (!$c) {
+              $c = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $procCond)
+            }
+            if ($c -and $c.Current.AutomationId -eq 'SupraChat.MainWindow') {
               $candidate = $c
             }
           } catch {}
@@ -108,14 +164,26 @@ try {
           $control=$candidate.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$predicate)
           if ($control) { return $control }
         }
+        $globalMatch = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+          [System.Windows.Automation.TreeScope]::Descendants,
+          [System.Windows.Automation.AndCondition]::new($procCond, $predicate))
+        if ($globalMatch) { return $globalMatch }
       } catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -notin @(-2147418113,-2147418111,-2147417846)) { throw }
       } catch [System.Windows.Automation.ElementNotAvailableException] {}
       Start-Sleep -Milliseconds 150
     }
-    throw "UIA_MISSING:$id"
+    $visible = @()
+    try {
+      $visible = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $procCond) |
+        ForEach-Object { $_.Current.AutomationId } |
+        Where-Object { ![string]::IsNullOrWhiteSpace($_) })
+    } catch {}
+    throw "UIA_MISSING:$id; candidate_found=$($candidate -ne $null); visible_ids=$($visible -join ',')"
   }
-  $null = Get-Control 'RootTabs'
+  foreach ($warmup in @('RootTabs', 'Tab.ChatGPT')) { $null = Get-Control $warmup }
   $tabSelected = $false
   $tabDeadline = [datetime]::UtcNow.AddSeconds(12)
   while ([datetime]::UtcNow -lt $tabDeadline) {
@@ -130,7 +198,7 @@ try {
   $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Synthetic W1')
   (Get-Control 'Sessions.Create').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   function Inventory {
-    $lines=& dotnet $cli session-ledger-list --port $port 2>$null
+    $lines=& $dotnet $cli session-ledger-list --port $port 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'CLI_FAILED' }
     $doc=($lines|Out-String)|ConvertFrom-Json
     if (!$doc.ok -or !$doc.value.succeeded) { throw 'CLI_REFUSED' }
@@ -152,7 +220,7 @@ try {
   # NativeCommandError with ErrorActionPreference=Stop. Read both streams
   # explicitly and accept only the fixed metadata-only stdio readiness line.
   $agentInfo = [Diagnostics.ProcessStartInfo]::new()
-  $agentInfo.FileName = (Get-Command dotnet).Source
+  $agentInfo.FileName = $dotnet
   $agentInfo.Arguments = ('"{0}" stdio' -f $cli)
   $agentInfo.UseShellExecute = $false
   $agentInfo.CreateNoWindow = $true
