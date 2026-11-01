@@ -257,6 +257,35 @@ try {
     Start-Sleep -Milliseconds 150
   }
   if (!$final -or $final.id -ne $session.id) { throw 'THREE_AUDIENCE_CONVERGENCE_FAILED' }
+  $phase='DRAFTS_AND_EXPORT'
+  $draftFile = [System.IO.Path]::GetTempFileName()
+  $env:SUPRACHAT_DRAFTS_STORE = $draftFile
+  try {
+    $revOut = & $dotnet $cli session-draft-review --port $port --session $final.id --direction chat-to-terminal --text 'CLI_TO_TERMINAL'
+    if ($LASTEXITCODE -ne 0) { throw 'CLI_DRAFT_REVIEW_FAILED' }
+    $revDoc = $revOut | ConvertFrom-Json
+    if (!$revDoc.ok -or !$revDoc.value.review_id) { throw 'CLI_DRAFT_REVIEW_REFUSED' }
+    $reviewId = $revDoc.value.review_id
+    $stageOut = & $dotnet $cli session-draft-stage --port $port --session $final.id --review-id $reviewId --confirm-text 'CLI_TO_TERMINAL'
+    if ($LASTEXITCODE -ne 0) { throw 'CLI_DRAFT_STAGE_FAILED' }
+    $stageDoc = $stageOut | ConvertFrom-Json
+    if (!$stageDoc.ok -or !$stageDoc.value.staged) { throw 'CLI_DRAFT_STAGE_REFUSED' }
+    $readOut = & $dotnet $cli session-draft-read --port $port --session $final.id
+    if ($LASTEXITCODE -ne 0) { throw 'CLI_DRAFT_READ_FAILED' }
+    $readDoc = $readOut | ConvertFrom-Json
+    if (!$readDoc.ok -or $readDoc.value.terminal_input -ne 'CLI_TO_TERMINAL') { throw 'CLI_DRAFT_BUFFER_MISMATCH' }
+
+    $exportOut = & $dotnet $cli session-export --port $port --format json
+    if ($LASTEXITCODE -ne 0) { throw 'CLI_EXPORT_FAILED' }
+    $exportDoc = $exportOut | ConvertFrom-Json
+    if (!$exportDoc.ok -or $exportDoc.value.schema -ne 'suprachat-workbench-metadata-export/v1') { throw 'CLI_EXPORT_REFUSED' }
+
+    $discardOut = & $dotnet $cli session-draft-discard --port $port --session $final.id
+    if ($LASTEXITCODE -ne 0) { throw 'CLI_DISCARD_FAILED' }
+  } finally {
+    Remove-Item -Force $draftFile -ErrorAction SilentlyContinue
+  }
+
   $passed=$true; $phase='PASS'
   'S0 normal W1 GUI, CLI and agent share one disposable session owner: PASS'
 } finally {

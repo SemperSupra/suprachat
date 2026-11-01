@@ -426,6 +426,10 @@ var mainWindowXamlPath = Path.Combine("SupraChat", "MainWindow.axaml");
 Require(File.Exists(mainWindowXamlPath), "MainWindow accessibility surface missing");
 var mainWindowXaml = File.ReadAllText(mainWindowXamlPath);
 
+var workbenchXamlPath = Path.Combine("SupraChat", "WorkbenchView.axaml");
+Require(File.Exists(workbenchXamlPath), "WorkbenchView accessibility surface missing");
+var workbenchXaml = File.ReadAllText(workbenchXamlPath);
+
 // Static XAML guard: stable application-authored AutomationIds must be nonblank
 // and unique within this declared window. Dynamic/runtime provider identity and
 // interactive UIA patterns require separate live Windows qualification.
@@ -442,12 +446,40 @@ static bool HasUniqueDeclaredAutomationIds(string xaml)
 }
 Require(HasUniqueDeclaredAutomationIds(mainWindowXaml),
     "main window declares duplicate or blank AutomationIds");
+Require(HasUniqueDeclaredAutomationIds(workbenchXaml),
+    "workbench view declares duplicate or blank AutomationIds");
 Require(!HasUniqueDeclaredAutomationIds(
     "<Window><Button AutomationProperties.AutomationId=\"duplicate\"/><Button AutomationProperties.AutomationId=\"duplicate\"/></Window>"),
     "AutomationId duplicate regression fixture must be refused");
 Require(!HasUniqueDeclaredAutomationIds(
     "<Window><Button AutomationProperties.AutomationId=\" \"/></Window>"),
     "blank AutomationId regression fixture must be refused");
+
+foreach (var marker in new[]
+{
+    "AutomationProperties.AutomationId=\"Sessions.WorkbenchView\"",
+    "AutomationProperties.AutomationId=\"Sessions.NewTitle\"",
+    "AutomationProperties.AutomationId=\"Sessions.Create\"",
+    "AutomationProperties.AutomationId=\"Sessions.Rename\"",
+    "AutomationProperties.AutomationId=\"Sessions.List\"",
+    "AutomationProperties.AutomationId=\"Sessions.Status\"",
+    "AutomationProperties.AutomationId=\"Sessions.ExportJsonFile\"",
+    "AutomationProperties.AutomationId=\"Sessions.ExportMarkdownFile\"",
+    "AutomationProperties.AutomationId=\"Sessions.ExportPreview\"",
+    "AutomationProperties.AutomationId=\"Sessions.DraftInput\"",
+    "AutomationProperties.AutomationId=\"Sessions.ReviewToTerminal\"",
+    "AutomationProperties.AutomationId=\"Sessions.ReviewToChat\"",
+    "AutomationProperties.AutomationId=\"Sessions.StageDraft\"",
+    "AutomationProperties.AutomationId=\"Sessions.DraftReview\"",
+    "AutomationProperties.AutomationId=\"Sessions.TerminalDraft\"",
+    "AutomationProperties.AutomationId=\"Sessions.ChatDraft\"",
+    "AutomationProperties.AutomationId=\"Sessions.DiscardDrafts\""
+})
+{
+    Require(workbenchXaml.Contains(marker, StringComparison.Ordinal),
+        $"required workbench accessibility marker missing: {marker}");
+}
+
 Require(mainWindowXaml.Contains("<local:SecurePassphraseTextBox x:Name=\"CredentialPassphraseBox\"", StringComparison.Ordinal),
     "portable credential passphrase must use the hardened secure textbox");
 Require(!mainWindowXaml.Contains("<TextBox x:Name=\"CredentialPassphraseBox\"", StringComparison.Ordinal),
@@ -559,7 +591,17 @@ foreach (var marker in new[]
     "\"auth-import\"",
     "\"auth/bundle/inspect\"",
     "\"auth/export\"",
-    "\"auth/import\""
+    "\"auth/import\"",
+    "\"session-draft-review\"",
+    "\"session-draft-stage\"",
+    "\"session-draft-read\"",
+    "\"session-draft-discard\"",
+    "\"session-export\"",
+    "\"session/draft/review\"",
+    "\"session/draft/stage\"",
+    "\"session/draft/read\"",
+    "\"session/draft/discard\"",
+    "\"session/export\""
 })
 {
     Require(automationSource.Contains(marker, StringComparison.Ordinal),
