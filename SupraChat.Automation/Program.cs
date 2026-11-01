@@ -101,6 +101,11 @@ internal static class Program
                     ParseLedgerPort(Option(args[1..], "--port")), "change", await ReadLedgerStdinAsync())),
                 "session-ledger-revoke-own" => WriteSuccess(await SessionLedgerClient.RequestAsync(
                     ParseLedgerPort(Option(args[1..], "--port")), "revoke-own", await ReadLedgerStdinAsync())),
+                "session-draft-review" => WriteSuccess(await SessionDraftReviewAsync(args[1..])),
+                "session-draft-stage" => WriteSuccess(await SessionDraftStageAsync(args[1..])),
+                "session-draft-read" => WriteSuccess(await SessionDraftReadAsync(args[1..])),
+                "session-draft-discard" => WriteSuccess(await SessionDraftDiscardAsync(args[1..])),
+                "session-export" => WriteSuccess(await SessionExportAsync(args[1..])),
                 "stdio" => await RunStdioAsync(),
                 _ => WriteFailure(2, "USAGE", $"Unknown command: {args[0]}", Help())
             };
@@ -173,6 +178,11 @@ internal static class Program
             new { name = "session-ledger-open", description = "Create synthetic ledger metadata from stdin; not an authenticated principal." },
             new { name = "session-ledger-change", description = "CAS synthetic ledger metadata from stdin; not a provider action." },
             new { name = "session-ledger-revoke-own", description = "W13 synthetic: explicitly revoke the currently signed actor grant, durably; cannot revoke another actor.", syntax = "session-ledger-revoke-own --port <host-port> < request.json" },
+            new { name = "session-draft-review", description = "Prepare and review an isolated local draft transfer (chat-to-terminal or terminal-to-chat).", syntax = "session-draft-review --session <id> --direction <chat-to-terminal|terminal-to-chat> [--text <text>] [--stdin] [--port <port>]" },
+            new { name = "session-draft-stage", description = "Stage a reviewed draft transfer into this session's local text buffer after verifying confirm text.", syntax = "session-draft-stage --session <id> --review-id <id> [--confirm-text <text>] [--stdin] [--port <port>]" },
+            new { name = "session-draft-read", description = "Read local staged draft buffers for the specified session.", syntax = "session-draft-read --session <id> [--port <port>]" },
+            new { name = "session-draft-discard", description = "Discard local draft buffers and pending reviews.", syntax = "session-draft-discard [--session <id>] [--port <port>]" },
+            new { name = "session-export", description = "Export metadata-only session representation in JSON or Markdown.", syntax = "session-export --format <json|markdown> [--output <path>] [--session <id>] [--port <port>]" },
             new { name = "stdio", description = "Serve line-delimited JSON-RPC 2.0 for agent clients with sessionful Codex events." }
         },
         auth_boundary = "Interactive authorization is completed by a human through the GUI. Machine shells reuse the same protected local credential store."
@@ -203,6 +213,11 @@ internal static class Program
             "session/ledger/open",
             "session/ledger/change",
             "session/ledger/revoke-own",
+            "session/draft/review",
+            "session/draft/stage",
+            "session/draft/read",
+            "session/draft/discard",
+            "session/export",
             "capabilities/read",
             "accessibility/read",
             "accessibility/preferences/read",
@@ -1057,6 +1072,11 @@ internal static class Program
             "session/ledger/open" => await RpcLedgerAsync(parameters, "open"),
             "session/ledger/change" => await RpcLedgerAsync(parameters, "change"),
             "session/ledger/revoke-own" => await RpcLedgerAsync(parameters, "revoke-own"),
+            "session/draft/review" => await RpcSessionDraftReviewAsync(parameters),
+            "session/draft/stage" => await RpcSessionDraftStageAsync(parameters),
+            "session/draft/read" => await RpcSessionDraftReadAsync(parameters),
+            "session/draft/discard" => await RpcSessionDraftDiscardAsync(parameters),
+            "session/export" => await RpcSessionExportAsync(parameters),
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
@@ -2029,6 +2049,364 @@ internal static class Program
         }
         return await SessionLedgerClient.RequestAsync(
             ParseLedgerPort(port.ToString(CultureInfo.InvariantCulture)), operation, request);
+    }
+
+    private static string DraftStorePath =>
+        Environment.GetEnvironmentVariable("SUPRACHAT_DRAFTS_STORE")
+        ?? Path.Combine(AppState.DirectoryPath, "local-drafts.json");
+
+    private static IWorkbenchSessionAuthority ResolveAuthority(string? portString)
+    {
+        if (!string.IsNullOrWhiteSpace(portString))
+        {
+            var port = ParseLedgerPort(portString);
+            return new W6SyntheticWorkbenchSessionAuthority(port);
+        }
+        var envPort = Environment.GetEnvironmentVariable("SUPRACHAT_W6_GUI_PORT");
+        if (!string.IsNullOrWhiteSpace(envPort) &&
+            int.TryParse(envPort, NumberStyles.None, CultureInfo.InvariantCulture, out var p) &&
+            p is >= 1024 and <= 65535)
+        {
+            return new W6SyntheticWorkbenchSessionAuthority(p);
+        }
+        return new ExperimentalLocalWorkbenchSessionAuthority();
+    }
+
+    private static readonly JsonSerializerOptions DraftStoreOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static async Task<LedgerLocalDrafts> LoadDraftsAsync(IWorkbenchSessionAuthority authority)
+    {
+        var drafts = new LedgerLocalDrafts(authority);
+        var path = DraftStorePath;
+        if (File.Exists(path))
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(path);
+                var snapshot = JsonSerializer.Deserialize<LedgerDraftSnapshot>(json, DraftStoreOptions);
+                if (snapshot is not null)
+                    drafts.RestoreSnapshot(snapshot);
+            }
+            catch
+            {
+                // Unreadable or corrupt local draft store is safely ignored.
+            }
+        }
+        return drafts;
+    }
+
+    private static async Task SaveDraftsAsync(LedgerLocalDrafts drafts)
+    {
+        var path = DraftStorePath;
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        var snapshot = drafts.ExportSnapshot();
+        var json = JsonSerializer.Serialize(snapshot, DraftStoreOptions);
+        await File.WriteAllTextAsync(path, json);
+    }
+
+    private static async Task<object> SessionDraftReviewAsync(string[] args)
+    {
+        var sessionId = RequiredOption(args, "--session");
+        var direction = RequiredOption(args, "--direction");
+        var text = Option(args, "--text");
+        if (text is null && (HasFlag(args, "--stdin") || !Console.IsInputRedirected))
+            text = await Console.In.ReadToEndAsync();
+        if (string.IsNullOrWhiteSpace(text))
+            throw new MachineException(2, "INVALID_PARAMS", "Draft text is required via --text or standard input.");
+
+        var authority = ResolveAuthority(Option(args, "--port"));
+        using var drafts = await LoadDraftsAsync(authority);
+        try
+        {
+            await drafts.SelectAsync(sessionId);
+            var review = await drafts.PrepareAsync(direction, text);
+            await SaveDraftsAsync(drafts);
+            return review;
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new MachineException(3, "OPERATION_REFUSED", ex.Message);
+        }
+    }
+
+    private static async Task<object> SessionDraftStageAsync(string[] args)
+    {
+        var sessionId = RequiredOption(args, "--session");
+        var reviewId = RequiredOption(args, "--review-id");
+        var confirmText = Option(args, "--confirm-text");
+        if (confirmText is null && (HasFlag(args, "--stdin") || !Console.IsInputRedirected))
+            confirmText = await Console.In.ReadToEndAsync();
+        if (string.IsNullOrWhiteSpace(confirmText))
+            throw new MachineException(2, "INVALID_PARAMS", "Confirm text is required via --confirm-text or standard input.");
+
+        var authority = ResolveAuthority(Option(args, "--port"));
+        using var drafts = await LoadDraftsAsync(authority);
+        try
+        {
+            await drafts.SelectAsync(sessionId);
+            var receipt = await drafts.StageReviewedAsync(reviewId, confirmText);
+            await SaveDraftsAsync(drafts);
+            return receipt;
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new MachineException(3, "OPERATION_REFUSED", ex.Message);
+        }
+    }
+
+    private static async Task<object> SessionDraftReadAsync(string[] args)
+    {
+        var sessionId = RequiredOption(args, "--session");
+        var authority = ResolveAuthority(Option(args, "--port"));
+        using var drafts = await LoadDraftsAsync(authority);
+        try
+        {
+            await drafts.SelectAsync(sessionId);
+            var buffers = drafts.ReadSelected();
+            return new
+            {
+                schema = LedgerLocalDrafts.Schema,
+                session_id = sessionId,
+                terminal_input = buffers.TerminalInput,
+                chat_input = buffers.ChatInput
+            };
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new MachineException(3, "OPERATION_REFUSED", ex.Message);
+        }
+    }
+
+    private static async Task<object> SessionDraftDiscardAsync(string[] args)
+    {
+        var sessionId = Option(args, "--session");
+        var authority = ResolveAuthority(Option(args, "--port"));
+        using var drafts = await LoadDraftsAsync(authority);
+        if (sessionId is not null)
+            drafts.Forget(sessionId);
+        else
+            drafts.DiscardPending();
+        await SaveDraftsAsync(drafts);
+        return new
+        {
+            schema = LedgerLocalDrafts.Schema,
+            session_id = sessionId,
+            discarded = true
+        };
+    }
+
+    private static async Task<object> SessionExportAsync(string[] args)
+    {
+        var format = RequiredOption(args, "--format");
+        var output = Option(args, "--output");
+        var sessionId = Option(args, "--session");
+        var authority = ResolveAuthority(Option(args, "--port"));
+
+        var receipt = await authority.ReadAsync(sessionId);
+        if (receipt.Status != "OBSERVED" || receipt.Snapshot is null)
+            throw new MachineException(4, "EXPORT_REFUSED", $"Export refused: {receipt.Status}");
+
+        try
+        {
+            var preview = WorkbenchMetadataExport.Prepare(receipt.Snapshot, format);
+            string? outputPath = null;
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                outputPath = Path.GetFullPath(output);
+                var dir = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                await File.WriteAllTextAsync(outputPath, preview.Content, System.Text.Encoding.UTF8);
+                preview = preview with { WasSaved = true };
+            }
+
+            return new
+            {
+                schema = preview.Schema,
+                format = preview.Format,
+                content = preview.Content,
+                byte_count = preview.ContentBytes,
+                was_saved = preview.WasSaved,
+                requires_user_selected_destination = preview.RequiresUserSelectedDestination,
+                output_path = outputPath,
+                warning = preview.DataWarning
+            };
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+    }
+
+    private static async Task<object> RpcSessionDraftReviewAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = RequiredProperty(p, "sessionId");
+        var direction = RequiredProperty(p, "direction");
+        var text = RequiredProperty(p, "text");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+
+        var authority = ResolveAuthority(portStr);
+        using var drafts = await LoadDraftsAsync(authority);
+        try
+        {
+            await drafts.SelectAsync(sessionId);
+            var review = await drafts.PrepareAsync(direction, text);
+            await SaveDraftsAsync(drafts);
+            return review;
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new MachineException(3, "OPERATION_REFUSED", ex.Message);
+        }
+    }
+
+    private static async Task<object> RpcSessionDraftStageAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = RequiredProperty(p, "sessionId");
+        var reviewId = RequiredProperty(p, "reviewId");
+        var confirmText = RequiredProperty(p, "confirmText");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+
+        var authority = ResolveAuthority(portStr);
+        using var drafts = await LoadDraftsAsync(authority);
+        try
+        {
+            await drafts.SelectAsync(sessionId);
+            var receipt = await drafts.StageReviewedAsync(reviewId, confirmText);
+            await SaveDraftsAsync(drafts);
+            return receipt;
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new MachineException(3, "OPERATION_REFUSED", ex.Message);
+        }
+    }
+
+    private static async Task<object> RpcSessionDraftReadAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = RequiredProperty(p, "sessionId");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+
+        var authority = ResolveAuthority(portStr);
+        using var drafts = await LoadDraftsAsync(authority);
+        try
+        {
+            await drafts.SelectAsync(sessionId);
+            var buffers = drafts.ReadSelected();
+            return new
+            {
+                schema = LedgerLocalDrafts.Schema,
+                session_id = sessionId,
+                terminal_input = buffers.TerminalInput,
+                chat_input = buffers.ChatInput
+            };
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new MachineException(3, "OPERATION_REFUSED", ex.Message);
+        }
+    }
+
+    private static async Task<object> RpcSessionDraftDiscardAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = OptionalString(p, "sessionId");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+
+        var authority = ResolveAuthority(portStr);
+        using var drafts = await LoadDraftsAsync(authority);
+        if (sessionId is not null)
+            drafts.Forget(sessionId);
+        else
+            drafts.DiscardPending();
+        await SaveDraftsAsync(drafts);
+        return new
+        {
+            schema = LedgerLocalDrafts.Schema,
+            session_id = sessionId,
+            discarded = true
+        };
+    }
+
+    private static async Task<object> RpcSessionExportAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var format = RequiredProperty(p, "format");
+        var output = OptionalString(p, "output");
+        var sessionId = OptionalString(p, "sessionId");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+
+        var authority = ResolveAuthority(portStr);
+        var receipt = await authority.ReadAsync(sessionId);
+        if (receipt.Status != "OBSERVED" || receipt.Snapshot is null)
+            throw new MachineException(4, "EXPORT_REFUSED", $"Export refused: {receipt.Status}");
+
+        try
+        {
+            var preview = WorkbenchMetadataExport.Prepare(receipt.Snapshot, format);
+            string? outputPath = null;
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                outputPath = Path.GetFullPath(output);
+                var dir = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                await File.WriteAllTextAsync(outputPath, preview.Content, System.Text.Encoding.UTF8);
+                preview = preview with { WasSaved = true };
+            }
+
+            return new
+            {
+                schema = preview.Schema,
+                format = preview.Format,
+                content = preview.Content,
+                byte_count = preview.ContentBytes,
+                was_saved = preview.WasSaved,
+                requires_user_selected_destination = preview.RequiresUserSelectedDestination,
+                output_path = outputPath,
+                warning = preview.DataWarning
+            };
+        }
+        catch (ArgumentException ex)
+        {
+            throw new MachineException(2, "INVALID_PARAMS", ex.Message);
+        }
     }
 
     private static string? Option(string[] args, string name)

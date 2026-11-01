@@ -168,6 +168,45 @@ public sealed class LedgerLocalDrafts : IDisposable
             ? buffers : new(string.Empty, string.Empty);
     }
 
+    public LedgerDraftSnapshot ExportSnapshot()
+    {
+        ThrowIfDisposed();
+        LedgerDraftPendingReviewState? pendingState = _pending is null ? null :
+            new(_pending.ReviewId, _pending.SessionId, _pending.LedgerVersion,
+                _pending.Direction, _pending.Text, _pending.CreatedAt);
+        return new LedgerDraftSnapshot(_selectedId, pendingState, new Dictionary<string, LedgerDraftBuffers>(_drafts));
+    }
+
+    public void RestoreSnapshot(LedgerDraftSnapshot snapshot)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(snapshot);
+        _drafts.Clear();
+        if (snapshot.Buffers is not null)
+        {
+            foreach (var (k, v) in snapshot.Buffers)
+            {
+                if (k is not null && v is not null)
+                    _drafts[k] = v;
+            }
+        }
+        _selectedId = snapshot.SelectedId;
+        if (snapshot.PendingReview is not null)
+        {
+            _pending = new(
+                snapshot.PendingReview.ReviewId,
+                snapshot.PendingReview.SessionId,
+                snapshot.PendingReview.LedgerVersion,
+                snapshot.PendingReview.Direction,
+                snapshot.PendingReview.Text,
+                snapshot.PendingReview.CreatedAt);
+        }
+        else
+        {
+            _pending = null;
+        }
+    }
+
     public void DiscardPending() => _pending = null;
 
     public void Forget(string sessionId)
@@ -233,3 +272,13 @@ public sealed record LedgerDraftReview(
 public sealed record LedgerDraftStageReceipt(
     string Schema, string SessionId, string Direction, string Destination,
     bool Staged, bool ChatSubmitted, bool CommandExecuted, bool RemoteRequestCreated);
+
+
+public sealed record LedgerDraftPendingReviewState(
+    string ReviewId, string SessionId, long LedgerVersion,
+    string Direction, string Text, DateTimeOffset CreatedAt);
+
+public sealed record LedgerDraftSnapshot(
+    string? SelectedId,
+    LedgerDraftPendingReviewState? PendingReview,
+    IReadOnlyDictionary<string, LedgerDraftBuffers>? Buffers);

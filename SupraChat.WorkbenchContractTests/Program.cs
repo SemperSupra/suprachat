@@ -224,6 +224,47 @@ static class Program
         Check(report.ConfiguredOrder.Length == 1 && report.ConfiguredOrder[0] == AuthModes.ApiKey, "auth_eval_configured_order");
         Check(report.Evaluations.Count == 1 && report.Evaluations[0].AuthMode == AuthModes.ApiKey, "auth_eval_evaluations_count");
 
+        // 6. LedgerDraft State Snapshot & Cross-Process Restoration Contract
+        var snapAuthority = new ExperimentalLocalWorkbenchSessionAuthority();
+        var s1 = snapAuthority.CreateAsync("snap-operation-001", "Snap Session 1").AsTask().GetAwaiter().GetResult();
+        var s2 = snapAuthority.CreateAsync("snap-operation-002", "Snap Session 2").AsTask().GetAwaiter().GetResult();
+        Check(s1.Applied && s2.Applied, "snap_sessions_created");
+
+        var snapDrafts1 = new LedgerLocalDrafts(snapAuthority, () => clock);
+        snapDrafts1.SelectAsync(s1.Session!.Id).AsTask().GetAwaiter().GetResult();
+        var rev1 = snapDrafts1.PrepareAsync("chat-to-terminal", "STAGED_TEXT").AsTask().GetAwaiter().GetResult();
+        var stage1 = snapDrafts1.StageReviewedAsync(rev1.ReviewId, "STAGED_TEXT").AsTask().GetAwaiter().GetResult();
+        Check(stage1.Staged, "snap_draft_staged");
+        var revPending = snapDrafts1.PrepareAsync("terminal-to-chat", "PENDING_TEXT").AsTask().GetAwaiter().GetResult();
+
+        var exportedSnap = snapDrafts1.ExportSnapshot();
+        Check(exportedSnap.SelectedId == s1.Session.Id, "exported_selected_id");
+        Check(exportedSnap.PendingReview is not null && exportedSnap.PendingReview.ReviewId == revPending.ReviewId, "exported_pending_review");
+        Check(exportedSnap.Buffers is not null && exportedSnap.Buffers.ContainsKey(s1.Session.Id), "exported_buffers_contain_s1");
+        Check(exportedSnap.Buffers![s1.Session.Id].TerminalInput == "STAGED_TEXT", "exported_terminal_buffer");
+
+        // Restore into an entirely independent LedgerLocalDrafts instance (simulating CLI process boundary)
+        var snapDrafts2 = new LedgerLocalDrafts(snapAuthority, () => clock);
+        snapDrafts2.RestoreSnapshot(exportedSnap);
+        Check(snapDrafts2.SelectedId == s1.Session.Id, "restored_selected_id");
+        Check(snapDrafts2.ReadSelected().TerminalInput == "STAGED_TEXT", "restored_terminal_buffer");
+        // Exercise the restored pending review
+        var stageRestored = snapDrafts2.StageReviewedAsync(revPending.ReviewId, "PENDING_TEXT").AsTask().GetAwaiter().GetResult();
+        Check(stageRestored.Staged, "restored_pending_review_staged");
+        Check(snapDrafts2.ReadSelected().ChatInput == "PENDING_TEXT", "restored_chat_buffer");
+        // Verify one-time consumption: cannot restage
+        MustRefuse(() => snapDrafts2.StageReviewedAsync(revPending.ReviewId, "PENDING_TEXT").AsTask().GetAwaiter().GetResult(), "restored_review_consumed");
+
+        // Discard pending review
+        var revToDiscard = snapDrafts2.PrepareAsync("chat-to-terminal", "WILL_DISCARD").AsTask().GetAwaiter().GetResult();
+        snapDrafts2.DiscardPending();
+        MustRefuse(() => snapDrafts2.StageReviewedAsync(revToDiscard.ReviewId, "WILL_DISCARD").AsTask().GetAwaiter().GetResult(), "discard_clears_pending");
+        Check(snapDrafts2.ReadSelected().TerminalInput == "STAGED_TEXT", "discard_preserves_staged_buffer");
+
+        // Forget session
+        snapDrafts2.Forget(s1.Session.Id);
+        MustRefuse(() => snapDrafts2.ReadSelected(), "forget_clears_session_buffers");
+
         Console.WriteLine($"WORKBENCH_SOURCE_ONLY_CONTRACT_PASS cases={_cases} provider_contact=false terminal_execution=false browser_submission=false persistent_state=false");
         return 0;
     }

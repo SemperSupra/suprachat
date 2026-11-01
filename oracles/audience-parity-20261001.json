@@ -481,6 +481,57 @@
       },
       "human_boundary": "Status/pairing-status/client-list are read-only. Enable/disable/pairing-start/client-revoke require an explicit one-shot human confirmation or machine confirm=true/--confirm; no operation auto-approves Codex server requests.",
       "notes": "Complete semantic lifecycle is implemented across GUI, CLI and JSON-RPC. Pairing/environment/client IDs are text-accessible; live authorized qualification on each OS remains pending."
+    },
+    {
+      "id": "session_workbench",
+      "consequential": true,
+      "access": {
+        "human": "implemented",
+        "accessible_human": "implemented",
+        "automation": "implemented",
+        "agent": "implemented"
+      },
+      "platforms": {
+        "windows": "implemented",
+        "macos": "implemented",
+        "linux": "implemented"
+      },
+      "human_boundary": "Session creation, selection, and renaming are local ledger metadata operations. Max 16 sessions. Collision detection for shared workspaces and duplicate conversations.",
+      "notes": "Accessible human navigation via UIA/tab indexing. Automation via CLI session-ledger-* subcommands. Agents via session/ledger/* JSON-RPC stdio methods."
+    },
+    {
+      "id": "session_draft_transfers",
+      "consequential": true,
+      "access": {
+        "human": "implemented",
+        "accessible_human": "implemented",
+        "automation": "implemented",
+        "agent": "implemented"
+      },
+      "platforms": {
+        "windows": "implemented",
+        "macos": "implemented",
+        "linux": "implemented"
+      },
+      "human_boundary": "Drafts are staged into inert, isolated local text buffers only. Never auto-executes terminal commands or auto-submits chat turns. Requires explicit two-phase review within 2-minute expiration.",
+      "notes": "GUI review/stage buttons with full UIA labels. Automation CLI session-draft-* subcommands. Agent JSON-RPC session/draft/* methods."
+    },
+    {
+      "id": "session_export",
+      "consequential": true,
+      "access": {
+        "human": "implemented",
+        "accessible_human": "implemented",
+        "automation": "implemented",
+        "agent": "implemented"
+      },
+      "platforms": {
+        "windows": "implemented",
+        "macos": "implemented",
+        "linux": "implemented"
+      },
+      "human_boundary": "Pure metadata export (JSON or Markdown). Strictly excludes transcripts, terminal output, transfer draft text, and credentials. File write requires explicit destination selection.",
+      "notes": "GUI file picker and preview panels. Automation CLI session-export subcommand with optional --output. Agent JSON-RPC session/export method."
     }
   ]
 }

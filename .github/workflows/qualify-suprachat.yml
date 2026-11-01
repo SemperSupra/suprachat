@@ -135,6 +135,23 @@ jobs:
             throw 'Dogfood diagnostics export contract failed.'
           }
 
+          $exportJson = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- session-export --format json
+          if ($LASTEXITCODE -ne 0) { throw 'session-export json failed.' }
+          $exportJsonDoc = $exportJson | ConvertFrom-Json
+          if (-not $exportJsonDoc.ok -or $exportJsonDoc.value.schema -ne 'suprachat-workbench-metadata-export/v1') {
+            throw 'session-export json contract failed.'
+          }
+          if ($exportJsonDoc.value.content -notmatch 'SESSION_METADATA_ONLY') {
+            throw 'session-export json scope contract failed.'
+          }
+
+          $exportMd = dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- session-export --format markdown
+          if ($LASTEXITCODE -ne 0) { throw 'session-export markdown failed.' }
+          $exportMdDoc = $exportMd | ConvertFrom-Json
+          if (-not $exportMdDoc.ok -or $exportMdDoc.value.content -notmatch '# SupraChat session metadata') {
+            throw 'session-export markdown contract failed.'
+          }
+
       - name: Smoke agent JSON-RPC stdio surface
         shell: pwsh
         run: |
@@ -215,6 +232,14 @@ jobs:
           $traceAfterBroker = $brokerResponses | Where-Object { $_.id -eq 9 } | Select-Object -First 1
           if ($traceAfterBroker.result.mode -ne 'OFF') {
             throw 'Persistent broker dispatch changed or blocked default-OFF trace state.'
+          }
+
+          $sessionExportRequest = '{"jsonrpc":"2.0","id":10,"method":"session/export","params":{"format":"json"}}'
+          $sessionExportLines = $sessionExportRequest | dotnet run --project SupraChat.Automation/SupraChat.Automation.csproj -c Release -- stdio 2>$null
+          if ($LASTEXITCODE -ne 0) { throw 'session/export stdio failed.' }
+          $sessionExportResponse = ($sessionExportLines | Select-Object -Last 1) | ConvertFrom-Json
+          if ($sessionExportResponse.id -ne 10 -or $sessionExportResponse.result.schema -ne 'suprachat-workbench-metadata-export/v1') {
+            throw 'Agent session/export contract missing.'
           }
 
       - name: Publish self-contained application
