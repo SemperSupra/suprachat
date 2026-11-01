@@ -48,6 +48,11 @@
                SelectionChanged="W0Sessions_SelectionChanged"
                AutomationProperties.AutomationId="Sessions.List"
                AutomationProperties.Name="Local ledger session list">
+        <ListBox.Styles>
+          <Style Selector="ListBoxItem">
+            <Setter Property="AutomationProperties.Name" Value="{Binding Title}" />
+          </Style>
+        </ListBox.Styles>
         <ListBox.ItemTemplate>
           <DataTemplate><TextBlock Text="{Binding DisplayText}" /></DataTemplate>
         </ListBox.ItemTemplate>
