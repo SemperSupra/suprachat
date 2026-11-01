@@ -106,6 +106,9 @@ internal static class Program
                 "session-draft-read" => WriteSuccess(await SessionDraftReadAsync(args[1..])),
                 "session-draft-discard" => WriteSuccess(await SessionDraftDiscardAsync(args[1..])),
                 "session-export" => WriteSuccess(await SessionExportAsync(args[1..])),
+                "session-status" => WriteSuccess(await SessionStatusAsync(args[1..])),
+                "session-close" => WriteSuccess(await SessionCloseAsync(args[1..])),
+                "session-restore" => WriteSuccess(await SessionRestoreAsync(args[1..])),
                 "stdio" => await RunStdioAsync(),
                 _ => WriteFailure(2, "USAGE", $"Unknown command: {args[0]}", Help())
             };
@@ -183,6 +186,9 @@ internal static class Program
             new { name = "session-draft-read", description = "Read local staged draft buffers for the specified session.", syntax = "session-draft-read --session <id> [--port <port>]" },
             new { name = "session-draft-discard", description = "Discard local draft buffers and pending reviews.", syntax = "session-draft-discard [--session <id>] [--port <port>]" },
             new { name = "session-export", description = "Export metadata-only session representation in JSON or Markdown.", syntax = "session-export --format <json|markdown> [--output <path>] [--session <id>] [--port <port>]" },
+            new { name = "session-status", description = "Update parallel session indicator state (idle, running, waiting, error).", syntax = "session-status --session <id> --status <idle|running|waiting|error> [--port <port>]" },
+            new { name = "session-close", description = "Archive and close an active session, isolating draft buffers.", syntax = "session-close --session <id> [--port <port>]" },
+            new { name = "session-restore", description = "Restore an archived session back to the active list.", syntax = "session-restore --session <id> [--port <port>]" },
             new { name = "stdio", description = "Serve line-delimited JSON-RPC 2.0 for agent clients with sessionful Codex events." }
         },
         auth_boundary = "Interactive authorization is completed by a human through the GUI. Machine shells reuse the same protected local credential store."
@@ -218,6 +224,9 @@ internal static class Program
             "session/draft/read",
             "session/draft/discard",
             "session/export",
+            "session/status/set",
+            "session/close",
+            "session/restore",
             "capabilities/read",
             "accessibility/read",
             "accessibility/preferences/read",
@@ -1077,6 +1086,9 @@ internal static class Program
             "session/draft/read" => await RpcSessionDraftReadAsync(parameters),
             "session/draft/discard" => await RpcSessionDraftDiscardAsync(parameters),
             "session/export" => await RpcSessionExportAsync(parameters),
+            "session/status/set" => await RpcSessionStatusSetAsync(parameters),
+            "session/close" => await RpcSessionCloseAsync(parameters),
+            "session/restore" => await RpcSessionRestoreAsync(parameters),
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
@@ -2407,6 +2419,156 @@ internal static class Program
         {
             throw new MachineException(2, "INVALID_PARAMS", ex.Message);
         }
+    }
+
+    private static async Task<object> SessionStatusAsync(string[] args)
+    {
+        var sessionId = RequiredOption(args, "--session");
+        var status = RequiredOption(args, "--status");
+        var authority = ResolveAuthority(Option(args, "--port"));
+        var session = await authority.InspectAsync(sessionId);
+        if (session is null)
+            throw new MachineException(2, "INVALID_PARAMS", "SESSION_NOT_FOUND");
+        var outcome = await authority.SetStatusAsync(
+            "cli-" + Guid.NewGuid().ToString("N"), session.Id, session.Version, status);
+        if (!outcome.Applied)
+            throw new MachineException(3, "OPERATION_REFUSED", outcome.Status);
+        return new
+        {
+            schema = SharedSessionLedger.Schema,
+            session_id = sessionId,
+            status = outcome.Session?.SessionState,
+            version = outcome.Session?.Version
+        };
+    }
+
+    private static async Task<object> SessionCloseAsync(string[] args)
+    {
+        var sessionId = RequiredOption(args, "--session");
+        var authority = ResolveAuthority(Option(args, "--port"));
+        var session = await authority.InspectAsync(sessionId);
+        if (session is null)
+            throw new MachineException(2, "INVALID_PARAMS", "SESSION_NOT_FOUND");
+        using var drafts = await LoadDraftsAsync(authority);
+        drafts.Forget(sessionId);
+        await SaveDraftsAsync(drafts);
+        var outcome = await authority.CloseAsync(
+            "cli-" + Guid.NewGuid().ToString("N"), session.Id, session.Version);
+        if (!outcome.Applied)
+            throw new MachineException(3, "OPERATION_REFUSED", outcome.Status);
+        return new
+        {
+            schema = SharedSessionLedger.Schema,
+            session_id = sessionId,
+            closed = true,
+            is_archived = outcome.Session?.IsArchived ?? true,
+            version = outcome.Session?.Version
+        };
+    }
+
+    private static async Task<object> SessionRestoreAsync(string[] args)
+    {
+        var sessionId = RequiredOption(args, "--session");
+        var authority = ResolveAuthority(Option(args, "--port"));
+        var session = await authority.InspectAsync(sessionId);
+        if (session is null)
+            throw new MachineException(2, "INVALID_PARAMS", "SESSION_NOT_FOUND");
+        var outcome = await authority.RestoreAsync(
+            "cli-" + Guid.NewGuid().ToString("N"), session.Id, session.Version);
+        if (!outcome.Applied)
+            throw new MachineException(3, "OPERATION_REFUSED", outcome.Status);
+        return new
+        {
+            schema = SharedSessionLedger.Schema,
+            session_id = sessionId,
+            restored = true,
+            is_archived = outcome.Session?.IsArchived ?? false,
+            version = outcome.Session?.Version
+        };
+    }
+
+    private static async Task<object> RpcSessionStatusSetAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = RequiredPropertyEither(p, "sessionId", "session_id");
+        var status = RequiredProperty(p, "status");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+        var authority = ResolveAuthority(portStr);
+        var session = await authority.InspectAsync(sessionId);
+        if (session is null)
+            throw new MachineException(2, "INVALID_PARAMS", "SESSION_NOT_FOUND");
+        var outcome = await authority.SetStatusAsync(
+            "rpc-" + Guid.NewGuid().ToString("N"), session.Id, session.Version, status);
+        if (!outcome.Applied)
+            throw new MachineException(3, "OPERATION_REFUSED", outcome.Status);
+        return new
+        {
+            schema = SharedSessionLedger.Schema,
+            session_id = sessionId,
+            status = outcome.Session?.SessionState,
+            version = outcome.Session?.Version
+        };
+    }
+
+    private static async Task<object> RpcSessionCloseAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = RequiredPropertyEither(p, "sessionId", "session_id");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+        var authority = ResolveAuthority(portStr);
+        var session = await authority.InspectAsync(sessionId);
+        if (session is null)
+            throw new MachineException(2, "INVALID_PARAMS", "SESSION_NOT_FOUND");
+        using var drafts = await LoadDraftsAsync(authority);
+        drafts.Forget(sessionId);
+        await SaveDraftsAsync(drafts);
+        var outcome = await authority.CloseAsync(
+            "rpc-" + Guid.NewGuid().ToString("N"), session.Id, session.Version);
+        if (!outcome.Applied)
+            throw new MachineException(3, "OPERATION_REFUSED", outcome.Status);
+        return new
+        {
+            schema = SharedSessionLedger.Schema,
+            session_id = sessionId,
+            closed = true,
+            is_archived = outcome.Session?.IsArchived ?? true,
+            version = outcome.Session?.Version
+        };
+    }
+
+    private static async Task<object> RpcSessionRestoreAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var sessionId = RequiredPropertyEither(p, "sessionId", "session_id");
+        string? portStr = p.TryGetProperty("port", out var portEl) && portEl.ValueKind == JsonValueKind.Number
+            ? portEl.GetInt32().ToString(CultureInfo.InvariantCulture) : null;
+        var authority = ResolveAuthority(portStr);
+        var session = await authority.InspectAsync(sessionId);
+        if (session is null)
+            throw new MachineException(2, "INVALID_PARAMS", "SESSION_NOT_FOUND");
+        var outcome = await authority.RestoreAsync(
+            "rpc-" + Guid.NewGuid().ToString("N"), session.Id, session.Version);
+        if (!outcome.Applied)
+            throw new MachineException(3, "OPERATION_REFUSED", outcome.Status);
+        return new
+        {
+            schema = SharedSessionLedger.Schema,
+            session_id = sessionId,
+            restored = true,
+            is_archived = outcome.Session?.IsArchived ?? false,
+            version = outcome.Session?.Version
+        };
+    }
+
+    private static string RequiredPropertyEither(JsonElement value, string name1, string name2)
+    {
+        if (value.TryGetProperty(name1, out var p1) && p1.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(p1.GetString()))
+            return p1.GetString()!;
+        if (value.TryGetProperty(name2, out var p2) && p2.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(p2.GetString()))
+            return p2.GetString()!;
+        throw new MachineException(2, "INVALID_PARAMS", $"Missing string params.{name1} or params.{name2}.");
     }
 
     private static string? Option(string[] args, string name)

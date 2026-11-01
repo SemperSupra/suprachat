@@ -64,6 +64,56 @@ public sealed class W6SyntheticWorkbenchSessionAuthority : IWorkbenchSessionAuth
             value = title
         }), token);
 
+    public ValueTask<SessionLedgerResult> SetStatusAsync(
+        string operationId, string sessionId, long expectedVersion,
+        string status, CancellationToken token = default) =>
+        CommandAsync("change", JsonSerializer.SerializeToElement(new
+        {
+            idempotencyKey = operationId,
+            audience = "human",
+            sessionId,
+            expectedVersion,
+            operation = "set-status",
+            value = status
+        }), token);
+
+    public ValueTask<SessionLedgerResult> SetUnreadAsync(
+        string operationId, string sessionId, long expectedVersion,
+        bool hasUnread, CancellationToken token = default) =>
+        CommandAsync("change", JsonSerializer.SerializeToElement(new
+        {
+            idempotencyKey = operationId,
+            audience = "human",
+            sessionId,
+            expectedVersion,
+            operation = "set-unread",
+            value = hasUnread ? "true" : "false"
+        }), token);
+
+    public ValueTask<SessionLedgerResult> CloseAsync(
+        string operationId, string sessionId, long expectedVersion,
+        CancellationToken token = default) =>
+        CommandAsync("change", JsonSerializer.SerializeToElement(new
+        {
+            idempotencyKey = operationId,
+            audience = "human",
+            sessionId,
+            expectedVersion,
+            operation = "archive"
+        }), token);
+
+    public ValueTask<SessionLedgerResult> RestoreAsync(
+        string operationId, string sessionId, long expectedVersion,
+        CancellationToken token = default) =>
+        CommandAsync("change", JsonSerializer.SerializeToElement(new
+        {
+            idempotencyKey = operationId,
+            audience = "human",
+            sessionId,
+            expectedVersion,
+            operation = "restore"
+        }), token);
+
     private async Task<SessionLedgerInventory> InventoryAsync(CancellationToken token)
     {
         var response = await W6SyntheticSessionTransport.RequestAsync(

@@ -31,7 +31,7 @@ public static class LedgerWorkbenchProjection
             return Deny("WORKBENCH_CAPACITY_UNSUPPORTED");
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        var sessions = new List<WorkbenchSession>();
+        var allSessions = new List<WorkbenchSession>();
         foreach (var entry in inventory.Sessions)
         {
             if (entry is null || !Guid.TryParseExact(entry.Id, "N", out _) ||
@@ -39,6 +39,8 @@ public static class LedgerWorkbenchProjection
                 entry.Title.Length > 80 || entry.Title.Any(char.IsControl) ||
                 entry.Version < 0 || entry.ChatSubmissionAllowed || entry.TerminalExecutionAllowed)
                 return Deny("INVALID_LEDGER_SESSION");
+            if (entry.SessionState is not ("idle" or "running" or "waiting" or "error"))
+                return Deny("INVALID_SESSION_STATUS");
             if (entry.ConversationUrl is not null)
             {
                 var check = ChatGptControlContract.Inspect(entry.ConversationUrl);
@@ -50,27 +52,37 @@ public static class LedgerWorkbenchProjection
                  string.IsNullOrWhiteSpace(entry.WorkspaceKey) ||
                  entry.WorkspaceKey.Any(char.IsControl)))
                 return Deny("INVALID_WORKSPACE_REFERENCE");
-            sessions.Add(new(entry.Id, entry.Title, entry.ConversationUrl,
-                entry.WorkspaceKey, "NOT_CONNECTED", false, false));
+            if (entry.WorktreeBranch is not null &&
+                (entry.WorktreeBranch.Length > 256 ||
+                 string.IsNullOrWhiteSpace(entry.WorktreeBranch) ||
+                 entry.WorktreeBranch.Any(char.IsControl)))
+                return Deny("INVALID_WORKTREE_REFERENCE");
+
+            allSessions.Add(new(entry.Id, entry.Title, entry.ConversationUrl,
+                entry.WorkspaceKey, "NOT_CONNECTED", false, false,
+                entry.SessionState, entry.HasUnread, entry.WorktreeBranch, entry.IsArchived));
         }
+
+        var activeSessions = allSessions.Where(s => !s.IsArchived).ToList();
+        var archivedSessions = allSessions.Where(s => s.IsArchived).ToList();
 
         var collisions = new List<WorkbenchCollision>();
-        for (var i = 0; i < sessions.Count; i++)
-        for (var j = i + 1; j < sessions.Count; j++)
+        for (var i = 0; i < activeSessions.Count; i++)
+        for (var j = i + 1; j < activeSessions.Count; j++)
         {
-            var a = sessions[i];
-            var b = sessions[j];
+            var a = activeSessions[i];
+            var b = activeSessions[j];
             if (a.ConversationUrl is not null && a.ConversationUrl == b.ConversationUrl)
-                collisions.Add(new("DUPLICATE_CONVERSATION", a.Id, b.Id));
+                collisions.Add(new("DUPLICATE_CONVERSATION", a.Id, b.Id, a.ConversationUrl));
             if (a.WorkspaceKey is not null &&
                 string.Equals(a.WorkspaceKey, b.WorkspaceKey, StringComparison.OrdinalIgnoreCase))
-                collisions.Add(new("SHARED_WORKSPACE", a.Id, b.Id));
+                collisions.Add(new("SHARED_WORKSPACE", a.Id, b.Id, a.WorkspaceKey));
         }
 
-        var stale = selectedId is not null && !ids.Contains(selectedId);
+        var stale = selectedId is not null && !activeSessions.Any(s => s.Id == selectedId);
         var snapshot = new WorkbenchSnapshot(SessionWorkbench.Schema,
-            stale ? null : selectedId, sessions.ToArray(), collisions.ToArray(),
-            SessionWorkbench.MaximumSessions, false, false);
+            stale ? null : selectedId, activeSessions.ToArray(), collisions.ToArray(),
+            SessionWorkbench.MaximumSessions, false, false, archivedSessions.ToArray());
         return new(Schema, stale ? "SESSION_SELECTION_STALE" : "OBSERVED",
             snapshot, inventory.Sequence, true, false, false);
     }

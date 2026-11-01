@@ -13,6 +13,14 @@ public interface IWorkbenchSessionAuthority
         string? conversationUrl = null, string? workspaceKey = null, CancellationToken token = default);
     ValueTask<SessionLedgerResult> RenameAsync(string operationId, string sessionId,
         long expectedVersion, string title, CancellationToken token = default);
+    ValueTask<SessionLedgerResult> SetStatusAsync(string operationId, string sessionId,
+        long expectedVersion, string status, CancellationToken token = default);
+    ValueTask<SessionLedgerResult> SetUnreadAsync(string operationId, string sessionId,
+        long expectedVersion, bool hasUnread, CancellationToken token = default);
+    ValueTask<SessionLedgerResult> CloseAsync(string operationId, string sessionId,
+        long expectedVersion, CancellationToken token = default);
+    ValueTask<SessionLedgerResult> RestoreAsync(string operationId, string sessionId,
+        long expectedVersion, CancellationToken token = default);
 }
 
 /// <summary>
@@ -38,4 +46,20 @@ public sealed class ExperimentalLocalWorkbenchSessionAuthority : IWorkbenchSessi
     public ValueTask<SessionLedgerResult> RenameAsync(string operationId, string sessionId,
         long expectedVersion, string title, CancellationToken token = default) =>
         ValueTask.FromResult(_ledger.Change(operationId, "human", sessionId, expectedVersion, "set-title", title));
+
+    public ValueTask<SessionLedgerResult> SetStatusAsync(string operationId, string sessionId,
+        long expectedVersion, string status, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Change(operationId, "human", sessionId, expectedVersion, "set-status", status));
+
+    public ValueTask<SessionLedgerResult> SetUnreadAsync(string operationId, string sessionId,
+        long expectedVersion, bool hasUnread, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Change(operationId, "human", sessionId, expectedVersion, "set-unread", hasUnread ? "true" : "false"));
+
+    public ValueTask<SessionLedgerResult> CloseAsync(string operationId, string sessionId,
+        long expectedVersion, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Change(operationId, "human", sessionId, expectedVersion, "archive", null));
+
+    public ValueTask<SessionLedgerResult> RestoreAsync(string operationId, string sessionId,
+        long expectedVersion, CancellationToken token = default) =>
+        ValueTask.FromResult(_ledger.Change(operationId, "human", sessionId, expectedVersion, "restore", null));
 }

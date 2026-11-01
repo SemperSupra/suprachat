@@ -12,6 +12,7 @@ public sealed class SessionWorkbench
     public const int MaximumSessions = 16;
 
     private readonly List<WorkbenchSession> _sessions = new();
+    private readonly List<WorkbenchSession> _archivedSessions = new();
     private string? _activeSessionId;
 
     internal event Action? ActiveSessionChanged;
@@ -28,14 +29,14 @@ public sealed class SessionWorkbench
                 var right = _sessions[j];
                 if (left.ConversationUrl is not null &&
                     string.Equals(left.ConversationUrl, right.ConversationUrl, StringComparison.Ordinal))
-                    collisions.Add(new("DUPLICATE_CONVERSATION", left.Id, right.Id));
+                    collisions.Add(new("DUPLICATE_CONVERSATION", left.Id, right.Id, left.ConversationUrl));
                 if (left.WorkspaceKey is not null &&
                     string.Equals(left.WorkspaceKey, right.WorkspaceKey, StringComparison.OrdinalIgnoreCase))
-                    collisions.Add(new("SHARED_WORKSPACE", left.Id, right.Id));
+                    collisions.Add(new("SHARED_WORKSPACE", left.Id, right.Id, left.WorkspaceKey));
             }
         }
         return new(Schema, _activeSessionId, _sessions.ToArray(), collisions,
-            MaximumSessions, false, false);
+            MaximumSessions, false, false, _archivedSessions.ToArray());
     }
 
     public WorkbenchSession Open(string? title = null, string? conversationUrl = null, string? workspaceKey = null)
@@ -53,9 +54,11 @@ public sealed class SessionWorkbench
         }
         var workspace = NormalizeWorkspace(workspaceKey);
         var sanitizedTitle = NormalizeTitle(title, _sessions.Count + 1);
+        var worktree = WorkspaceMetadataDetector.DetectBranch(workspace);
         var item = new WorkbenchSession(
             Guid.NewGuid().ToString("N"), sanitizedTitle, canonicalUrl, workspace,
-            "NOT_CONNECTED", TerminalExecutionPermitted: false, ChatSubmissionPermitted: false);
+            "NOT_CONNECTED", TerminalExecutionPermitted: false, ChatSubmissionPermitted: false,
+            "idle", false, worktree, false);
         _sessions.Add(item);
         _activeSessionId = item.Id;
         ActiveSessionChanged?.Invoke();
@@ -76,13 +79,47 @@ public sealed class SessionWorkbench
         var index = _sessions.FindIndex(s => s.Id == sessionId);
         if (index < 0) return false;
         var wasActive = _activeSessionId == sessionId;
+        var session = _sessions[index] with { IsArchived = true };
         _sessions.RemoveAt(index);
+        _archivedSessions.Add(session);
         if (wasActive)
         {
             _activeSessionId = _sessions.Count == 0 ? null : _sessions[Math.Min(index, _sessions.Count - 1)].Id;
             ActiveSessionChanged?.Invoke();
         }
         SessionClosed?.Invoke(sessionId);
+        return true;
+    }
+
+    public bool Archive(string sessionId) => Close(sessionId);
+
+    public bool Restore(string sessionId)
+    {
+        var index = _archivedSessions.FindIndex(s => s.Id == sessionId);
+        if (index < 0) return false;
+        if (_sessions.Count >= MaximumSessions)
+            throw new InvalidOperationException("MAX_SESSIONS_REACHED");
+        var restored = _archivedSessions[index] with { IsArchived = false };
+        _archivedSessions.RemoveAt(index);
+        _sessions.Add(restored);
+        return true;
+    }
+
+    public bool SetStatus(string sessionId, string status)
+    {
+        var index = _sessions.FindIndex(s => s.Id == sessionId);
+        if (index < 0) return false;
+        if (status is not ("idle" or "running" or "waiting" or "error"))
+            throw new ArgumentException("INVALID_SESSION_STATUS", nameof(status));
+        _sessions[index] = _sessions[index] with { SessionState = status };
+        return true;
+    }
+
+    public bool SetUnread(string sessionId, bool hasUnread)
+    {
+        var index = _sessions.FindIndex(s => s.Id == sessionId);
+        if (index < 0) return false;
+        _sessions[index] = _sessions[index] with { HasUnread = hasUnread };
         return true;
     }
 
@@ -162,15 +199,31 @@ public sealed class SessionWorkbench
 
 public sealed record WorkbenchSession(
     string Id, string Title, string? ConversationUrl, string? WorkspaceKey,
-    string TerminalState, bool TerminalExecutionPermitted, bool ChatSubmissionPermitted);
+    string TerminalState, bool TerminalExecutionPermitted, bool ChatSubmissionPermitted,
+    string SessionState = "idle", bool HasUnread = false, string? WorktreeBranch = null,
+    bool IsArchived = false)
+{
+    public string DisplayBadge => SessionState switch
+    {
+        "running" => "[busy]",
+        "waiting" => "[wait]",
+        "error" => "[err]",
+        _ => HasUnread ? "[idle] •" : "[idle]"
+    };
+    public string WorktreeSummary => string.IsNullOrWhiteSpace(WorktreeBranch)
+        ? (string.IsNullOrWhiteSpace(WorkspaceKey) ? "" : $"({WorkspaceKey})")
+        : $"({WorktreeBranch})";
+    public string DisplayText => $"{DisplayBadge} {Title} {WorktreeSummary}".Trim();
+}
 
-public sealed record WorkbenchCollision(string Type, string LeftSessionId, string RightSessionId);
+public sealed record WorkbenchCollision(string Type, string LeftSessionId, string RightSessionId, string? Detail = null);
 
 public sealed record WorkbenchSnapshot(
     string Schema, string? ActiveSessionId,
     IReadOnlyList<WorkbenchSession> Sessions,
     IReadOnlyList<WorkbenchCollision> Collisions,
-    int MaxSessions, bool TerminalExecutionPermitted, bool ChatSubmissionPermitted);
+    int MaxSessions, bool TerminalExecutionPermitted, bool ChatSubmissionPermitted,
+    IReadOnlyList<WorkbenchSession>? ArchivedSessions = null);
 
 public sealed record WorkbenchTransferPreview(
     string Schema, string SessionId, string Direction,

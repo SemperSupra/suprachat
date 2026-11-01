@@ -131,7 +131,7 @@ static class Program
         var cMd = WorkbenchMetadataExport.Prepare(collisionSnap, "markdown");
         Check(cMd.Content.Contains("- DUPLICATE_CONVERSATION:", StringComparison.Ordinal), "markdown_duplicate_conversation_warning");
         Check(cMd.Content.Contains("- SHARED_WORKSPACE:", StringComparison.Ordinal), "markdown_shared_workspace_warning");
-        Check(cMd.Content.Contains("| Session | ID | Conversation reference | Workspace reference | Terminal |", StringComparison.Ordinal), "markdown_table_header");
+        Check(cMd.Content.Contains("| Session | ID | Status | Worktree / branch | Conversation reference | Workspace reference | Terminal |", StringComparison.Ordinal), "markdown_table_header");
         Check(cMd.Content.Contains("Active session: " + c2.Id, StringComparison.Ordinal), "markdown_active_session");
         Check(cMd.Content.Contains("Chat submission: disabled. Terminal execution: disabled.", StringComparison.Ordinal), "markdown_disabled_capabilities");
         Check(cMd.Content.Contains("Excluded: credentials, transcripts, terminal output, and transfer preview text.", StringComparison.Ordinal), "markdown_excluded_notice");
@@ -264,6 +264,123 @@ static class Program
         // Forget session
         snapDrafts2.Forget(s1.Session.Id);
         MustRefuse(() => snapDrafts2.ReadSelected(), "forget_clears_session_buffers");
+
+        // 7. Parallel-session Indicators, Worktree Metadata, Collisions, Lifecycle & 16-Session Capacity
+        var hardenAuth = new ExperimentalLocalWorkbenchSessionAuthority();
+        var h1 = hardenAuth.CreateAsync("harden-op-0001", "Hardened 1").AsTask().GetAwaiter().GetResult();
+        Check(h1.Applied && h1.Session is not null, "harden_created");
+
+        // Status transitions
+        var stRun = hardenAuth.SetStatusAsync("harden-op-0002", h1.Session!.Id, h1.Session.Version, "running").AsTask().GetAwaiter().GetResult();
+        Check(stRun.Applied && stRun.Session!.SessionState == "running", "status_running");
+        var stWait = hardenAuth.SetStatusAsync("harden-op-0003", h1.Session.Id, stRun.Session!.Version, "waiting").AsTask().GetAwaiter().GetResult();
+        Check(stWait.Applied && stWait.Session!.SessionState == "waiting", "status_waiting");
+        var stErr = hardenAuth.SetStatusAsync("harden-op-0004", h1.Session.Id, stWait.Session!.Version, "error").AsTask().GetAwaiter().GetResult();
+        Check(stErr.Applied && stErr.Session!.SessionState == "error", "status_error");
+        var stIdle = hardenAuth.SetStatusAsync("harden-op-0005", h1.Session.Id, stErr.Session!.Version, "idle").AsTask().GetAwaiter().GetResult();
+        Check(stIdle.Applied && stIdle.Session!.SessionState == "idle", "status_idle");
+
+        // Unread flag & display badge
+        var stUnread = hardenAuth.SetUnreadAsync("harden-op-0006", h1.Session.Id, stIdle.Session!.Version, true).AsTask().GetAwaiter().GetResult();
+        Check(stUnread.Applied && stUnread.Session!.HasUnread, "has_unread_true");
+        var projUnread = hardenAuth.ReadAsync(h1.Session.Id).AsTask().GetAwaiter().GetResult();
+        Check(projUnread.Snapshot!.Sessions[0].DisplayBadge == "[idle] •", "display_badge_unread");
+
+        MustRefuse(() => hardenAuth.SetStatusAsync("harden-op-0007", h1.Session.Id, stUnread.Session!.Version, "bogus_status").AsTask().GetAwaiter().GetResult(), "invalid_status_refused");
+
+        // Worktree branch detection
+        Check(WorkspaceMetadataDetector.DetectBranch(null) is null, "detect_null");
+        Check(WorkspaceMetadataDetector.DetectBranch("nonexistent_path_xyz") is null, "detect_nonexistent");
+        var tempGitDir = Path.Combine(Path.GetTempPath(), "suprachat_wt_test_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempGitDir, ".git"));
+            File.WriteAllText(Path.Combine(tempGitDir, ".git", "HEAD"), "ref: refs/heads/feature/worktree-test\n");
+            var detected = WorkspaceMetadataDetector.DetectBranch(tempGitDir);
+            Check(detected == "feature/worktree-test", "detect_standard_git");
+
+            var tempWorktreeDir = Path.Combine(Path.GetTempPath(), "suprachat_wt2_test_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(tempWorktreeDir);
+                var wtGitDir = Path.Combine(tempGitDir, ".git", "worktrees", "sub-worktree");
+                Directory.CreateDirectory(wtGitDir);
+                File.WriteAllText(Path.Combine(wtGitDir, "HEAD"), "ref: refs/heads/wt-linked-branch\n");
+                File.WriteAllText(Path.Combine(tempWorktreeDir, ".git"), $"gitdir: {wtGitDir}\n");
+                var detectedLinked = WorkspaceMetadataDetector.DetectBranch(tempWorktreeDir);
+                Check(detectedLinked == "wt-linked-branch", "detect_worktree_pointer");
+            }
+            finally
+            {
+                if (Directory.Exists(tempWorktreeDir)) Directory.Delete(tempWorktreeDir, true);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempGitDir)) Directory.Delete(tempGitDir, true);
+        }
+
+        // Collision warnings with details
+        var colConv = "https://chatgpt.com/c/11111111-2222-3333-4444-555555555555";
+        var colWs = "colliding/workspace/path";
+        var hCol1 = hardenAuth.CreateAsync("harden-op-0010", "Col 1", colConv, colWs).AsTask().GetAwaiter().GetResult();
+        var hCol2 = hardenAuth.CreateAsync("harden-op-0011", "Col 2", colConv, colWs).AsTask().GetAwaiter().GetResult();
+        Check(hCol1.Applied && hCol2.Applied, "collision_sessions_created");
+        var receiptCol = hardenAuth.ReadAsync().AsTask().GetAwaiter().GetResult();
+        Check(receiptCol.Snapshot!.Collisions.Count >= 2, "two_collisions_detected");
+        var convCol = receiptCol.Snapshot.Collisions.FirstOrDefault(c => c.Type == "DUPLICATE_CONVERSATION");
+        Check(convCol is not null && convCol.Detail == colConv, "collision_detail_conversation");
+        var wsCol = receiptCol.Snapshot.Collisions.FirstOrDefault(c => c.Type == "SHARED_WORKSPACE");
+        Check(wsCol is not null && wsCol.Detail == colWs, "collision_detail_workspace");
+
+        // Export preview contains collision details & new columns
+        var mdExport = WorkbenchMetadataExport.Prepare(receiptCol.Snapshot, "markdown");
+        Check(mdExport.Content.Contains(colConv, StringComparison.Ordinal), "markdown_export_has_col_detail");
+        Check(mdExport.Content.Contains("| Status | Worktree / branch |", StringComparison.Ordinal), "markdown_export_has_columns");
+        var jsonExport = WorkbenchMetadataExport.Prepare(receiptCol.Snapshot, "json");
+        Check(jsonExport.Content.Contains("\"detail\":", StringComparison.Ordinal), "json_export_has_collision_detail");
+        Check(jsonExport.Content.Contains("\"session_state\":", StringComparison.Ordinal), "json_export_has_session_state");
+
+        // Close / Archive and Restore lifecycle
+        var beforeCloseSnap = hardenAuth.ReadAsync().AsTask().GetAwaiter().GetResult();
+        var activeCountBefore = beforeCloseSnap.Snapshot!.Sessions.Count;
+        var closeRes = hardenAuth.CloseAsync("harden-op-0020", hCol1.Session!.Id, hCol1.Session.Version).AsTask().GetAwaiter().GetResult();
+        Check(closeRes.Applied && closeRes.Session!.IsArchived, "session_archived");
+        var afterCloseSnap = hardenAuth.ReadAsync().AsTask().GetAwaiter().GetResult();
+        Check(afterCloseSnap.Snapshot!.Sessions.Count == activeCountBefore - 1, "active_count_decremented");
+        Check(afterCloseSnap.Snapshot.ArchivedSessions is not null &&
+              afterCloseSnap.Snapshot.ArchivedSessions.Any(s => s.Id == hCol1.Session.Id), "session_in_archived_list");
+
+        // Restore
+        var restoreRes = hardenAuth.RestoreAsync("harden-op-0021", hCol1.Session.Id, closeRes.Session!.Version).AsTask().GetAwaiter().GetResult();
+        Check(restoreRes.Applied && !restoreRes.Session!.IsArchived, "session_restored");
+        var afterRestoreSnap = hardenAuth.ReadAsync().AsTask().GetAwaiter().GetResult();
+        Check(afterRestoreSnap.Snapshot!.Sessions.Count == activeCountBefore, "active_count_restored");
+
+        // 16-session capacity performance qualification
+        var capBench = new SessionWorkbench();
+        for (var i = 0; i < SessionWorkbench.MaximumSessions; i++)
+        {
+            capBench.Open($"Session {i + 1}");
+        }
+        var fullSnap = capBench.Snapshot();
+        Check(fullSnap.Sessions.Count == SessionWorkbench.MaximumSessions, "capacity_16_sessions_filled");
+        MustRefuse(() => capBench.Open("Overflow"), "capacity_17th_session_refused");
+
+        // Close 1 session -> 15 active, 1 archived
+        var closedId = fullSnap.Sessions[0].Id;
+        Check(capBench.Close(closedId), "close_one_of_16");
+        var after1Close = capBench.Snapshot();
+        Check(after1Close.Sessions.Count == 15, "15_active_sessions");
+        Check(after1Close.ArchivedSessions!.Count == 1, "1_archived_session");
+
+        // Can open another session to reach 16 again
+        var reOpened = capBench.Open("Re-opened slot");
+        Check(capBench.Snapshot().Sessions.Count == SessionWorkbench.MaximumSessions, "restored_to_16_active");
+        MustRefuse(() => capBench.Open("Overflow again"), "overflow_again_refused");
+
+        // Restore when at capacity should fail
+        MustRefuse(() => capBench.Restore(closedId), "restore_at_full_capacity_refused");
 
         Console.WriteLine($"WORKBENCH_SOURCE_ONLY_CONTRACT_PASS cases={_cases} provider_contact=false terminal_execution=false browser_submission=false persistent_state=false");
         return 0;
