@@ -150,8 +150,25 @@ try {
     } catch {}
     throw "UIA_MISSING:$id; count=$($diag.Count); elements=$($diag -join ' | ')"
   }
-  $null = Get-Control 'RootTabs'
-  $tab = Get-Control 'Tab.Sessions'
+  $rootTabs = Get-Control 'RootTabs'
+  $tab = $null
+  try { $tab = Get-Control 'Tab.Sessions' } catch {}
+  if (!$tab) {
+    try {
+      $children = $rootTabs.FindAll([System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition)
+      foreach ($c in $children) {
+        if ($c.Current.AutomationId -eq 'Tab.Sessions' -or $c.Current.Name -eq 'Sessions') {
+          $tab = $c
+          break
+        }
+      }
+      if (!$tab -and $children.Count -ge 4) {
+        $tab = $children[3]
+      }
+    } catch {}
+  }
+  if (!$tab) { throw 'UIA_MISSING:Tab.Sessions' }
   $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
   $selection.Select()
   $tabSelected = $false
