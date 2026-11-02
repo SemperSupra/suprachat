@@ -21,10 +21,10 @@ jobs:
       - name: Qualify disposable Avalonia/native environment and extension inventory
         shell: pwsh
         run: |
-          $exe = Join-Path $PWD 'SupraChat.WebViewAvaloniaExtensionProbe/bin/Release/net10.0-windows/SupraChat.WebViewAvaloniaExtensionProbe.exe'
+          $dll = Join-Path $PWD 'SupraChat.WebViewAvaloniaExtensionProbe/bin/Release/net10.0-windows/SupraChat.WebViewAvaloniaExtensionProbe.dll'
           $receipt = Join-Path $env:RUNNER_TEMP 'avalonia-e2.json'
-          $p = Start-Process -FilePath $exe -ArgumentList @('--receipt', ('"' + $receipt + '"')) -PassThru
-          if (-not $p.WaitForExit(90000)) {
+          $p = Start-Process -FilePath 'dotnet' -ArgumentList @($dll, '--receipt', $receipt) -PassThru
+          if (-not $p.WaitForExit(60000)) {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             '{"schema":"suprachat-avalonia-extension-e2/v1","classification":"RUNNER_PROCESS_TIMEOUT","evidence":"SYNTHETIC_ONLY","production_admitted":false}' | Set-Content -Path $receipt -Encoding utf8
             throw 'E2 timed out; native environment compatibility remains UNKNOWN.'
