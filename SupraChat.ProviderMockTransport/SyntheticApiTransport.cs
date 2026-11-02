@@ -149,7 +149,7 @@ public sealed class SyntheticApiTransport
                 return Receipt(operation, ProviderOutcome.Unknown, ProviderFailureClass.Unknown, clock.ElapsedMilliseconds);
 
             var outcome = ProviderStreamReconciler.Classify(operation.OperationId, observations, transportClosed: true);
-            var failure = outcome == ProviderOutcome.Completed ? null :
+            ProviderFailureClass? failure = outcome == ProviderOutcome.Completed ? (ProviderFailureClass?)null :
                 outcome == ProviderOutcome.Incomplete ? ProviderFailureClass.Incomplete :
                 ProviderFailureClass.Unknown;
             return Receipt(operation, outcome, failure, clock.ElapsedMilliseconds);
