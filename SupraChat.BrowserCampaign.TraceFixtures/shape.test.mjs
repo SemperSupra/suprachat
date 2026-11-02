@@ -43,3 +43,19 @@ test("malformed, oversized, spoofed and missing correlation",()=>{
  assert.ok(p.snapshot(s).events.length<=3);
  p.enable(s,false);assert.equal(p.ingest(s,"dataReceived",message()),"OFF");
 });
+test("session capacity limit, revocation, and stale handle refusal",()=>{
+ const p=new SyntheticTraceShape();
+ const sessions=[p.session(),p.session(),p.session(),p.session()];
+ assert.throws(()=>p.session(),RangeError);
+ const first=sessions[0];
+ p.enable(first,true);
+ p.revoke(first);
+ assert.throws(()=>p.enable(first,true),TypeError);
+ assert.throws(()=>p.snapshot(first),TypeError);
+ assert.throws(()=>p.ingest(first,"requestWillBeSent",request()),TypeError);
+ const fifth=p.session();
+ p.enable(fifth,true);
+ assert.equal(p.ingest(fifth,"requestWillBeSent",request()),"OBSERVED");
+ p.close(fifth);
+ assert.throws(()=>p.ingest(fifth,"requestWillBeSent",request()),TypeError);
+});

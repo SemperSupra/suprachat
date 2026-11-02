@@ -25,6 +25,14 @@ export class SyntheticTraceShape {
   this.#owner.set(handle,state);this.#states.add(state);return handle;
  }
  #state(cap){const s=this.#owner.get(cap);if(!s)throw new TypeError("unknown capability");return s;}
+ revoke(cap){
+  const s=this.#state(cap);
+  s.enabled=false;
+  s.active.clear();
+  this.#states.delete(s);
+  this.#owner.delete(cap);
+ }
+ close(cap){this.revoke(cap);}
  enable(cap,yes){const s=this.#state(cap);if(yes!==true&&yes!==false)throw new TypeError("mode");
   s.enabled=yes;if(!yes){s.active.clear();s.gaps++;}}
  #emit(s,event){if(s.events.length>=this.limit){s.events.shift();s.gaps++;}
