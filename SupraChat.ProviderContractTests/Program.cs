@@ -65,4 +65,28 @@ Assert(!ProviderUsageValidation.Valid(new(UsageSource.Unknown, 0, null, null, nu
 Assert(!ProviderUsageValidation.Valid(new(UsageSource.ProviderReported, -1, 3, null, null)), "negative usage refused");
 Assert(!ProviderUsageValidation.Valid(new(UsageSource.ProviderReported, 5, 3, 0.1m, null)), "cost without currency refused");
 Assert(ProviderUsageValidation.Valid(new(UsageSource.ProviderReported, 5, 3, 0.1m, "USD")), "source-tagged usage");
+var goodReceipt = new ProviderReceipt(
+    ProviderReceiptPolicy.Schema, "op-1", "binding-1", ProviderOutcome.Completed,
+    null, UsageSource.ProviderReported, 5, 3, 40, 12, "req-abc", false);
+Assert(ProviderReceiptPolicy.Valid(goodReceipt), "metadata-only success receipt valid");
+Assert(!ProviderReceiptPolicy.Valid(goodReceipt with { ContainsContent = true }), "payload-bearing receipt refused");
+Assert(!ProviderReceiptPolicy.Valid(goodReceipt with { ProviderRequestAlias = "Bearer secret" }), "unbounded request alias refused");
+Assert(!ProviderReceiptPolicy.Valid(goodReceipt with { FirstChunkMs = 41 }), "first chunk after completion refused");
+Assert(!ProviderReceiptPolicy.Valid(goodReceipt with { Outcome = ProviderOutcome.Admitted }), "admission not settled");
+Assert(!ProviderReceiptPolicy.Valid(goodReceipt with { FailureClass = ProviderFailureClass.Policy }), "success cannot claim failure");
+var unknownReceipt = goodReceipt with {
+    Outcome = ProviderOutcome.Unknown,
+    FailureClass = ProviderFailureClass.Unknown,
+    UsageSource = UsageSource.Unknown,
+    InputTokens = null,
+    OutputTokens = null
+};
+Assert(ProviderReceiptPolicy.Valid(unknownReceipt), "uncertain outcome represented explicitly");
+Assert(!ProviderReceiptPolicy.Valid(unknownReceipt with { InputTokens = 0 }), "unknown usage not fabricated");
+var retry = new ProviderRetryFacts(true, false, false, SideEffectCertainty.None);
+Assert(ProviderRetryPolicy.Eligible(retry), "transient pre-submit candidate eligible");
+Assert(!ProviderRetryPolicy.Eligible(retry with { Submitted = true }), "submitted request never auto-retried");
+Assert(!ProviderRetryPolicy.Eligible(retry with { StreamingStarted = true }), "streaming request never auto-retried");
+Assert(!ProviderRetryPolicy.Eligible(retry with { SideEffects = SideEffectCertainty.Possible }), "possible side effect blocks retry");
+Assert(!ProviderRetryPolicy.Eligible(retry with { Transient = false }), "permanent failure blocks retry");
 Console.WriteLine($"QUALIFIED_SYNTHETIC_CONTRACT_ONLY cases={total} providers=2 session_authority_changed=false live_network=false");
