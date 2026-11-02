@@ -1,0 +1,41 @@
+name: Qualify Avalonia explicit WebView2 extension environment E2
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.WebViewAvaloniaExtensionProbe/**'
+      - '.github/workflows/qualify-webview-avalonia-e2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-avalonia-e2:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build synthetic Avalonia environment bridge
+        run: dotnet build SupraChat.WebViewAvaloniaExtensionProbe/SupraChat.WebViewAvaloniaExtensionProbe.csproj -c Release
+      - name: Qualify disposable Avalonia/native environment and extension inventory
+        shell: pwsh
+        run: |
+          $dll = Join-Path $PWD 'SupraChat.WebViewAvaloniaExtensionProbe/bin/Release/net10.0-windows/SupraChat.WebViewAvaloniaExtensionProbe.dll'
+          $receipt = Join-Path $env:RUNNER_TEMP 'avalonia-e2.json'
+          $p = Start-Process -FilePath 'dotnet' -ArgumentList @($dll, '--receipt', $receipt) -PassThru
+          if (-not $p.WaitForExit(60000)) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            '{"schema":"suprachat-avalonia-extension-e2/v1","classification":"RUNNER_PROCESS_TIMEOUT","evidence":"SYNTHETIC_ONLY","production_admitted":false}' | Set-Content -Path $receipt -Encoding utf8
+            throw 'E2 timed out; native environment compatibility remains UNKNOWN.'
+          }
+          if ($p.ExitCode -ne 0) { throw 'E2 native qualification failed; see sanitized receipt.' }
+      - name: Preserve only synthetic receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-avalonia-webview-e2
+          path: |
+            ${{ runner.temp }}/avalonia-e2.json
+            ${{ runner.temp }}/avalonia-e2.phase.txt
+          if-no-files-found: ignore
