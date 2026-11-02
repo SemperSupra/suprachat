@@ -1,0 +1,20 @@
+name: Qualify synthetic trace shape S0
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.BrowserCampaign.TraceFixtures/**'
+      - '.github/workflows/qualify-browser-trace-s0.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-trace-shape:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Execute synthetic-only trace shape and negative tests
+        run: node --test SupraChat.BrowserCampaign.TraceFixtures/*.test.mjs
