@@ -92,6 +92,16 @@ public static class ProviderAdmission
             binding.BindingRevision <= 0)
             return ProviderDecision.Refuse("INVALID_GENERATION");
 
+        if (!Enum.IsDefined(binding.Surface))
+            return ProviderDecision.Refuse("INVALID_SURFACE");
+
+        // These refs are *opaque aliases*, never emails, token strings or URLs.
+        if (!IsOpaqueAlias(binding.AccountRef) || !IsOpaqueAlias(binding.EndpointPolicyRef))
+            return ProviderDecision.Refuse("UNSAFE_BINDING_ALIAS");
+
+        if (capabilities.Features is null)
+            return ProviderDecision.Refuse("INVALID_CAPABILITIES");
+
         if (operation.SessionId != binding.SessionId ||
             operation.BindingId != binding.BindingId ||
             operation.ProviderId != binding.ProviderId ||
@@ -129,6 +139,16 @@ public static class ProviderAdmission
         if (prior.OperationId != candidate.OperationId)
             return "DISTINCT_OPERATION";
         return prior == candidate ? "IDENTICAL_REPLAY" : "REPLAY_CONFLICT";
+    }
+
+    private static bool IsOpaqueAlias(string? value)
+    {
+        if (value is null || value.Length is < 1 or > 64)
+            return false;
+        foreach (var ch in value)
+            if (!(ch is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-'))
+                return false;
+        return true;
     }
 
     private static bool IsSha256Hex(string? value)
