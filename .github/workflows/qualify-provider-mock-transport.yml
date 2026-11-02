@@ -1,0 +1,29 @@
+name: Qualify two synthetic provider transports
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.ProviderContracts/**'
+      - 'SupraChat.ProviderMockTransport/**'
+      - 'SupraChat.ProviderMockTransportTests/**'
+      - '.github/workflows/qualify-provider-mock-transport.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: provider-transport-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mock-transport:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify fake-handler transport and protocol negatives
+        run: dotnet run --project SupraChat.ProviderMockTransportTests/SupraChat.ProviderMockTransportTests.csproj -c Release
