@@ -1,0 +1,36 @@
+name: Qualify disposable WebView2 extension E1
+
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.WebViewExtensionProbe/**'
+      - '.github/workflows/qualify-webview-extension.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-webview2-extension-e1:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build disposable native extension fixture
+        shell: pwsh
+        run: dotnet build SupraChat.WebViewExtensionProbe/SupraChat.WebViewExtensionProbe.csproj -c Release
+      - name: Exercise extension-enabled WebView2 profile with loopback-only MV3
+        shell: pwsh
+        run: |
+          dotnet run --project SupraChat.WebViewExtensionProbe/SupraChat.WebViewExtensionProbe.csproj -c Release --no-build -- --receipt "$env:RUNNER_TEMP/webview-extension-e1.json"
+          if ($LASTEXITCODE -ne 0) { throw 'WebView2 E1 qualification failed; retain first failure and classify environment/runtime separately.' }
+      - name: Retain sanitized E1 capability receipt (not signed-in or Avalonia HIL)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-webview2-extension-e1
+          path: ${{ runner.temp }}/webview-extension-e1.json
+          if-no-files-found: ignore
