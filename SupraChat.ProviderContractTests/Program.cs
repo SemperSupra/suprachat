@@ -43,6 +43,12 @@ Assert(!ProviderAdmission.Evaluate(a, Caps("mock-a"), opA with { RequestDigest =
 Assert(!ProviderAdmission.Evaluate(a with { Schema = "future" }, Caps("mock-a"), opA).Admitted, "unknown schema refused");
 Assert(!ProviderAdmission.Evaluate(a with { AuthGeneration = 0 }, Caps("mock-a"), opA).Admitted, "zero auth generation refused");
 Assert(!ProviderAdmission.Evaluate(a, Caps("mock-b"), opA).Admitted, "capabilities provider mismatch refused");
+var unsafeAccount = a with { AccountRef = "user@example.com" };
+Assert(!ProviderAdmission.Evaluate(unsafeAccount, Caps("mock-a"), Operation(unsafeAccount, "unsafe")).Admitted, "email account alias refused");
+var unsafeEndpoint = a with { EndpointPolicyRef = "https://private.example" };
+Assert(!ProviderAdmission.Evaluate(unsafeEndpoint, Caps("mock-a"), Operation(unsafeEndpoint, "unsafe2")).Admitted, "endpoint URL refused");
+Assert(!ProviderAdmission.Evaluate(a with { Surface = (ProviderSurface)99 }, Caps("mock-a"), opA).Admitted, "unknown surface refused");
+Assert(!ProviderAdmission.Evaluate(a, Caps("mock-a") with { Features = null! }, opA).Admitted, "null capability map refused");
 Assert(!ProviderAdmission.Evaluate(a, Caps("mock-a") with { Revision = "old" }, opA).Admitted, "stale capability revision refused");
 Assert(ProviderAdmission.CompareReplay(opA, opA with { }) == "IDENTICAL_REPLAY", "identical replay recognized");
 Assert(ProviderAdmission.CompareReplay(opA, opA with { RequestDigest = new string('b', 64) }) == "REPLAY_CONFLICT", "changed payload refused");
