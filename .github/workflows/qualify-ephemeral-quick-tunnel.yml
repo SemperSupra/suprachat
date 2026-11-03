@@ -1,0 +1,60 @@
+name: Qualify Ephemeral Quick Tunnel (public synthetic only)
+on:
+  pull_request:
+    paths:
+      - 'tools/ephemeral-tunnel-lab/**'
+      - '.github/workflows/qualify-ephemeral-quick-tunnel.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ephemeral-quick-tunnel-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mcp-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: tools/ephemeral-tunnel-lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/ephemeral-tunnel-lab/go.mod
+          cache: false
+      - name: Run bounded server/auth/HTTP negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./... -count=1
+          go test ./... -count=5
+          echo 'QUALIFIED_QUICK_TUNNEL_MCP_CONTRACT_ONLY no_credentials=true'
+  quick-tunnel-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: tools/ephemeral-tunnel-lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/ephemeral-tunnel-lab/go.mod
+          cache: false
+      - name: Execute live disposable Cloudflare Quick Tunnel and remote negative oracles
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./run-quick-tunnel.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ephemeral-quick-tunnel-sanitized-evidence
+          path: tools/ephemeral-tunnel-lab/evidence/quick-tunnel-receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
