@@ -137,7 +137,15 @@ try {
   try {
     await invoke('browser_navigate', { url: 'https://chatgpt.com/' });
     const publicSnapshot = await invoke('browser_snapshot');
-    publicSite = publicSnapshot.trim().length ? 'PUBLIC_SIGNED_OUT_PAGE_OBSERVABLE' :
+    // A nonempty snapshot may be only a CDN or anti-bot interstitial.
+    // Classify using public UI markers; never export the raw snapshot.
+    const challenged = /verify you are human|checking your browser|just a moment|security check|captcha/i
+      .test(publicSnapshot);
+    const publicApp = /ChatGPT|Ask anything/i.test(publicSnapshot) &&
+      /Log in|Sign up|Sign in|Continue as guest/i.test(publicSnapshot);
+    publicSite = challenged ? 'PUBLIC_BROWSER_CHALLENGE_OBSERVED' :
+      publicApp ? 'PUBLIC_SIGNED_OUT_UI_MARKERS_OBSERVED' :
+      publicSnapshot.trim().length ? 'PUBLIC_RESPONSE_UNCLASSIFIED' :
       'PUBLIC_PAGE_NO_ACCESSIBILITY_SNAPSHOT';
   } catch {
     publicSite = 'PUBLIC_SITE_BLOCKED_OR_UNAVAILABLE';
