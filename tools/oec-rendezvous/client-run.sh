@@ -14,16 +14,10 @@ for _ in $(seq 1 75);do
 done
 if ! test -s "$state/peer/endpoint.json";then echo "RENDEZVOUS_SERVER_HANDOFF_MISSING";exit 1;fi
 # Reject malformed URL and unexpected cipher filename without printing either.
-remote_url="$(python3 - "$state/peer/endpoint.json" <<'PY'
-import json,sys,re
-with open(sys.argv[1]) as f:x=json.load(f)
-url=x.get("endpoint","")
-assert x.get("schema")=="oec-rendezvous-public/v1"
-assert x.get("cipher")=="encrypted-token.bin"
-assert re.fullmatch(r"https://[a-zA-Z0-9-]+[.]trycloudflare[.]com",url)
-print(url)
-PY
-)"
+remote_url="$(python3 tools/oec-rendezvous/handoff.py verify \
+ --manifest "$state/peer/endpoint.json" \
+ --client-pem "$state/public/client.pem" \
+ --encrypted-token "$state/peer/encrypted-token.bin")"
 openssl pkeyutl -decrypt -inkey "$state/private/client-key.pem" \
   -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
   -in "$state/peer/encrypted-token.bin" -out "$state/private/remote-token"
