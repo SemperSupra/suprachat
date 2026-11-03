@@ -40,7 +40,7 @@ jobs:
       - name: Publish only public endpoint and RSA-OAEP ciphertext
         uses: actions/upload-artifact@v4
         with:
-          name: oec-server-rendezvous
+          name: oec-server-rendezvous-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/oec-server/public/
           retention-days: 1
       - name: Await independent client receipt via authenticated GitHub artifacts
@@ -65,7 +65,7 @@ jobs:
       - name: Publish only the public key
         uses: actions/upload-artifact@v4
         with:
-          name: oec-client-public
+          name: oec-client-public-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/oec-client/public/client.pem
           retention-days: 1
       - name: Decrypt private handoff and qualify HTTPS MCP externally
@@ -75,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: oec-client-verified
+          name: oec-client-verified-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/oec-client/receipt/client-receipt.json
           if-no-files-found: ignore
           retention-days: 1
