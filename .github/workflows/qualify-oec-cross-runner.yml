@@ -12,7 +12,17 @@ concurrency:
   group: oec-cross-runner-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  handoff-contracts:
+    name: Run-scoped envelope replay and identity security contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject replay, substituted identities, broad tools and expired tickets
+        shell: bash
+        run: python3 -m unittest discover -s tools/oec-rendezvous -p 'test_handoff.py' -v
   server:
+    needs: handoff-contracts
     name: Independent server runner (Cloudflare HTTPS)
     runs-on: ubuntu-24.04
     timeout-minutes: 11
@@ -41,6 +51,7 @@ jobs:
         shell: bash
         run: bash ./tools/oec-rendezvous/server-stop.sh
   client:
+    needs: handoff-contracts
     name: Independent client runner (private RSA key)
     runs-on: ubuntu-24.04
     timeout-minutes: 11
