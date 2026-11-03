@@ -1,0 +1,37 @@
+name: Qualify OEC Mirror Observer v0.2
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-observer-v02/**'
+      - '.github/workflows/qualify-oec-observer-v02.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-observer-v02-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-observer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: tools/oec-observer-v02
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/oec-observer-v02/go.mod
+          cache: false
+      - name: Contract, adversarial, and idempotency qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./... -count=1 -v
+          go test ./... -count=5
+          echo 'QUALIFIED_SYNTHETIC_OBSERVER_MCP_V02 no_actual_browser=true no_chatgpt_internals=true'
