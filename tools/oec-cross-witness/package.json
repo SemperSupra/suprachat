@@ -1,0 +1,13 @@
+{
+  "name": "oec-cross-witness-synthetic-cycle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Disposable zero-credential cross-witness observable synthetic cycle",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.25.2",
+    "@modelcontextprotocol/inspector": "2.13.0",
+    "@playwright/mcp": "0.0.84",
+    "chrome-devtools-mcp": "1.12.0"
+  }
+}
