@@ -50,7 +50,7 @@ try {
  for(const n of ['new_page','take_snapshot','list_network_requests','list_console_messages'])check(known.has(n),'missing_'+n);
  await call('new_page',{url,timeout:15000});
  const pageList=await call('list_pages');
- const pageMatch=pageList.match(/(?:^|\\n)\\s*(\\d+)\\s*:\\s*http:\/\/127[.]0[.]0[.]1:/);
+ const pageMatch=pageList.match(/(?:^|\n)\s*(\d+)\s*:\s*http:\/\/127[.]0[.]0[.]1:/);
  check(Boolean(pageMatch),'synthetic_page_id_not_observed');
  const pageId=Number(pageMatch[1]);
  const snapshot=await call('take_snapshot',{pageId});
