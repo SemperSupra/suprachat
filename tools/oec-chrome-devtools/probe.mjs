@@ -49,17 +49,21 @@ try {
  const known=new Set(tools.tools.map(t=>t.name));
  for(const n of ['new_page','take_snapshot','list_network_requests','list_console_messages'])check(known.has(n),'missing_'+n);
  await call('new_page',{url,timeout:15000});
- const snapshot=await call('take_snapshot');
+ const pageList=await call('list_pages');
+ const pageMatch=pageList.match(/(?:^|\\n)\\s*(\\d+)\\s*:\\s*http:\/\/127[.]0[.]0[.]1:/);
+ check(Boolean(pageMatch),'synthetic_page_id_not_observed');
+ const pageId=Number(pageMatch[1]);
+ const snapshot=await call('take_snapshot',{pageId});
  check(snapshot.includes('OEC DevTools Synthetic Witness'),'snapshot_missing_fixture');
- const requests=await call('list_network_requests',{pageSize:100});
+ const requests=await call('list_network_requests',{pageId,pageSize:100});
  check(requests.includes('/api/data'),'api_network_request_missing');
- const consoleLog=await call('list_console_messages',{pageSize:100});
+ const consoleLog=await call('list_console_messages',{pageId,pageSize:100});
  check(consoleLog.includes('OEC_SYNTHETIC_CONSOLE_MARKER'),'console_marker_missing');
  let performance='NOT_ATTEMPTED';
  if(known.has('performance_start_trace')&&known.has('performance_stop_trace')){
    try {
-     await call('performance_start_trace',{reload:true,autoStop:false});
-     await call('performance_stop_trace',{});
+     await call('performance_start_trace',{pageId,reload:true,autoStop:false});
+     await call('performance_stop_trace',{pageId});
      performance='PASS';
    } catch { performance='UNKNOWN_FIRST_FAILURE'; }
  }
