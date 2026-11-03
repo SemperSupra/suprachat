@@ -14,7 +14,7 @@ Only fixed booleans and bounded counts are retained. No text/values, URLs, windo
 - Agent: proposed read-only `observe_environment`, `inspect_ui`, and `compare_state` capabilities; `remote_control=false`.
 
 ## Qualification
-`python3 -m unittest discover -s tools/oec-observation-contract -p 'test_contract.py' -v`
+`python3 -m unittest discover -s tools/oec-observation-contract -p 'test_*.py' -v`
 
 Cloud CI qualifies the validator on public synthetic fixtures. It does not prove authenticated-WebUI behavior, ownership of local login, or any OpenAI tunnel association.
 
@@ -26,3 +26,34 @@ Cloud CI qualifies the validator on public synthetic fixtures. It does not prove
 5. Test unauthorized calls, replay/expiry, credential leakage and teardown before any live authenticated tunnel use.
 
 **Authority:** SupraChat private DLE #2. No native code changes, merges, production credentials, private Actions minutes, release, or deployment.
+
+## Existing first-party WebView2 metadata primitive (reuse, do not rebuild)
+
+Canonical main already implements a consent-gated **Windows** WebView2 metadata capture with a native review window. Relevant source: `SupraChat/MainWindow.axaml.cs`, `SupraChat/Core/WindowsConsentedMetadataSession.cs`, `SupraChat/Core/NativeMetadataSummary.cs` and `NativeMetadataSummaryStore.cs`.
+
+Source-derived safeguards: exact `https://chatgpt.com/` origin, in-process view identity, prepare/review/confirm, a 120-second lease, stop on navigation/view replacement/expiry, no automatic upload, and atomic no-overwrite local aggregate persistence. The capture is **network metadata**, not conversation/DOM content. It does not verify login or infer model internals.
+
+To activate *only after authorized local source review* on a signed-in Windows SupraChat instance:
+
+```powershell
+$out = Join-Path $env:LOCALAPPDATA 'SemperSupra\SupraChat\metadata-experiments'
+& '.\SupraChat.exe' '--first-party-metadata-hil' '--open-metadata-review' "--metadata-summary-directory=$out"
+```
+
+The command opens a review window; the operator must acknowledge, prepare and confirm separately. Capture remains OFF until confirmation. Stop/save and close the review normally. The original aggregate is private local evidence; do not attach it to a public GitHub issue or public runner.
+
+After capture, optional **local-only** minimization for a specific saved `suprachat-metadata-summary-*.json` file:
+
+```powershell
+python .\tools\oec-observation-contract\export_native_summary.py 'C:\PATH\TO\APP-AUTHORED-SUMMARY.json' > '.\sanitized-projection.json'
+```
+
+`native_summary.py` verifies the app-authored first-party v3 source schema, consent-lifecycle agreement, safe end state and no-export flags, then emits only aggregate counts, failure classifications and SHA-256 of the source file. It explicitly sets `authenticated_state=OPERATOR_CHECK_REQUIRED` and `verified_provider_action=false`; it never exports raw events, diagnostics, URLs, cookies, credentials or content. A failed validation produces no projection.
+
+The separate PowerShell 5.1 `Inspect-SupraChatStructure.ps1` optionally provides structural counts for `Tab.ChatGPT` and `Tab.Sessions`. Public CI uses `-SyntheticFixture`; a local operator must use `-OperatorAttestsSignedIn` and supply the authorized SupraChat ProcessId. That attestation **is not independent login verification**. This source-isolated local one-shot is not an MCP bridge.
+
+## Connection admission
+
+The independently qualified public Cloudflare cross-runner MCP transport does not grant signed-in browser access. For OpenAI-native direct ChatGPT tool calls, use the upstream `openai/tunnel-client` Secure MCP Tunnel with a locally reachable MCP server, tunnel association, runtime API key and account/workspace permission to create a custom MCP plugin. The tunnel is the transport; the server still needs narrow read-only operations. Do not reuse or bypass the earlier refused network-bridge source write. Use only a reviewed, restricted server and sanitized projections once independently admitted. No live endpoints, credential values or sovereign infrastructure details belong in this public workcell.
+
+**Local readiness distinction:** Native UIA and consented first-party metadata capture are available for local testing; ChatGPT-facing MCP connection remains unqualified and should not be presented as working.
