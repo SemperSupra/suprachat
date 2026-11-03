@@ -30,8 +30,9 @@ openssl pkeyutl -decrypt -inkey "$state/private/client-key.pem" \
 export OEC_LAB_TOKEN
 OEC_LAB_TOKEN="$(cat "$state/private/remote-token")"
 mkdir -p "$state/receipt"
-python3 tools/ephemeral-tunnel-lab/verify_remote.py --url "$remote_url" \
- --receipt "$state/receipt/client-receipt.json"
+server_nonce="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["server_nonce"])' "$state/peer/endpoint.json")"
+python3 tools/oec-rendezvous/verify-crossrunner.py --url "$remote_url" \
+ --server-nonce "$server_nonce" --receipt "$state/receipt/client-receipt.json"
 python3 - "$state/receipt/client-receipt.json" <<'PY'
 import json,sys
 with open(sys.argv[1]) as f:x=json.load(f)
