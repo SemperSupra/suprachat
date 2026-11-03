@@ -1,0 +1,39 @@
+name: Qualify OEC MCP Inspector (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-inspector/**'
+      - '.github/workflows/qualify-oec-inspector.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-inspector-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  inspector-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/oec-observer-v02/go.mod
+          cache: false
+      - name: Install pinned MCP Inspector
+        working-directory: tools/oec-inspector
+        run: npm install --ignore-scripts --no-audit --no-fund --save-exact
+      - name: Inspect real OEC MCP fixture using official Inspector CLI
+        shell: bash
+        run: bash tools/oec-inspector/qualify.sh
+      - name: Upload sanitized proof only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-inspector-sanitized-receipt
+          path: tools/oec-inspector/evidence/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
