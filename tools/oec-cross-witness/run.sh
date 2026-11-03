@@ -15,7 +15,7 @@ trap cleanup EXIT INT TERM
 export OEC_EXPERIMENT_ID OEC_OBSERVER_TOKEN
 OEC_EXPERIMENT_ID="$(python3 -c 'import secrets;print("e"+secrets.token_hex(12))')"
 OEC_OBSERVER_TOKEN="$(python3 -c 'import secrets;print(secrets.token_hex(32))')"
-go build -trimpath -C ../oec-observer-v02 -o "$tmp/oec-observer" ./cmd/observer
+go -C ../oec-observer-v02 build -trimpath -o "$tmp/oec-observer" ./cmd/observer
 "$tmp/oec-observer" > "$tmp/observer.log" 2>&1 &
 server_pid=$!
 ready=0
