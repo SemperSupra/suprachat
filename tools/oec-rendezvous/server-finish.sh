@@ -6,7 +6,7 @@ state="$RUNNER_TEMP/oec-server"
 mkdir -p "$state/client-result"
 for _ in $(seq 1 70);do
  if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-  --name "oec-client-verified" --dir "$state/client-result" >/dev/null 2>&1 \
+  --name "oec-client-verified-attempt-$GITHUB_RUN_ATTEMPT" --dir "$state/client-result" >/dev/null 2>&1 \
   && test -s "$state/client-result/client-receipt.json";then break;fi
  sleep 2
 done
