@@ -1,0 +1,82 @@
+name: Qualify OEC Native UIA Dual View (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-uia-dual-view/**'
+      - '.github/workflows/qualify-oec-uia-dual-view.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-uia-dual-view-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compare-native-uia:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Parse PS5.1 and test non-SupraChat refusal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='tools/oec-uia-dual-view/Compare-UIATrees.ps1'
+          $tokens=$null; $errors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if (@($errors).Count -gt 0) { throw 'DUAL_VIEW_PS51_PARSE_FAILED' }
+          $negative= & powershell.exe -NoProfile -NonInteractive -File $script -ProcessId $PID -Samples 1 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $negative -notmatch 'REFUSED_NON_SYNTHETIC_PROCESS') {
+            throw 'DUAL_VIEW_NON_SYNTHETIC_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          Write-Host 'QUALIFIED_DUAL_VIEW_PS51_PARSE_AND_REFUSAL'
+      - name: Build unmodified SupraChat Windows application
+        shell: pwsh
+        run: |
+          dotnet publish SupraChat/SupraChat.csproj -c Release -r win-x64 --self-contained false -o out/oec-dual-view-fixture
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path out/oec-dual-view-fixture/SupraChat.exe)) {
+            throw 'DUAL_VIEW_APP_BUILD_FAILED'
+          }
+      - name: Compare UIA FindAll and ControlViewWalker on same process
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:SUPRACHAT_INSTALL_TRACE_ID=[Guid]::NewGuid().ToString('N')
+          $env:SUPRACHAT_INSTALL_SESSION_ID=[Guid]::NewGuid().ToString('N')
+          $exe=Join-Path $PWD 'out/oec-dual-view-fixture/SupraChat.exe'
+          $p=Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 1
+            if ($p.HasExited) { throw 'DUAL_VIEW_APP_EXITED' }
+            $raw= & powershell.exe -NoProfile -NonInteractive -File 'tools/oec-uia-dual-view/Compare-UIATrees.ps1' -ProcessId $p.Id -Samples 6 -IntervalMs 1000
+            if ($LASTEXITCODE -ne 0) { throw 'DUAL_VIEW_REAL_PROVIDER_FAILED' }
+            $doc=($raw | Out-String).Trim() | ConvertFrom-Json
+            if ($doc.schema -ne 'suprachat-uia-dual-view/v1' -or
+                $doc.evidence_class -ne 'PUBLIC_SYNTHETIC_NATIVE_UIA' -or
+                $doc.sample_count -ne 6 -or $doc.readonly -ne $true -or
+                $doc.sensitive_content_captured -ne $false) {
+              throw 'DUAL_VIEW_RECEIPT_CONTRACT_FAIL'
+            }
+            $top=@('schema','evidence_class','readonly','sensitive_content_captured','sample_count','samples')
+            $sample=@('sample','elapsed_ms','root_present','root_id_valid','root_process_valid','findall_count','findall_target','findall_ms','walker_count','walker_target','walker_ms','error_class')
+            if (@($doc.PSObject.Properties.Name | Where-Object {$_ -notin $top}).Count -gt 0) {throw 'DUAL_VIEW_EXTRA_TOP_FIELD'}
+            foreach ($s in $doc.samples) {
+              if (@($s.PSObject.Properties.Name | Where-Object {$_ -notin $sample}).Count -gt 0) {throw 'DUAL_VIEW_EXTRA_SAMPLE_FIELD'}
+            }
+            New-Item -ItemType Directory -Force 'tools/oec-uia-dual-view/evidence' | Out-Null
+            $doc | ConvertTo-Json -Compress -Depth 5 | Set-Content -Encoding utf8 'tools/oec-uia-dual-view/evidence/dual-view.json'
+            Write-Host 'QUALIFIED_REAL_WINDOWS_UIA_DUAL_VIEW_OBSERVATION'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload metadata-only sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-uia-dual-view-sanitized-receipt
+          path: tools/oec-uia-dual-view/evidence/dual-view.json
+          if-no-files-found: ignore
+          retention-days: 7
