@@ -1,0 +1,22 @@
+name: OEC Disposable Quick Tunnel Lab
+description: Qualify a bounded synthetic MCP service over a temporary Cloudflare HTTPS tunnel; no real credentials or product sessions
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+    - name: Verify live temporary HTTPS transport, tool discovery and authorization negatives
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash "${{ github.action_path }}/run-quick-tunnel.sh"
+    - name: Publish only the sanitized evidence receipt
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: oec-quick-tunnel-${{ github.job }}
+        path: ${{ github.action_path }}/evidence/quick-tunnel-receipt.json
+        if-no-files-found: ignore
+        retention-days: 7
