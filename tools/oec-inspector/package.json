@@ -1,0 +1,8 @@
+{
+  "name": "oec-inspector-public-qualification",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@modelcontextprotocol/inspector": "2.13.0"
+  }
+}
