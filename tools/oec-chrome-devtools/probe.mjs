@@ -50,7 +50,7 @@ try {
  for(const n of ['new_page','take_snapshot','list_network_requests','list_console_messages'])check(known.has(n),'missing_'+n);
  await call('new_page',{url,timeout:15000});
  const pageList=await call('list_pages');
- const pageMatch=pageList.match(/(?:^|\n)\s*(\d+)\s*:\s*http:\/\/127[.]0[.]0[.]1:/);
+ const pageMatch=pageList.match(/(?:^|\n)\s*(\d+)\s*:[^\n]*http:\/\/127[.]0[.]0[.]1:\d+\/fixture/);
  if(!pageMatch){
    // Only the original synthetic fixture is open; redact its ephemeral port.
    console.error('OEC_SYNTHETIC_PAGE_LIST '+pageList.slice(0,1000)
