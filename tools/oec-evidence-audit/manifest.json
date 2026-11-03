@@ -1,0 +1,39 @@
+{
+  "schema": "oec-evidence-artifact-manifest/v1",
+  "repository": "SemperSupra/suprachat",
+  "evidence_class": "PUBLIC_SYNTHETIC_ONLY",
+  "sources": [
+    {
+      "name": "inspector",
+      "run_id": 41661531502,
+      "artifact_id": 13242910703,
+      "head_sha": "4791b5910394bc07cf4628eb1d3abce512d2190b",
+      "archive_sha256": "b96bfe3c94b7737911c794f242b14ab738961f9cd9d153bdb0afc1bc2af4d3dc",
+      "receipt_schema": "oec-inspector-public-receipt/v1"
+    },
+    {
+      "name": "chrome",
+      "run_id": 41662816944,
+      "artifact_id": 13244005739,
+      "head_sha": "83301fec49a004ef9ddbe9d8580629eab67fa074",
+      "archive_sha256": "fd1c44793c69fb834aaa8ba53b96ab9fa3d4222f981aec395f7859ccb0235a72",
+      "receipt_schema": "oec-chrome-devtools-witness/v1"
+    },
+    {
+      "name": "otel",
+      "run_id": 41661990184,
+      "artifact_id": 13243100770,
+      "head_sha": "144be27740c09e84d8693bcd8e2eab3b6d24a637",
+      "archive_sha256": "623a6e7b5f9da1359ad55861cb1aef3aede8ab279d86315358d889a716e7ee26",
+      "receipt_schema": "oec-otel-synthetic-receipt/v1"
+    },
+    {
+      "name": "cross-witness",
+      "run_id": 41708165067,
+      "artifact_id": 13267945369,
+      "head_sha": "f3e400aa768a0a87402b4ff92f0656fb1819ee79",
+      "archive_sha256": "8b1b9af9f6c67e9011ce941bfbe01fb20a349d6b5f565a4d78238802740eefd0",
+      "receipt_schema": "oec-cross-witness-cycle/v1"
+    }
+  ]
+}
