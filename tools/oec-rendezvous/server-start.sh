@@ -41,17 +41,25 @@ if [[ -z "$host" ]];then echo "RENDEZVOUS_TUNNEL_NOT_READY";exit 1;fi
 openssl pkeyutl -encrypt -pubin -inkey "$state/peer/client.pem" -in "$state/private/token" \
  -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
  -out "$state/public/encrypted-token.bin"
-python3 - "$state/public/endpoint.json" "$host" "$state/private/token" <<'PY'
+server_nonce="$(python3 - "$state/private/token" <<'PY'
 import json,sys,urllib.request
-token=open(sys.argv[3]).read()
-q=json.dumps({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"lab.observe","arguments":{}}}).encode()
-request=urllib.request.Request("http://127.0.0.1:18761/mcp",data=q,headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"},method="POST")
+token=open(sys.argv[1]).read()
+q=json.dumps({"jsonrpc":"2.0","id":12,"method":"tools/call",
+ "params":{"name":"lab.observe","arguments":{}}}).encode()
+request=urllib.request.Request(
+ "http://127.0.0.1:18761/mcp",data=q,
+ headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"},
+ method="POST")
 with urllib.request.urlopen(request,timeout=4) as res:
-    observer=json.load(res)["result"]["structuredContent"]
+ observer=json.load(res)["result"]["structuredContent"]
 assert observer["evidence_class"]=="DIRECT_RUNNER"
-nonce=observer["nonce"]
-assert len(nonce)==24
-with open(sys.argv[1],"w") as f:
-    json.dump({"schema":"oec-rendezvous-public/v1","endpoint":sys.argv[2],"cipher":"encrypted-token.bin","server_nonce":nonce},f)
+assert len(observer["nonce"])==24
+print(observer["nonce"])
 PY
+)"
+python3 tools/oec-rendezvous/handoff.py create \
+ --manifest "$state/public/endpoint.json" \
+ --endpoint "$host" --server-nonce "$server_nonce" \
+ --client-pem "$state/peer/client.pem" \
+ --encrypted-token "$state/public/encrypted-token.bin"
 echo "RENDEZVOUS_SERVER_PUBLISHED_ENCRYPTED_HANDOFF_ONLY"
