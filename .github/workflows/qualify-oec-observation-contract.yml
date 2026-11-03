@@ -27,8 +27,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python -m unittest discover -s tools/oec-observation-contract -p 'test_contract.py' -v
+          python -m unittest discover -s tools/oec-observation-contract -p 'test_*.py' -v
       - name: Emit only fixed-schema synthetic test receipt
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
           python - <<'PY'
@@ -38,7 +40,8 @@ jobs:
           item = {
               "schema": "oec-observation-contract-ci/v1",
               "evidence_class": "PUBLIC_SYNTHETIC_CONTRACT_TEST",
-              "source_sha": os.environ["GITHUB_SHA"],
+              "source_sha": os.environ["SOURCE_HEAD_SHA"],
+              "checkout_sha": os.environ["GITHUB_SHA"],
               "runner_os": os.environ["RUNNER_OS"],
               "privacy_negatives": "PASS",
               "authenticated_local_run": False,
