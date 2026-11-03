@@ -31,7 +31,13 @@ const toText = result => (result.content||[]).filter(c=>c.type==='text').map(c=>
 const seen=[];
 async function call(name,args={}){
  const v=await client.callTool({name,arguments:args});
- if(v.isError)throw Error('TOOL_FAIL_'+name);
+ if(v.isError){
+   // Diagnostic is from our original localhost synthetic fixture only;
+   // do not turn this on for private/authenticated browser targets.
+   const error=toText(v).replace(/http:\/\/127[.]0[.]0[.]1:[0-9]+/g,'[synthetic-loopback]');
+   console.error('OEC_SYNTHETIC_MCP_TOOL_FAILURE '+name+' '+error.slice(0,900));
+   throw Error('TOOL_FAIL_'+name);
+ }
  seen.push(name);
  return toText(v);
 }
