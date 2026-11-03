@@ -1,0 +1,50 @@
+name: Qualify OEC Disposable Mirror (synthetic only)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-mirror/**'
+      - '.github/workflows/qualify-oec-mirror.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-mirror-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-mirror:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: tools/oec-mirror
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/oec-mirror/go.mod
+          cache: false
+      - name: Synthetic contracts, negatives and replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./... -count=1
+          go test ./... -count=4
+      - name: Runner-local observation and deterministic projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          go run ./cmd/oecmirror -runner-probe > evidence/runner.json
+          go run ./cmd/oecmirror -input fixtures/synthetic.json > evidence/report.json
+          go run ./cmd/oecmirror -input fixtures/synthetic.json > evidence/replay.json
+          cmp evidence/report.json evidence/replay.json
+          printf 'QUALIFIED_SYNTHETIC_MIRROR_ONLY os=%s credentials=false provider_network=false session_capture=false\n' '${{ matrix.os }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oec-disposable-mirror-${{ matrix.os }}
+          path: tools/oec-mirror/evidence/*.json
+          retention-days: 7
