@@ -70,7 +70,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter,r *http.Request) {
  case "tools/list":
   out["result"]=map[string]any{"tools":[]any{
    map[string]any{"name":"lab.observe","description":"Direct runner-local environment observation; does not inspect ChatGPT internals","inputSchema":map[string]any{"type":"object","additionalProperties":false}},
-   map[string]any{"name":"lab.digest","description":"SHA-256 of bounded synthetic challenge; no external side effects","inputSchema":map[string]any{"type":"object","properties":map[string]any{"challenge":map[string]string{"type":"string","minLength":"8","maxLength":"96"}},"required":[]string{"challenge"},"additionalProperties":false}},
+   map[string]any{"name":"lab.digest","description":"SHA-256 of bounded synthetic challenge; no external side effects","inputSchema":map[string]any{"type":"object","properties":map[string]any{"challenge":map[string]any{"type":"string","minLength":8,"maxLength":96}},"required":[]string{"challenge"},"additionalProperties":false}},
   }}
  case "tools/call":
   var p struct {Name string `json:"name"`; Arguments json.RawMessage `json:"arguments"`}
