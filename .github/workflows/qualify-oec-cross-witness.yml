@@ -1,0 +1,50 @@
+name: Qualify OEC Correlated Synthetic Cycle
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-cross-witness/**'
+      - '.github/workflows/qualify-oec-cross-witness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-cross-witness-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  correlated-observation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    defaults:
+      run:
+        working-directory: tools/oec-cross-witness
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/oec-observer-v02/go.mod
+          cache: false
+      - name: Install exact top-level upstream MCP versions
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund --save-exact
+          node --check ./probe.mjs
+      - name: Install isolated Chromium
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/playwright install chromium
+      - name: Execute single correlated browser / MCP / OTLP synthetic cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./run.sh
+      - name: Upload only privacy-audited metadata receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-correlated-synthetic-receipt
+          path: tools/oec-cross-witness/evidence/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
