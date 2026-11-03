@@ -6,7 +6,7 @@ umask 077
 state="$RUNNER_TEMP/oec-server"
 mkdir -p "$state/private" "$state/public"
 for _ in $(seq 1 75);do
- if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "oec-client-public" --dir "$state/peer" >/dev/null 2>&1 && test -s "$state/peer/client.pem";then break;fi
+ if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "oec-client-public-attempt-$GITHUB_RUN_ATTEMPT" --dir "$state/peer" >/dev/null 2>&1 && test -s "$state/peer/client.pem";then break;fi
  sleep 2
 done
 if ! test -s "$state/peer/client.pem";then echo "RENDEZVOUS_CLIENT_PUBLIC_KEY_MISSING";exit 1;fi
