@@ -57,3 +57,21 @@ The separate PowerShell 5.1 `Inspect-SupraChatStructure.ps1` optionally provides
 The independently qualified public Cloudflare cross-runner MCP transport does not grant signed-in browser access. For OpenAI-native direct ChatGPT tool calls, use the upstream `openai/tunnel-client` Secure MCP Tunnel with a locally reachable MCP server, tunnel association, runtime API key and account/workspace permission to create a custom MCP plugin. The tunnel is the transport; the server still needs narrow read-only operations. Do not reuse or bypass the earlier refused network-bridge source write. Use only a reviewed, restricted server and sanitized projections once independently admitted. No live endpoints, credential values or sovereign infrastructure details belong in this public workcell.
 
 **Local readiness distinction:** Native UIA and consented first-party metadata capture are available for local testing; ChatGPT-facing MCP connection remains unqualified and should not be presented as working.
+
+## Reuse existing authoritative native summary validator first
+
+The repository already ships `tools/local/Test-NativeMetadataSummary.ps1` and `tools/local/Test-SupraChatWinAppLifecycle.ps1`; do **not** replace them with a weaker second native acceptance test. The first validator checks the source schema, assembly hash, detailed lifecycle status, recorded/retained/evicted event accounting, diagnostic totals and bounded history. The WinApp lifecycle harness can independently exercise Stop, Expiry, Navigation, ReviewClose, and OwnerClose under explicit local admission. Neither belongs in public CI with a signed-in profile.
+
+For an operator-selected saved summary and its **matching reviewed application binary** (Windows PowerShell is sufficient for this command block, but the native validator itself requires PowerShell 7 / `pwsh` and .NET System.Text.Json):
+
+```powershell
+$summary = 'C:\ABSOLUTE\PATH\TO\suprachat-metadata-summary-EXAMPLE.json'
+$appDll  = 'C:\ABSOLUTE\PATH\TO\SupraChat.dll'
+$receipt = 'C:\ABSOLUTE\PRIVATE\FOLDER\native-validation.json'
+$sha = (Get-FileHash -LiteralPath $appDll -Algorithm SHA256).Hash
+pwsh -NoProfile -File .\tools\local\Test-NativeMetadataSummary.ps1 -SummaryPath $summary -ExpectedAssemblyHash $sha -ExpectedEndReason SummarySave -ReceiptPath $receipt
+```
+
+Use the actual `ExpectedEndReason` for the reviewed test and a **new** receipt file; no overwrite is permitted. Stop if the build hash, lifecycle, accounting, or privacy check fails. Once the native validator passes, run the independent `export_native_summary.py` projection against that same immutable saved source file. The exporter never uploads or exposes the original native summary.
+
+Public `qualify-oec-native-aggregate-prior-art.yml` now exercises the original validator's synthetic self-test in addition to the 34 Python negatives on Ubuntu and Windows; it does **not** run the actual first-party consent flow. The first signed-in UI test, tunnel admission, and ChatGPT-side custom MCP connection remain independently held.
