@@ -1,0 +1,63 @@
+name: Qualify OEC Synthetic Artifact ZIP Custody
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-evidence-audit/**'
+      - '.github/workflows/qualify-oec-evidence-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: oec-evidence-audit-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  custody:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Local adversarial ZIP and privacy contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tools/oec-evidence-audit -p 'test_*.py' -v
+      - name: Download exact Actions ZIPs and compare immutable run source SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          manifest=json.loads(pathlib.Path('tools/oec-evidence-audit/manifest.json').read_text())
+          target=pathlib.Path('tools/oec-evidence-audit/archives')
+          target.mkdir(exist_ok=True)
+          for item in manifest['sources']:
+              run_id=str(item['run_id'])
+              artifact_id=str(item['artifact_id'])
+              uri=f'repos/SemperSupra/suprachat/actions/runs/{run_id}'
+              head=subprocess.check_output(['gh','api',uri,'--jq','.head_sha'],text=True).strip()
+              if head != item['head_sha']:
+                  raise RuntimeError('source run HEAD mismatch for '+item['name'])
+              with (target/(item['name']+'.zip')).open('wb') as f:
+                  subprocess.run(['gh','api','-H','Accept: application/vnd.github+json',
+                                  'repos/SemperSupra/suprachat/actions/artifacts/'+artifact_id+'/zip'],
+                                 check=True,stdout=f,stderr=subprocess.DEVNULL)
+          PY
+      - name: Verify actual ZIP hashes, full synthetic receipt privacy and custody
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/oec-evidence-audit/audit.py \
+            --manifest tools/oec-evidence-audit/manifest.json \
+            --zip-dir tools/oec-evidence-audit/archives \
+            --out tools/oec-evidence-audit/evidence/receipt.json
+      - name: Upload only redacted ZIP custody receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-evidence-zip-audit
+          path: tools/oec-evidence-audit/evidence/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
