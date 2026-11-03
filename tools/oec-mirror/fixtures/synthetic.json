@@ -1,0 +1,32 @@
+{
+  "schema": "oec-mirror-input/v1",
+  "subject": "synthetic-agent",
+  "epoch": 7,
+  "declared": [
+    {
+      "id": "tool.discover",
+      "effect": "READ"
+    },
+    {
+      "id": "synthetic.click",
+      "effect": "SYNTHETIC"
+    },
+    {
+      "id": "work.submit",
+      "effect": "EXTERNAL"
+    }
+  ],
+  "observed": [
+    {
+      "id": "synthetic.click",
+      "epoch": 7,
+      "outcome": "COMPLETED",
+      "evidence": "SYNTHETIC_TEST",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "unknown": [
+    "private.context.assembly",
+    "inference.worker"
+  ]
+}
