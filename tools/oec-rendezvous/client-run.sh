@@ -7,7 +7,7 @@ state="$RUNNER_TEMP/oec-client"
 mkdir -p "$state/peer"
 for _ in $(seq 1 75);do
  if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-   --name "oec-server-rendezvous" --dir "$state/peer" >/dev/null 2>&1 \
+   --name "oec-server-rendezvous-attempt-$GITHUB_RUN_ATTEMPT" --dir "$state/peer" >/dev/null 2>&1 \
    && test -s "$state/peer/endpoint.json" \
    && test -s "$state/peer/encrypted-token.bin";then break;fi
  sleep 2
