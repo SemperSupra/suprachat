@@ -26,10 +26,10 @@ jobs:
         with:
           go-version-file: tools/oec-observer-v02/go.mod
           cache: false
-      - name: Install exact top-level upstream MCP versions
+      - name: Install immutable audited npm dependency lock
         run: |
           set -euo pipefail
-          npm install --ignore-scripts --no-audit --no-fund --save-exact
+          npm ci --ignore-scripts --no-audit --no-fund
           node --check ./probe.mjs
       - name: Install isolated Chromium
         run: |
