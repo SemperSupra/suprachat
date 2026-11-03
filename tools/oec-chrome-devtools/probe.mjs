@@ -51,6 +51,11 @@ try {
  await call('new_page',{url,timeout:15000});
  const pageList=await call('list_pages');
  const pageMatch=pageList.match(/(?:^|\n)\s*(\d+)\s*:\s*http:\/\/127[.]0[.]0[.]1:/);
+ if(!pageMatch){
+   // Only the original synthetic fixture is open; redact its ephemeral port.
+   console.error('OEC_SYNTHETIC_PAGE_LIST '+pageList.slice(0,1000)
+      .replace(/http:\/\/127[.]0[.]0[.]1:[0-9]+/g,'[fixture-loopback]'));
+ }
  check(Boolean(pageMatch),'synthetic_page_id_not_observed');
  const pageId=Number(pageMatch[1]);
  const snapshot=await call('take_snapshot',{pageId});
