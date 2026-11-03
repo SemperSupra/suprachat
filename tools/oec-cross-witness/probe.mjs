@@ -27,7 +27,13 @@ async function invoke(name,args={}){
   return d.body;
 }
 async function createToolClient(name,bin,args){
-  const transport=new StdioClientTransport({command:bin,args,env:{...process.env},stderr:'pipe'});
+  // Browser MCP child processes are untrusted relative to the local bearer.
+  // Explicitly omit OEC_OBSERVER_TOKEN, OEC_EXPERIMENT_ID and GitHub token.
+  const childEnv={PATH:process.env.PATH,HOME:process.env.HOME,
+    LANG:process.env.LANG||'C.UTF-8',CI:'true'};
+  assert(!('OEC_OBSERVER_TOKEN' in childEnv)&&!('GH_TOKEN' in childEnv),
+    'unsafe_child_environment');
+  const transport=new StdioClientTransport({command:bin,args,env:childEnv,stderr:'pipe'});
   const client=new Client({name,version:'0.1.0'},{capabilities:{}});
   await client.connect(transport);
   return client;
