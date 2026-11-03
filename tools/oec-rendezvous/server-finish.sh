@@ -21,5 +21,6 @@ assert x.get("runner_os")=="linux"
 assert all(x.get(k)=="PASS" for k in expect)
 assert x.get("secrets_or_endpoints_exported") is False
 assert x.get("chatgpt_internal_visibility") is False
+assert x.get("independent_runner") is True
 PY
 echo "QUALIFIED_TWO_INDEPENDENT_GHA_RUNNER_JOBS tunnel=cloudflare auth=rsa_oaep_sha256 shared_bearer_public=false"
