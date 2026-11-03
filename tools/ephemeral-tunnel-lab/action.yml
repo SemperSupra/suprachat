@@ -12,11 +12,17 @@ runs:
       run: |
         set -euo pipefail
         bash "${{ github.action_path }}/run-quick-tunnel.sh"
+    - name: Normalize output path across action installations
+      id: receipt
+      if: always()
+      shell: bash
+      run: |
+        printf 'path=%s\n' "$(realpath -m "$GITHUB_ACTION_PATH/evidence/quick-tunnel-receipt.json")" >> "$GITHUB_OUTPUT"
     - name: Publish only the sanitized evidence receipt
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: oec-quick-tunnel-${{ github.job }}
-        path: ${{ github.action_path }}/evidence/quick-tunnel-receipt.json
+        path: ${{ steps.receipt.outputs.path }}
         if-no-files-found: ignore
         retention-days: 7
