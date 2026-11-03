@@ -68,17 +68,4 @@ assert not x['hidden_chatgpt_model_access']
 assert not x['first_party_claim_is_independent_proof']
 assert len(x['unknowns'])==4
 PY
-# One-time public dependency-lock acquisition. This contains only npm dependency
-# metadata from a disposable synthetic runner, never a secret or user input.
-python3 - <<'PY'
-import base64,hashlib,pathlib
-raw=pathlib.Path('package-lock.json').read_bytes()
-assert 100 < len(raw) < 524288
-b64=base64.b64encode(raw).decode('ascii')
-chunks=[b64[i:i+900] for i in range(0,len(b64),900)]
-print('OEC_LOCK_EXPORT_START')
-for i,ch in enumerate(chunks):
- print(f'OEC_LOCK_B64_{i:04d}={ch}')
-print(f'OEC_LOCK_EXPORT_END chunks={len(chunks)} bytes={len(raw)} sha256={hashlib.sha256(raw).hexdigest()}')
-PY
 echo "QUALIFIED_CORRELATED_SYNTHETIC_CYCLE inspector=true playwright=true chrome=true otel=true secrets=false"
