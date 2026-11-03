@@ -10,7 +10,7 @@ cleanup(){
  rm -f "$logs"
 }
 trap cleanup EXIT INT TERM
-docker run --rm -d --name "$container"   -p 127.0.0.1:4318:4318   -v "$PWD/collector.yaml:/etc/otelcol/config.yaml:ro"   otel/opentelemetry-collector:0.143.0 --config=/etc/otelcol/config.yaml >/dev/null
+docker run --rm -d --name "$container"   -p 127.0.0.1:4318:4318   -v "$PWD/collector.yaml:/etc/otelcol/config.yaml:ro"   otel/opentelemetry-collector@sha256:e94651f4a264e36b6009fae118b45c034a93b7ea5fe7f6b29f9d4a0196d19541 --config=/etc/otelcol/config.yaml >/dev/null
 python3 send_synthetic.py
 ok=false
 for _ in $(seq 1 30);do
