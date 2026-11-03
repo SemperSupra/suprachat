@@ -18,7 +18,7 @@ command -v go >/dev/null
 command -v sha256sum >/dev/null
 
 # Fixed upstream artifact, separately verified against published release checksum.
-cloudflared_sha="d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db"
+cloudflared_sha="3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586"
 cloudflared_url="https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64"
 curl -fsSL --retry 3 --connect-timeout 10 --max-time 150 "$cloudflared_url" -o "$workspace/cloudflared"
 echo "$cloudflared_sha  $workspace/cloudflared" | sha256sum -c - >/dev/null
