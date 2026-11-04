@@ -50,9 +50,9 @@ if (!$IReviewedFirstPartyCapture) {
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     throw 'POWERSHELL_7_REQUIRED_FOR_NATIVE_VALIDATOR'
 }
-if (![IO.Path]::IsPathRooted($SummaryPath) -or
-    ![IO.Path]::IsPathRooted($AssemblyPath) -or
-    ![IO.Path]::IsPathRooted($PrivateOutputDirectory)) {
+if (![IO.Path]::IsPathFullyQualified($SummaryPath) -or
+    ![IO.Path]::IsPathFullyQualified($AssemblyPath) -or
+    ![IO.Path]::IsPathFullyQualified($PrivateOutputDirectory)) {
     throw 'ABSOLUTE_PRIVATE_PATHS_REQUIRED'
 }
 if (!(Test-Path -LiteralPath $SummaryPath -PathType Leaf) -or
