@@ -29,6 +29,7 @@ from test_native_summary import sample
 doc=sample()
 doc['assembly_sha256']=sys.argv[2]
 doc['diagnostics']={'ObservationIncidents':0,'LifecycleIncidents':0,'Reasons':{},'TotalIncidents':0}
+doc['lifecycle']={'Request':12}
 pathlib.Path(sys.argv[1]).write_text(json.dumps(doc,sort_keys=True),encoding='utf-8')
 '@
 $fixture | & python - $summary $hash
