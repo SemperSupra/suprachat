@@ -1,0 +1,33 @@
+name: Qualify OEC Local Offline One-Shot (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-observation-contract/**'
+      - '.github/workflows/qualify-oec-local-one-shot.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-local-one-shot-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  offline-first-party-projection-fixture:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exercise real local validation and projection on fixture-only bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:OPENAI_API_KEY=$null
+          $env:CONTROL_PLANE_API_KEY=$null
+          $env:CONTROL_PLANE_TUNNEL_ID=$null
+          & './tools/oec-observation-contract/Test-OfflineOneShotFixture.ps1'
+          if($LASTEXITCODE -and $LASTEXITCODE -ne 0){throw 'OFFLINE_ONE_SHOT_FIXTURE_FAILED'}
+      # No artifact upload: synthetic evidence and fake app binary stay in runner temp.
