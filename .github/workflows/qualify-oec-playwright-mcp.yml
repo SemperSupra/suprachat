@@ -28,6 +28,13 @@ jobs:
           set -euo pipefail
           npm install --ignore-scripts --no-audit --no-fund --save-exact
           node -p 'require("./node_modules/@playwright/mcp/package.json").version'
+      - name: Upload reproducible generated lock candidate (public-only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-playwright-mcp-lock-candidate
+          path: tools/oec-playwright-mcp/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Install isolated Chromium browser
         shell: bash
         run: |
