@@ -34,9 +34,9 @@ pathlib.Path(sys.argv[1]).write_text(json.dumps(doc,sort_keys=True),encoding='ut
 $fixture | & python - $summary $hash
 if($LASTEXITCODE -ne 0){throw 'SYNTHETIC_FIXTURE_CONSTRUCTION_FAILED'}
 try {
-  $args=@{IReviewedFirstPartyCapture=$true;SummaryPath=$summary;AssemblyPath=$binary;ExpectedEndReason='SummarySave';PrivateOutputDirectory=$private}
+  $invokeParams=@{IReviewedFirstPartyCapture=$true;SummaryPath=$summary;AssemblyPath=$binary;ExpectedEndReason='SummarySave';PrivateOutputDirectory=$private}
   # Exercise the actual native validator -> local independent projection pipeline.
-  $response= & $trial @args
+  $response= & $trial @invokeParams
   $receipt=($response | Out-String).Trim() | ConvertFrom-Json
   if($receipt.schema -ne 'oec-local-trial-qualification/v1' -or
      $receipt.native_aggregate_validated -ne $true -or
@@ -58,16 +58,16 @@ try {
   # An unrelated matching-name DLL must fail source/binary identity.
   $msg='NONE'
   try {
-    $args.AssemblyPath=$badBinary
-    $null=& $trial @args
+    $invokeParams.AssemblyPath=$badBinary
+    $null=& $trial @invokeParams
   } catch { $msg=$_.Exception.Message }
   if($msg -notmatch 'METADATA_BUILD_MISMATCH') { throw 'MISMATCHED_ASSEMBLY_NOT_REFUSED' }
   # Public repository custody must never become the output destination.
   $msg='NONE'
   try {
-    $args.AssemblyPath=$binary
-    $args.PrivateOutputDirectory=$root
-    $null=& $trial @args
+    $invokeParams.AssemblyPath=$binary
+    $invokeParams.PrivateOutputDirectory=$root
+    $null=& $trial @invokeParams
   } catch { $msg=$_.Exception.Message }
   if($msg -notmatch 'REFUSED_PUBLIC_REPOSITORY_CUSTODY') { throw 'PUBLIC_REPOSITORY_CUSTODY_NOT_REFUSED' }
   Write-Host 'QUALIFIED_OFFLINE_NATIVE_ONE_SHOT_SYNTHETIC end_to_end=true wrong_build_refused=true repo_custody_refused=true authenticated=false tunnel=false'
