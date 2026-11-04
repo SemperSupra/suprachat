@@ -41,6 +41,29 @@ jobs:
           }
           $global:LASTEXITCODE=0
           Write-Host 'QUALIFIED_LOCAL_UIA_PS51_ADMISSION_NEGATIVES'
+          # The offline local-run packet never starts capture, a tunnel or an MCP listener.
+          $trial=Join-Path $PWD 'tools/oec-observation-contract/Invoke-LocalObservationTrial.ps1'
+          $tokens=$null; $parseErrors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($trial,[ref]$tokens,[ref]$parseErrors)
+          if (@($parseErrors).Count -ne 0){throw 'LOCAL_TRIAL_PS51_PARSE_FAILED'}
+          $raw= & powershell.exe -NoProfile -NonInteractive -File $trial -SelfTest
+          if ($LASTEXITCODE -ne 0){throw 'LOCAL_TRIAL_PRECHECK_FAILED'}
+          $receipt=($raw | Out-String).Trim() | ConvertFrom-Json
+          if ($receipt.schema -ne 'oec-local-trial-preflight/v1' -or
+              $receipt.passed -ne $true -or $receipt.authenticated_state -ne 'NOT_ASSESSED' -or
+              $receipt.tunnel_connected -ne $false -or
+              $receipt.browser_launched -ne $false){throw 'LOCAL_TRIAL_PRECHECK_INVALID'}
+          $noReview= & powershell.exe -NoProfile -NonInteractive -File $trial 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $noReview -notmatch 'EXPLICIT_OPERATOR_REVIEW_REQUIRED'){
+            throw 'LOCAL_TRIAL_CONSENT_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          $unsafeSelfTest= & powershell.exe -NoProfile -NonInteractive -File $trial -SelfTest -IReviewedFirstPartyCapture 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $unsafeSelfTest -notmatch 'SELFTEST_NO_LIVE_ARGUMENTS_PERMITTED'){
+            throw 'LOCAL_TRIAL_MODE_CROSSOVER_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          Write-Host 'QUALIFIED_OFFLINE_LOCAL_TRIAL_SELFTEST_AND_CONSENT_REFUSALS'
       - name: Build unmodified SupraChat synthetic test target
         shell: pwsh
         run: |
