@@ -1,0 +1,36 @@
+{
+  "mode": "install",
+  "install_id": "suprachat-test-001",
+  "desired": [
+    {
+      "kind": "platform_tunnel",
+      "key": "suprachat-mcp",
+      "version": "v1",
+      "scope": "personal-workspace"
+    },
+    {
+      "kind": "local_runtime",
+      "key": "suprachat-local",
+      "version": "v1",
+      "scope": "personal-workspace"
+    },
+    {
+      "kind": "local_marketplace",
+      "key": "suprachat-local",
+      "version": "v1",
+      "scope": "personal-workspace"
+    },
+    {
+      "kind": "chatgpt_plugin",
+      "key": "suprachat",
+      "version": "v1",
+      "scope": "personal-workspace"
+    }
+  ],
+  "observed": [],
+  "capabilities": {
+    "tunnel_manage": true,
+    "runtime_key": true,
+    "codex_cli": true
+  }
+}

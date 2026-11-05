@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "suprachat",
+  "version": "0.0.1",
+  "description": "Safe SupraChat provisioning and reversible connection guidance.",
+  "repository": "https://github.com/SemperSupra/suprachat",
+  "keywords": [
+    "mcp",
+    "connection",
+    "suprachat"
+  ],
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/setup/SKILL.md",
+      "interface": {
+        "displayName": "SupraChat",
+        "shortDescription": "Set up and verify your SupraChat environment.",
+        "developerName": "SemperSupra",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ]
+      }
+    }
+  }
+}

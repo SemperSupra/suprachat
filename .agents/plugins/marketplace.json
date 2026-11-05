@@ -1,0 +1,17 @@
+{
+  "name": "suprachat-local",
+  "plugins": [
+    {
+      "name": "suprachat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/suprachat"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
