@@ -98,6 +98,46 @@ jobs:
             }
             if($results.Count -ne 4){throw 'MISSING_APARTMENT_VARIANT'}
             if(@($results | Where-Object { $_.root_valid }).Count -eq 0){throw 'NO_ACTUAL_NATIVE_UIA_ROOT_OBSERVED'}
+            # Compare the protected smoke's process-root search with HWND-root
+            # discovery on this *same* application instance. No user content.
+            $rootScript=(Resolve-Path 'tools/oec-uia-apartments/Inspect-RootSelection.ps1').Path
+            $rootOut=Join-Path $temp 'root-selection.json'
+            $rootErr=Join-Path $temp 'root-selection.err'
+            $rootArgs=@('-NoProfile','-NonInteractive','-Sta','-File',
+              ('"' + $rootScript + '"'), '-ProcessId',[string]$p.Id,'-Samples','2')
+            $rootChild=Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList $rootArgs -PassThru -RedirectStandardOutput $rootOut -RedirectStandardError $rootErr
+            $rootFinished=$rootChild.WaitForExit(50000)
+            if(!$rootFinished){
+              Stop-Process -Id $rootChild.Id -Force -ErrorAction SilentlyContinue
+              throw 'ROOT_PATH_DIFFERENTIAL_TIMEOUT'
+            }
+            if($rootChild.ExitCode -ne 0){throw 'ROOT_PATH_DIFFERENTIAL_PROCESS_FAILED'}
+            $rootDoc=Get-Content -LiteralPath $rootOut -Raw | ConvertFrom-Json
+            if($rootDoc.schema -ne 'suprachat-uia-root-selection/v1' -or
+               $rootDoc.evidence_class -ne 'PUBLIC_SYNTHETIC_NATIVE_UIA' -or
+               $rootDoc.readonly -ne $true -or
+               $rootDoc.captured_sensitive_content -ne $false -or
+               @($rootDoc.samples).Count -ne 2){throw 'ROOT_PATH_DIFFERENTIAL_SCHEMA_FAILED'}
+            $rootBrief=New-Object 'System.Collections.Generic.List[object]'
+            foreach($item in $rootDoc.samples){
+              $rootBrief.Add([pscustomobject]@{
+                sample=[int]$item.sample
+                handle_root_valid=($item.handle_root_valid -eq $true)
+                process_search_root_valid=($item.process_search_root_valid -eq $true)
+                handle_target=($item.handle_target -eq $true)
+                process_search_target=($item.process_search_target -eq $true)
+                handle_findall_target=($item.handle_findall_target -eq $true)
+                handle_descendants=[int]$item.handle_descendants
+                root_search_ms=[int]$item.root_search_ms
+                process_findfirst_ms=[int]$item.process_findfirst_ms
+                error_present=(-not [string]::IsNullOrEmpty([string]$item.error_class))
+              })
+              Write-Host ('UIA_ROOT_PATH_RESULT sample={0} hwnd_root={1} process_root={2} hwnd_target={3} process_target={4} hwnd_all_target={5} descendants={6} root_search_ms={7} process_target_ms={8} error={9}' -f
+                $item.sample,$item.handle_root_valid,$item.process_search_root_valid,
+                $item.handle_target,$item.process_search_target,$item.handle_findall_target,
+                $item.handle_descendants,$item.root_search_ms,$item.process_findfirst_ms,
+                (-not [string]::IsNullOrEmpty([string]$item.error_class)))
+            }
             $summary=[ordered]@{
               schema='suprachat-uia-apartment-summary/v1'
               evidence_class='PUBLIC_SYNTHETIC_NATIVE_UIA'
@@ -105,6 +145,7 @@ jobs:
               protected_qualification_modified=$false
               user_content_captured=$false
               variants=$results.ToArray()
+              root_selection=$rootBrief.ToArray()
             }
             New-Item -ItemType Directory -Force tools/oec-uia-apartments/evidence | Out-Null
             $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath tools/oec-uia-apartments/evidence/summary.json -Encoding utf8
