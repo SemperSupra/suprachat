@@ -1,0 +1,27 @@
+name: Qualify synthetic provider fault oracle
+on:
+  pull_request:
+    paths:
+      - 'tools/provider_rdte/**'
+      - '.github/workflows/qualify-provider-faults.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: provider-faults-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  adversarial-model:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Qualify independent adversarial model
+        run: python tools/provider_rdte/fault_oracle.py
