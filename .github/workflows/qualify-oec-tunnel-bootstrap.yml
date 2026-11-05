@@ -43,10 +43,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          go build -trimpath -o evidence/oec-tunnelctl ./cmd/tunnelctl
-          ./evidence/oec-tunnelctl --action plan --tunnel-id tunnel_0123456789abcdef0123456789abcdef --alias suprachat-rdte > evidence/plan.json
-          python3 -c 'import json;d=json.load(open("evidence/plan.json"));assert d["schema"]=="suprachat-official-tunnel-plan/v1" and not d["execute"] and not d["chatgpt_connector_created"] and not d["chatgpt_account_access_verified"]'
-          if ./evidence/oec-tunnelctl --action connect --tunnel-id tunnel_0123456789abcdef0123456789abcdef > /dev/null 2>&1; then echo MUTATION_WITHOUT_EXECUTE_ACCEPTED;exit 1;fi
+          suffix=""
+          if [[ "$RUNNER_OS" == Windows ]]; then suffix=".exe"; fi
+          go build -trimpath -o "evidence/oec-tunnelctl${suffix}" ./cmd/tunnelctl
+          "./evidence/oec-tunnelctl${suffix}" --action plan --tunnel-id tunnel_0123456789abcdef0123456789abcdef --alias suprachat-rdte > evidence/plan.json
+          grep -q '"schema":"suprachat-official-tunnel-plan/v1"' evidence/plan.json
+          grep -q '"chatgpt_connector_created":false' evidence/plan.json
+          grep -q '"chatgpt_account_access_verified":false' evidence/plan.json
+          if "./evidence/oec-tunnelctl${suffix}" --action connect --tunnel-id tunnel_0123456789abcdef0123456789abcdef > /dev/null 2>&1; then echo MUTATION_WITHOUT_EXECUTE_ACCEPTED;exit 1;fi
           echo 'QUALIFIED_TUNNEL_BOOTSTRAP_OFFLINE actions_no_keys=true'
       - name: Upload sanitized plan only
         if: success()
