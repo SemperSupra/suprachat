@@ -12,29 +12,39 @@ import (
  "os"
  "os/exec"
  "path/filepath"
+ "slices"
  "strings"
  "time"
  bootstrap "example.com/suprachat/oec-tunnel-bootstrap"
 )
 type cliRunner struct{binary string}
-func (r cliRunner) Run(ctx context.Context,c bootstrap.Command)([]byte,error){
- if len(c.Args)==0{return nil,errors.New("empty upstream command")}
- cmd:=exec.CommandContext(ctx,r.binary,c.Args...)
- // Do not inherit unrelated provider/API/GitHub credentials to child.
- env:=make([]string,0)
+// Child receives the runtime credential only when the upstream managed runtime
+// needs it. Codex plugin commands and local stop never inherit API keys.
+func sanitizedChildEnv(parent []string,c bootstrap.Command)[]string{
+ env:=make([]string,0,len(parent))
  deny:=map[string]bool{
   "OPENAI_ADMIN_KEY":true,"CONTROL_PLANE_API_KEY":true,
   "OPENAI_API_KEY":true,"GITHUB_TOKEN":true,"GH_TOKEN":true,
   "CONTROL_PLANE_TUNNEL_ID":true,"MCP_SERVER_URL":true,
  }
- for _,v:=range os.Environ(){parts:=strings.SplitN(v,"=",2);if !deny[strings.ToUpper(parts[0])]{env=append(env,v)}}
- if os.Getenv("CONTROL_PLANE_API_KEY")!=""{
+ for _,v:=range parent{
+  parts:=strings.SplitN(v,"=",2)
+  if len(parts)!=2 || deny[strings.ToUpper(parts[0])]{continue}
+  env=append(env,v)
+ }
+ needsRuntime:=len(c.Args)>0 && c.Args[0]=="runtimes" && !slices.Contains(c.Args,"stop")
+ if needsRuntime && os.Getenv("CONTROL_PLANE_API_KEY")!=""{
   env=append(env,"CONTROL_PLANE_API_KEY="+os.Getenv("CONTROL_PLANE_API_KEY"))
  }
  if c.Admin && os.Getenv("OPENAI_ADMIN_KEY")!=""{
   env=append(env,"OPENAI_ADMIN_KEY="+os.Getenv("OPENAI_ADMIN_KEY"))
  }
- cmd.Env=env
+ return env
+}
+func (r cliRunner) Run(ctx context.Context,c bootstrap.Command)([]byte,error){
+ if len(c.Args)==0{return nil,errors.New("empty upstream command")}
+ cmd:=exec.CommandContext(ctx,r.binary,c.Args...)
+ cmd.Env=sanitizedChildEnv(os.Environ(),c)
  var stdout bytes.Buffer
  cmd.Stdout=&stdout
  cmd.Stderr=io.Discard
