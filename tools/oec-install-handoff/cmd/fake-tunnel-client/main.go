@@ -29,7 +29,9 @@ func main(){
   case "stop":
    if os.Getenv("CONTROL_PLANE_API_KEY")!=""||os.Getenv("OPENAI_ADMIN_KEY")!=""||
      a[len(a)-1]!=os.Getenv("SYNTHETIC_ALIAS"){refuse()}
-   send(map[string]any{"stopped":true})
+   stopped:=os.Getenv("SYNTHETIC_FAULT")!="false-stop"
+   send(map[string]any{"alias":os.Getenv("SYNTHETIC_ALIAS"),"stopped":stopped,
+     "process_running":!stopped,"ready":false})
   default:refuse()
   }
   return

@@ -97,7 +97,7 @@ func TestStopRequiresExplicitExecution(t *testing.T){
  c:=base();c.Execute=false;f:=success()
  if e:=Stop(context.Background(),c,f);e==nil{t.Fatal("implicit stop")}
  c.Execute=true
- f.output[0]=[]byte(`{"alias":"suprachat-rdte","stopped":true}`)
+ f.output[0]=[]byte(`{"alias":"suprachat-rdte","stopped":true,"process_running":false,"ready":false}`)
  if e:=Stop(context.Background(),c,f);e!=nil{t.Fatal(e)}
  if len(f.commands)!=1||strings.Join(f.commands[0].Args," ")!="runtimes --json stop suprachat-rdte"{t.Fatal("unexpected stop")}
 }
@@ -123,4 +123,18 @@ func TestBoundedReadinessNeverWaived(t *testing.T){
  waits:=0
  res,err:=applyWithWait(context.Background(),c,f,func(context.Context)error{waits++;return nil})
  if err==nil||res.RuntimeReady||res.ChatGPTConnectorCreated||waits!=7||len(f.commands)!=9{t.Fatal("unready runtime was promoted or loop exceeded bound")}
+}
+
+func TestStopRejectsUnverifiedTeardown(t *testing.T){
+ cases:=[]struct{name,body string}{
+  {"false_stopped","{\"alias\":\"suprachat-rdte\",\"stopped\":false,\"process_running\":false,\"ready\":false}"},
+  {"still_running","{\"alias\":\"suprachat-rdte\",\"stopped\":true,\"process_running\":true,\"ready\":false}"},
+  {"still_ready","{\"alias\":\"suprachat-rdte\",\"stopped\":true,\"process_running\":false,\"ready\":true}"},
+  {"different_alias","{\"alias\":\"another-runtime\",\"stopped\":true,\"process_running\":false,\"ready\":false}"},
+  {"missing_status","{\"alias\":\"suprachat-rdte\",\"stopped\":true}"},
+ }
+ for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){
+  c:=base();f:=success();f.output[0]=[]byte(tc.body)
+  if e:=Stop(context.Background(),c,f);e==nil{t.Fatal("false teardown accepted")}
+ })}
 }

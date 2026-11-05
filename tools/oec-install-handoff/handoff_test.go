@@ -99,3 +99,12 @@ func TestScopedCreationAndMismatch(t *testing.T){
   "--alias","home-private","--tunnel-id",tunnelA)
  if err==nil||strings.Contains(stderr,"SYNTHETIC_ADMIN"){t.Fatal("mismatched tunnel accepted or admin leaked")}
 }
+
+func TestFakeUpstreamFalseStopCannotClaimCleanup(t *testing.T){
+ cli,fake:=build(t)
+ e:=append(testEnv("home-private",tunnelA,"SYNTHETIC_RUNTIME_HOME"),"SYNTHETIC_FAULT=false-stop")
+ result,stderr,err:=command(cli,e,"--action","stop","--execute","--binary",fake,"--alias","home-private")
+ if err==nil||result!=nil{t.Fatal("false upstream stop accepted")}
+ if !strings.Contains(stderr,"TUNNEL_STOP_NOT_VERIFIED"){t.Fatal("failure was not classified as missing teardown proof")}
+ if strings.Contains(stderr,"SYNTHETIC_ADMIN"){t.Fatal("credential echoed")}
+}
