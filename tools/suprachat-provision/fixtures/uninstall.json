@@ -1,0 +1,33 @@
+{
+  "mode": "uninstall",
+  "install_id": "suprachat-test-001",
+  "desired": [],
+  "observed": [
+    {
+      "kind": "platform_tunnel",
+      "key": "suprachat-mcp",
+      "version": "v1",
+      "scope": "personal-workspace",
+      "owner": "suprachat-test-001"
+    },
+    {
+      "kind": "local_runtime",
+      "key": "suprachat-local",
+      "version": "v1",
+      "scope": "personal-workspace",
+      "owner": "suprachat-test-001",
+      "connected": true
+    },
+    {
+      "kind": "chatgpt_plugin",
+      "key": "suprachat",
+      "version": "v1",
+      "scope": "personal-workspace",
+      "owner": "suprachat-test-001",
+      "connected": true
+    }
+  ],
+  "capabilities": {
+    "tunnel_manage": true
+  }
+}
