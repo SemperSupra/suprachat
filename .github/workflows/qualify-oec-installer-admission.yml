@@ -1,0 +1,58 @@
+name: Qualify Model A official installer handoff admission (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-installer-admission/**'
+      - '.github/workflows/qualify-oec-installer-admission.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-installer-admission-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  no-account-handoff:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: tools/oec-installer-admission
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Vet same-source official wrapper and ownership planner
+        run: |
+          set -euo pipefail
+          go vet ./...
+          (cd ../suprachat-provision && go vet ./...)
+          (cd ../oec-tunnel-bootstrap && go vet ./...)
+      - name: Repeated independent installer scope and safety tests
+        run: |
+          set -euo pipefail
+          go test -shuffle=on -count=6 -timeout=6m ./...
+      - name: Linux race
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          go test -race -shuffle=on -count=4 -timeout=6m ./...
+      - name: Synthetic non-executable evidence only
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          printf '%s\n' '{"schema":"suprachat-model-a-installer-admission-evidence/v1","evidence_class":"PUBLIC_SYNTHETIC_NO_PLATFORM_ACCOUNT","actual_official_wrapper_imported":true,"owned_planner_imported":true,"no_commands_executed":true,"chatgpt_plugin_installed":false,"live_platform_tunnel_created":false,"user_credentials_used":false,"uninstall_adapter_qualified":false}' > evidence/result.json
+      - name: Upload sanitized evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-installer-admission-${{ matrix.os }}
+          path: tools/oec-installer-admission/evidence/result.json
+          retention-days: 7
+          if-no-files-found: error
