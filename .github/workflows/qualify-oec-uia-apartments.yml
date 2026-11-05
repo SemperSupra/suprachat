@@ -90,6 +90,12 @@ jobs:
                 findall_max=[int]$maxDesc;walker_max=[int]$walkDesc
               })
             }
+            foreach($item in $results){
+              # Bounded structural booleans/counts only, no UI text or PIDs.
+              Write-Host ('UIA_APARTMENT_RESULT variant={0} class={1} apartment={2} root={3} tab={4} findall={5} walker={6}' -f
+                $item.variant,$item.execution_class,$item.apartment,
+                $item.root_valid,$item.tab_sessions_observed,$item.findall_max,$item.walker_max)
+            }
             if($results.Count -ne 4){throw 'MISSING_APARTMENT_VARIANT'}
             if(@($results | Where-Object { $_.root_valid }).Count -eq 0){throw 'NO_ACTUAL_NATIVE_UIA_ROOT_OBSERVED'}
             $summary=[ordered]@{
