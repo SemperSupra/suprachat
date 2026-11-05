@@ -1,0 +1,53 @@
+name: Qualify Model A crash-safe lifecycle journal (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-lifecycle-journal/**'
+      - '.github/workflows/qualify-oec-lifecycle-journal.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-lifecycle-journal-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  journal-recovery:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: tools/oec-lifecycle-journal
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Vet and repeated crash/restart/replay/refusal suite
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test -shuffle=on -count=8 -timeout=6m ./...
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          go test -race -shuffle=on -count=3 -timeout=6m ./...
+      - name: Synthetic-only receipt
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          printf '%s\n' '{"schema":"suprachat-model-a-journal/v1","synthetic_test":true,"real_account":false,"credentials_used":false,"operator_chatgpt_app_installed":false,"replay_and_rollback_qualified":true}' > evidence/receipt.json
+      - name: Upload sanitized receipt
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-lifecycle-journal-${{ matrix.os }}
+          path: tools/oec-lifecycle-journal/evidence/receipt.json
+          if-no-files-found: error
+          retention-days: 7
