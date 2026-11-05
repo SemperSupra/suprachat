@@ -116,13 +116,9 @@ func Build(req Request)(Plan,error){
    case ChatGPT:
     if old.Connected{s.Operation="operator_disconnect";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin removal requires authorized account action"}else{s.Operation="verify_detached"}
    case Tunnel:
-    if attached[x.Scope]{s.Operation="defer_tunnel_delete";s.BlockedReason="ChatGPT plugin still attached"}
-    else if !req.Cap.TunnelManage{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"}
-    else{s.Operation="delete_owned_tunnel"}
+    if attached[x.Scope]{s.Operation="defer_tunnel_delete";s.BlockedReason="ChatGPT plugin still attached"} else if !req.Cap.TunnelManage{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"} else{s.Operation="delete_owned_tunnel"}
    case Project:
-    if !req.Cap.ArchiveApproved{s.Operation="operator_archive_approval";s.RequiresUser=true;s.BlockedReason="project only archives with approval"}
-    else if !req.Cap.PlatformAdmin{s.Operation="needs_platform_admin";s.BlockedReason="missing admin"}
-    else{s.Operation="archive_owned_project"}
+    if !req.Cap.ArchiveApproved{s.Operation="operator_archive_approval";s.RequiresUser=true;s.BlockedReason="project only archives with approval"} else if !req.Cap.PlatformAdmin{s.Operation="needs_platform_admin";s.BlockedReason="missing admin"} else{s.Operation="archive_owned_project"}
    case Runtime:s.Operation="stop_owned_runtime"
    case Marketplace:s.Operation="remove_owned_marketplace"
    case Codex:s.Operation="uninstall_owned_codex_plugin"
@@ -132,31 +128,22 @@ func Build(req Request)(Plan,error){
    p.Steps=append(p.Steps,s);continue
   }
   if exists{
-   if old.Owner!=req.InstallID{s.Operation="preserve_unowned"}
-   else if old.Version==x.Version{s.Operation="verify_owned_idempotent"}
-   else if x.Kind==ChatGPT{s.Operation="operator_upgrade";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin upgrade requires authorized account action"}
-   else{s.Operation="upgrade_owned";s.Undo="restore_previous_version"}
+   if old.Owner!=req.InstallID{s.Operation="preserve_unowned"} else if old.Version==x.Version{s.Operation="verify_owned_idempotent"} else if x.Kind==ChatGPT{s.Operation="operator_upgrade";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin upgrade requires authorized account action"} else{s.Operation="upgrade_owned";s.Undo="restore_previous_version"}
    s.CompareFingerprint=digest(old);p.Steps=append(p.Steps,s);continue
   }
   switch x.Kind{
   case Project:
-   if req.Cap.PlatformAdmin{s.Operation="create_owned_project";s.Undo="archive_created_project"}
-   else{s.Operation="needs_platform_admin";s.BlockedReason="missing admin"}
+   if req.Cap.PlatformAdmin{s.Operation="create_owned_project";s.Undo="archive_created_project"} else{s.Operation="needs_platform_admin";s.BlockedReason="missing admin"}
   case Tunnel:
-   if req.Cap.TunnelManage{s.Operation="create_owned_tunnel";s.Undo="delete_created_tunnel_if_detached"}
-   else{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"}
+   if req.Cap.TunnelManage{s.Operation="create_owned_tunnel";s.Undo="delete_created_tunnel_if_detached"} else{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"}
   case Runtime:
-   if req.Cap.RuntimeKey{s.Operation="connect_owned_runtime";s.Undo="stop_owned_runtime"}
-   else{s.Operation="needs_runtime_key";s.BlockedReason="missing scope"}
+   if req.Cap.RuntimeKey{s.Operation="connect_owned_runtime";s.Undo="stop_owned_runtime"} else{s.Operation="needs_runtime_key";s.BlockedReason="missing scope"}
   case Marketplace:
-   if req.Cap.CodexCLI{s.Operation="register_owned_marketplace";s.Undo="remove_owned_marketplace"}
-   else{s.Operation="needs_codex_cli";s.BlockedReason="no supported local marketplace client"}
+   if req.Cap.CodexCLI{s.Operation="register_owned_marketplace";s.Undo="remove_owned_marketplace"} else{s.Operation="needs_codex_cli";s.BlockedReason="no supported local marketplace client"}
   case Codex:
-   if req.Cap.CodexCLI{s.Operation="install_owned_codex_plugin";s.Undo="uninstall_owned_codex_plugin"}
-   else{s.Operation="needs_codex_cli";s.BlockedReason="no supported plugin client"}
+   if req.Cap.CodexCLI{s.Operation="install_owned_codex_plugin";s.Undo="uninstall_owned_codex_plugin"} else{s.Operation="needs_codex_cli";s.BlockedReason="no supported plugin client"}
   case APISkill:
-   if req.Cap.ProjectKey{s.Operation="upload_owned_api_skill";s.Undo="delete_owned_api_skill"}
-   else{s.Operation="needs_project_key";s.BlockedReason="missing API skill scope"}
+   if req.Cap.ProjectKey{s.Operation="upload_owned_api_skill";s.Undo="delete_owned_api_skill"} else{s.Operation="needs_project_key";s.BlockedReason="missing API skill scope"}
   case ChatGPT:
    s.Operation="operator_register_chatgpt_plugin";s.RequiresUser=true;s.BlockedReason="no verified unattended ChatGPT custom plugin install API"
   }
