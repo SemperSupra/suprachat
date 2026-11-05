@@ -167,8 +167,15 @@ func Stop(ctx context.Context,c Config,r Runner)error{
  if !validAlias.MatchString(c.Alias){return errors.New("invalid stop alias")}
  raw,e:=r.Run(ctx,Command{Args:[]string{"runtimes","--json","stop",c.Alias}})
  if e!=nil{return errors.New("upstream stop failed")}
- _,e=decodeObject(raw)
- return e
+ doc,e:=decodeObject(raw)
+ if e!=nil{return e}
+ // A successful process exit is not a completed teardown. Upstream v0.0.19
+ // exposes alias/stopped/process_running/ready in its status payload.
+ if doc["alias"]!=c.Alias || doc["stopped"]!=true ||
+    doc["process_running"]!=false || doc["ready"]!=false {
+  return errors.New("official managed runtime stop not independently confirmed")
+ }
+ return nil
 }
 // Errors from untrusted CLI output are intentionally not printed because they
 // may include local paths, env fragments or remote response metadata.
