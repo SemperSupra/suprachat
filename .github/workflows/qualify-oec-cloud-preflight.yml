@@ -1,0 +1,58 @@
+name: Qualify OEC Cloud Preflight (public synthetic only)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-cloud-preflight/**'
+      - '.github/workflows/qualify-oec-cloud-preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-cloud-preflight-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-preflight:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/oec-cloud-preflight
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Native Go static review
+        run: |
+          set -euo pipefail
+          go version
+          go vet ./...
+      - name: Full Go fault-injection and concurrency suite
+        run: |
+          set -euo pipefail
+          go test -shuffle=on -count=5 -timeout=5m ./...
+      - name: Race-detector tests (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          go test -race -shuffle=on -count=2 -timeout=5m ./...
+      - name: End-to-end synthetic loopback TLS and fail-closed receipt
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          go run ./cmd/preflight > evidence/preflight.json
+          go run ./cmd/verify evidence/preflight.json
+      - name: Upload only sanitized synthetic receipt
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-cloud-preflight-${{ matrix.os }}
+          path: tools/oec-cloud-preflight/evidence/preflight.json
+          retention-days: 7
+          if-no-files-found: error

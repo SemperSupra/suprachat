@@ -1,0 +1,91 @@
+name: Qualify OEC Cloudflare Synthetic Handoff (public free-tier)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-cloud-preflight/**'
+      - '.github/workflows/qualify-oec-cloud-preflight-tunnel.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-preflight-tunnel-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  disposable-cloudflare-https:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Real public HTTPS against fixed synthetic Go sidecar
+        shell: bash
+        working-directory: tools/oec-cloud-preflight
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          work="$(mktemp -d "$RUNNER_TEMP/oec-cloud-preflight.XXXXXXXX")"
+          server_pid=""
+          tunnel_pid=""
+          cleanup() {
+            set +e
+            if [[ -n "$tunnel_pid" ]]; then kill "$tunnel_pid" 2>/dev/null; wait "$tunnel_pid" 2>/dev/null; fi
+            if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null; fi
+            rm -rf "$work"
+          }
+          trap cleanup EXIT INT TERM
+          go build -trimpath -o "$work/preflight-server" ./cmd/tunnel-server
+          go build -trimpath -o "$work/preflight-client" ./cmd/tunnel-client
+          curl -fsSL --retry 3 --connect-timeout 10 --max-time 150 \
+            "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64" \
+            -o "$work/cloudflared"
+          echo "3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586  $work/cloudflared" | sha256sum -c - >/dev/null
+          chmod 700 "$work/cloudflared"
+          export OEC_RUN_ID="synthetic-$(openssl rand -hex 12)"
+          export OEC_SECRET_HEX="$(openssl rand -hex 32)"
+          "$work/preflight-server" > "$work/server.log" 2>&1 &
+          server_pid=$!
+          ready=0
+          for _ in $(seq 1 30); do
+            code="$(curl --noproxy '*' -sS --max-time 2 -o /dev/null -w '%{http_code}' \
+              http://127.0.0.1:18887/v1/observe || true)"
+            if [[ "$code" == 403 ]]; then ready=1;break;fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break;fi
+            sleep 1
+          done
+          if [[ "$ready" != 1 ]];then echo 'SYNTHETIC_LOOPBACK_START_FAILED';exit 1;fi
+          "$work/cloudflared" tunnel --url http://127.0.0.1:18887 --no-autoupdate \
+            --loglevel info > "$work/tunnel.log" 2>&1 &
+          tunnel_pid=$!
+          endpoint=""
+          for _ in $(seq 1 65); do
+            endpoint="$(grep -Eo 'https://[a-zA-Z0-9-]+[.]trycloudflare[.]com' \
+              "$work/tunnel.log" | head -n 1 || true)"
+            if [[ -n "$endpoint" ]];then break;fi
+            if ! kill -0 "$tunnel_pid" 2>/dev/null;then break;fi
+            sleep 1
+          done
+          if [[ -z "$endpoint" ]];then echo 'PUBLIC_TUNNEL_NOT_READY';exit 1;fi
+          export OEC_ENDPOINT="$endpoint"
+          "$work/preflight-client"
+          go run ./cmd/tunnel-verify evidence/cloudflare-preflight.json
+          kill "$server_pid" "$tunnel_pid" 2>/dev/null || true
+          wait "$server_pid" 2>/dev/null || true
+          wait "$tunnel_pid" 2>/dev/null || true
+          server_pid=""
+          tunnel_pid=""
+          if curl --noproxy '*' -sS --max-time 2 -o /dev/null \
+             http://127.0.0.1:18887/v1/observe 2>/dev/null;then
+            echo 'LOOPBACK_SERVER_SURVIVED_TEARDOWN';exit 1
+          fi
+          echo 'QUALIFIED_CLOUDFLARE_SIDEcar_TEARDOWN synthetic_only=true'
+      - name: Upload public-safe receipt only
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-cloud-preflight-live-cloudflare
+          path: tools/oec-cloud-preflight/evidence/cloudflare-preflight.json
+          retention-days: 7
+          if-no-files-found: error
