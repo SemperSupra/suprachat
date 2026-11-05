@@ -73,12 +73,19 @@ func valid(x Resource)error{
  if _,ok:=rank[x.Kind];!ok{return errors.New("unknown resource kind")}
  if !safe.MatchString(x.Key)||!versionRE.MatchString(x.Version)||!safe.MatchString(x.Scope){return errors.New("invalid identity")}
  if x.Owner!=""&&!safe.MatchString(x.Owner){return errors.New("invalid owner")}
+ if x.RemoteID!=""&&!safe.MatchString(x.RemoteID){return errors.New("invalid remote id")}
  if x.Connected&&x.Kind!=ChatGPT&&x.Kind!=Runtime{return errors.New("invalid connection flag")}
  return nil
 }
 func digest(x Resource)string{
  sum:=sha256.Sum256([]byte(fmt.Sprintf("%s/%s/%s/%s/%s/%s",x.Kind,x.Key,x.Scope,x.Version,x.RemoteID,x.Owner)))
  return hex.EncodeToString(sum[:])
+}
+// Remote deletion and upgrade require both the recorded claim and a fresh
+// independently observed resource fingerprint from the executor.
+func verifiedRemote(x Resource) bool {
+ return x.RemoteID!="" && x.RecordedFingerprint!="" &&
+   x.RecordedFingerprint==x.ObservedFingerprint && x.RecordedFingerprint==digest(x)
 }
 func Build(req Request)(Plan,error){
  p:=Plan{Schema:Schema,DryRun:true,Mode:req.Mode,Status:"NOT_APPLIED",Steps:[]Step{}}
@@ -117,19 +124,19 @@ func Build(req Request)(Plan,error){
    case ChatGPT:
     if old.Connected{s.Operation="operator_disconnect";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin removal requires authorized account action"}else{s.Operation="verify_detached"}
    case Tunnel:
-    if attached[x.Scope]{s.Operation="defer_tunnel_delete";s.BlockedReason="ChatGPT plugin still attached"} else if !req.Cap.TunnelManage{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"} else{s.Operation="delete_owned_tunnel"}
+    if attached[x.Scope]{s.Operation="defer_tunnel_delete";s.BlockedReason="ChatGPT plugin still attached"} else if !verifiedRemote(old){s.Operation="verify_remote_owner";s.BlockedReason="missing or drifted remote identity proof"} else if !req.Cap.TunnelManage{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"} else{s.Operation="delete_owned_tunnel"}
    case Project:
-    if !req.Cap.ArchiveApproved{s.Operation="operator_archive_approval";s.RequiresUser=true;s.BlockedReason="project only archives with approval"} else if !req.Cap.PlatformAdmin{s.Operation="needs_platform_admin";s.BlockedReason="missing admin"} else{s.Operation="archive_owned_project"}
+    if !req.Cap.ArchiveApproved{s.Operation="operator_archive_approval";s.RequiresUser=true;s.BlockedReason="project only archives with approval"} else if !verifiedRemote(old){s.Operation="verify_remote_owner";s.BlockedReason="missing or drifted remote identity proof"} else if !req.Cap.PlatformAdmin{s.Operation="needs_platform_admin";s.BlockedReason="missing admin"} else{s.Operation="archive_owned_project"}
    case Runtime:s.Operation="stop_owned_runtime"
    case Marketplace:s.Operation="remove_owned_marketplace"
    case Codex:s.Operation="uninstall_owned_codex_plugin"
    case APISkill:
-    if req.Cap.ProjectKey{s.Operation="delete_owned_api_skill"}else{s.Operation="needs_project_key";s.BlockedReason="missing scope"}
+    if !verifiedRemote(old){s.Operation="verify_remote_owner";s.BlockedReason="missing or drifted remote identity proof"}else if req.Cap.ProjectKey{s.Operation="delete_owned_api_skill"}else{s.Operation="needs_project_key";s.BlockedReason="missing scope"}
    }
    p.Steps=append(p.Steps,s);continue
   }
   if exists{
-   if old.Owner!=req.InstallID{s.Operation="preserve_unowned"} else if old.Version==x.Version{s.Operation="verify_owned_idempotent"} else if x.Kind==ChatGPT{s.Operation="operator_upgrade";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin upgrade requires authorized account action"} else{s.Operation="upgrade_owned";s.Undo="restore_previous_version"}
+   if old.Owner!=req.InstallID{s.Operation="preserve_unowned"} else if old.Version==x.Version{s.Operation="verify_owned_idempotent"} else if x.Kind==ChatGPT{s.Operation="operator_upgrade";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin upgrade requires authorized account action"} else if (x.Kind==Tunnel||x.Kind==Project||x.Kind==APISkill)&&!verifiedRemote(old){s.Operation="verify_remote_owner";s.BlockedReason="missing or drifted remote identity proof"} else{s.Operation="upgrade_owned";s.Undo="restore_previous_version"}
    s.CompareFingerprint=digest(old);p.Steps=append(p.Steps,s);continue
   }
   switch x.Kind{
