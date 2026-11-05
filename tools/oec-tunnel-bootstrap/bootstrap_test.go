@@ -82,7 +82,7 @@ func TestRefuseUnknownAndPartialRuntimeState(t *testing.T){
  }
  for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){
   f:=success();tc.mutate(f)
-  res,e:=Apply(context.Background(),base(),f)
+  res,e:=applyWithWait(context.Background(),base(),f,func(context.Context)error{return errors.New("simulated deadline")})
   if e==nil{t.Fatal("broken runtime accepted")}
   if res.ChatGPTConnectorCreated||res.AuthenticatedWebUIObserved{t.Fatal("fabricated connectivity")}
   if strings.Contains(fmt.Sprint(e),"SECRET_UPSTREAM")||strings.Contains(fmt.Sprint(e),"sensitive upstream"){t.Fatal("secret exposed in error")}
@@ -100,4 +100,27 @@ func TestStopRequiresExplicitExecution(t *testing.T){
  f.output[0]=[]byte(`{"alias":"suprachat-rdte","stopped":true}`)
  if e:=Stop(context.Background(),c,f);e!=nil{t.Fatal(e)}
  if len(f.commands)!=1||strings.Join(f.commands[0].Args," ")!="runtimes --json stop suprachat-rdte"{t.Fatal("unexpected stop")}
+}
+
+func TestNewTunnelConvergesOnlyAfterIndependentReadyStatus(t *testing.T){
+ c:=base();f:=success()
+ f.output=[][]byte{
+  []byte(`{"alias":"suprachat-rdte","mode":"managed"}`),
+  []byte(`{"alias":"suprachat-rdte","tunnel_id":"`+tunnelID+`","healthy":false,"ready":false,"process_running":true}`),
+  []byte(`{"alias":"suprachat-rdte","tunnel_id":"`+tunnelID+`","healthy":true,"ready":false,"process_running":true}`),
+  []byte(`{"alias":"suprachat-rdte","tunnel_id":"`+tunnelID+`","healthy":true,"ready":true,"process_running":true}`),
+ }
+ waits:=0
+ res,err:=applyWithWait(context.Background(),c,f,func(context.Context)error{waits++;return nil})
+ if err!=nil{t.Fatal(err)}
+ if !res.RuntimeHealthy||!res.RuntimeReady||!res.ProcessRunning||waits!=2||len(f.commands)!=4{t.Fatal("premature success or retry mismatch")}
+}
+func TestBoundedReadinessNeverWaived(t *testing.T){
+ c:=base();f:=success()
+ notReady:=[]byte(`{"alias":"suprachat-rdte","tunnel_id":"`+tunnelID+`","healthy":true,"ready":false,"process_running":true}`)
+ f.output=[][]byte{[]byte(`{"alias":"suprachat-rdte","mode":"managed"}`)}
+ for i:=0;i<8;i++{f.output=append(f.output,notReady)}
+ waits:=0
+ res,err:=applyWithWait(context.Background(),c,f,func(context.Context)error{waits++;return nil})
+ if err==nil||res.RuntimeReady||res.ChatGPTConnectorCreated||waits!=7||len(f.commands)!=9{t.Fatal("unready runtime was promoted or loop exceeded bound")}
 }
