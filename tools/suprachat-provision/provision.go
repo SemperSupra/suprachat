@@ -33,6 +33,7 @@ type Resource struct {
  RecordedFingerprint string `json:"recorded_fingerprint,omitempty"`
  ObservedFingerprint string `json:"observed_fingerprint,omitempty"`
  Connected bool `json:"connected,omitempty"`
+ DetachedVerified bool `json:"detached_verified,omitempty"`
 }
 type Capabilities struct {
  PlatformAdmin bool `json:"platform_admin"`
@@ -75,6 +76,7 @@ func valid(x Resource)error{
  if x.Owner!=""&&!safe.MatchString(x.Owner){return errors.New("invalid owner")}
  if x.RemoteID!=""&&!safe.MatchString(x.RemoteID){return errors.New("invalid remote id")}
  if x.Connected&&x.Kind!=ChatGPT&&x.Kind!=Runtime{return errors.New("invalid connection flag")}
+ if x.DetachedVerified && (x.Kind!=ChatGPT||x.Connected){return errors.New("invalid detached attestation")}
  return nil
 }
 func digest(x Resource)string{
@@ -102,7 +104,7 @@ func Build(req Request)(Plan,error){
   if err:=valid(x);err!=nil{return Plan{},err}
   if _,ok:=observed[id(x)];ok{return Plan{},errors.New("duplicate observed")}
   observed[id(x)]=x
-  if x.Kind==ChatGPT&&x.Connected{attached[x.Scope]=true}
+  if x.Kind==ChatGPT&&(x.Connected||!x.DetachedVerified){attached[x.Scope]=true}
  }
  items:=make([]Resource,0)
  if req.Mode=="install"{for _,x:=range desired{items=append(items,x)}}else{for _,x:=range observed{items=append(items,x)}}
@@ -122,7 +124,7 @@ func Build(req Request)(Plan,error){
    s.CompareFingerprint=digest(old)
    switch x.Kind{
    case ChatGPT:
-    if old.Connected{s.Operation="operator_disconnect";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin removal requires authorized account action"}else{s.Operation="verify_detached"}
+    if old.Connected{s.Operation="operator_disconnect";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin removal requires authorized account action"} else if !old.DetachedVerified{s.Operation="operator_verify_detached";s.RequiresUser=true;s.BlockedReason="ChatGPT plugin detachment not independently confirmed"} else{s.Operation="verify_detached"}
    case Tunnel:
     if attached[x.Scope]{s.Operation="defer_tunnel_delete";s.BlockedReason="ChatGPT plugin still attached"} else if !verifiedRemote(old){s.Operation="verify_remote_owner";s.BlockedReason="missing or drifted remote identity proof"} else if !req.Cap.TunnelManage{s.Operation="needs_tunnel_manage";s.BlockedReason="missing scope"} else{s.Operation="delete_owned_tunnel"}
    case Project:

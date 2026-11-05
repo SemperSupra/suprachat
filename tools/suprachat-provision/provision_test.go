@@ -18,7 +18,7 @@ func TestInstallDryRunAndUIHold(t *testing.T){
 func TestUninstallAttachedPreservesTunnel(t *testing.T){
  r:=fixture(t,"uninstall.json");p,e:=Build(r);if e!=nil{t.Fatal(e)}
  if operation(p,ChatGPT)!="operator_disconnect"||operation(p,Tunnel)!="defer_tunnel_delete"||operation(p,Runtime)!="stop_owned_runtime"{t.Fatal("teardown order violated")}
- r.Observed[2].Connected=false
+ r.Observed[2].Connected=false;r.Observed[2].DetachedVerified=true
  r.Observed[0].RemoteID="tunnel_fake"
  r.Observed[0].RecordedFingerprint=digest(r.Observed[0]);r.Observed[0].ObservedFingerprint=r.Observed[0].RecordedFingerprint
  p,_=Build(r)
@@ -57,7 +57,7 @@ func TestPluginManifestAndMarketplace(t *testing.T){
 }
 
 func TestRemoteCleanupRequiresFreshMatchingIdentity(t *testing.T){
- r:=fixture(t,"uninstall.json");r.Observed[2].Connected=false
+ r:=fixture(t,"uninstall.json");r.Observed[2].Connected=false;r.Observed[2].DetachedVerified=true
  p,_:=Build(r)
  if operation(p,Tunnel)!="verify_remote_owner"{t.Fatal("unverified remote tunnel deletion admitted")}
  r.Observed[0].RemoteID="tunnel_fake"
@@ -67,4 +67,14 @@ func TestRemoteCleanupRequiresFreshMatchingIdentity(t *testing.T){
  r.Observed[0].ObservedFingerprint="tampered"
  p,_=Build(r)
  if operation(p,Tunnel)!="refuse_drift"{t.Fatal("drift not fenced")}
+}
+
+func TestUnverifiedChatGPTDetachmentBlocksTunnelDelete(t *testing.T){
+ r:=fixture(t,"uninstall.json");r.Observed[2].Connected=false
+ r.Observed[0].RemoteID="tunnel_fake"
+ r.Observed[0].RecordedFingerprint=digest(r.Observed[0]);r.Observed[0].ObservedFingerprint=r.Observed[0].RecordedFingerprint
+ p,e:=Build(r);if e!=nil{t.Fatal(e)}
+ if operation(p,ChatGPT)!="operator_verify_detached"||operation(p,Tunnel)!="defer_tunnel_delete"{t.Fatal("unverified remote plugin detachment bypassed")}
+ r.Observed[2].DetachedVerified=true;p,e=Build(r)
+ if e!=nil||operation(p,Tunnel)!="delete_owned_tunnel"{t.Fatal("attested independent detachment refused")}
 }
