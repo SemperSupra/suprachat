@@ -22,6 +22,7 @@ const (
 )
 var rank=map[Kind]int{Project:1,Tunnel:2,Runtime:3,Marketplace:4,Codex:5,APISkill:6,ChatGPT:7}
 var safe=regexp.MustCompile("^[a-z0-9][a-z0-9_.:-]{2,95}$")
+var versionRE=regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 type Resource struct {
  Kind Kind `json:"kind"`
  Key string `json:"key"`
@@ -70,7 +71,7 @@ type Plan struct {
 func id(x Resource)string{return string(x.Kind)+"/"+x.Key}
 func valid(x Resource)error{
  if _,ok:=rank[x.Kind];!ok{return errors.New("unknown resource kind")}
- if !safe.MatchString(x.Key)||!safe.MatchString(x.Version)||!safe.MatchString(x.Scope){return errors.New("invalid identity")}
+ if !safe.MatchString(x.Key)||!versionRE.MatchString(x.Version)||!safe.MatchString(x.Scope){return errors.New("invalid identity")}
  if x.Owner!=""&&!safe.MatchString(x.Owner){return errors.New("invalid owner")}
  if x.Connected&&x.Kind!=ChatGPT&&x.Kind!=Runtime{return errors.New("invalid connection flag")}
  return nil
