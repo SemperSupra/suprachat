@@ -52,6 +52,7 @@ type Request struct {
 }
 type Step struct {
  Kind Kind `json:"kind"`
+ Scope string `json:"scope"`
  Key string `json:"key"`
  Operation string `json:"operation"`
  Undo string `json:"undo,omitempty"`
@@ -60,6 +61,7 @@ type Step struct {
  CompareFingerprint string `json:"compare_fingerprint,omitempty"`
 }
 type Plan struct {
+ InstallID string `json:"install_id"`
  Schema string `json:"schema"`
  DryRun bool `json:"dry_run"`
  Mode string `json:"mode"`
@@ -69,7 +71,8 @@ type Plan struct {
  ChangesApplied bool `json:"changes_applied"`
  ChatGPTConnected bool `json:"chatgpt_connected"`
 }
-func id(x Resource)string{return string(x.Kind)+"/"+x.Key}
+// Scope is part of resource identity: independently scoped customers may reuse a key.
+func id(x Resource)string{return string(x.Kind)+"/"+x.Scope+"/"+x.Key}
 func valid(x Resource)error{
  if _,ok:=rank[x.Kind];!ok{return errors.New("unknown resource kind")}
  if !safe.MatchString(x.Key)||!versionRE.MatchString(x.Version)||!safe.MatchString(x.Scope){return errors.New("invalid identity")}
@@ -90,7 +93,7 @@ func verifiedRemote(x Resource) bool {
    x.RecordedFingerprint==x.ObservedFingerprint && x.RecordedFingerprint==digest(x)
 }
 func Build(req Request)(Plan,error){
- p:=Plan{Schema:Schema,DryRun:true,Mode:req.Mode,Status:"NOT_APPLIED",Steps:[]Step{}}
+ p:=Plan{Schema:Schema,InstallID:req.InstallID,DryRun:true,Mode:req.Mode,Status:"NOT_APPLIED",Steps:[]Step{}}
  if req.Mode!="install"&&req.Mode!="uninstall"{return Plan{},errors.New("invalid mode")}
  if !safe.MatchString(req.InstallID){return Plan{},errors.New("invalid install id")}
  desired:=map[string]Resource{};observed:=map[string]Resource{}
@@ -111,10 +114,11 @@ func Build(req Request)(Plan,error){
  sort.Slice(items,func(i,j int)bool{
   a,b:=rank[items[i].Kind],rank[items[j].Kind]
   if a!=b {if req.Mode=="uninstall"{return a>b};return a<b}
-  return items[i].Key<items[j].Key
+  if items[i].Key!=items[j].Key{return items[i].Key<items[j].Key}
+  return items[i].Scope<items[j].Scope
  })
  for _,x:=range items{
-  s:=Step{Kind:x.Kind,Key:x.Key}
+  s:=Step{Kind:x.Kind,Key:x.Key,Scope:x.Scope}
   old,exists:=observed[id(x)]
   if exists&&old.RecordedFingerprint!=""&&old.ObservedFingerprint!=""&&old.RecordedFingerprint!=old.ObservedFingerprint {
    s.Operation="refuse_drift";s.BlockedReason="fingerprint changed";p.Steps=append(p.Steps,s);continue
