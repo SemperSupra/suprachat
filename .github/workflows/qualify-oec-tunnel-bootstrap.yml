@@ -52,6 +52,14 @@ jobs:
           grep -q '"chatgpt_account_access_verified":false' evidence/plan.json
           if "./evidence/oec-tunnelctl${suffix}" --action connect --tunnel-id tunnel_0123456789abcdef0123456789abcdef > /dev/null 2>&1; then echo MUTATION_WITHOUT_EXECUTE_ACCEPTED;exit 1;fi
           echo 'QUALIFIED_TUNNEL_BOOTSTRAP_OFFLINE actions_no_keys=true'
+      - name: Upload reproducible CLI binary for later local trial
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-tunnelctl-binary-${{ matrix.os }}
+          path: tools/oec-tunnel-bootstrap/evidence/oec-tunnelctl*
+          retention-days: 7
+          if-no-files-found: error
       - name: Upload sanitized plan only
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -85,3 +93,74 @@ jobs:
           "${bins[0]}" admin tunnels create --help >/dev/null
           "${bins[0]}" codex plugin install --help >/dev/null
           echo 'QUALIFIED_OFFICIAL_TUNNEL_CLIENT_CLI_CONTRACT no_credentials=true'
+
+  official-windows-ps51-installer:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install official pinned binary with PS5.1, negative tests, and idempotent retry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=(Resolve-Path 'tools/oec-tunnel-bootstrap/Install-OfficialTunnel.ps1').Path
+          $tokens=$null;$errors=$null
+          $null=[Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){throw 'INSTALLER_PS51_PARSE_FAILED'}
+          $planRaw=& powershell.exe -NoProfile -NonInteractive -File $script
+          if($LASTEXITCODE -ne 0){throw 'INSTALLER_DRY_RUN_FAILED'}
+          $plan=($planRaw | Out-String).Trim() | ConvertFrom-Json
+          if($plan.schema -ne 'suprachat-tunnel-client-install-plan/v1' -or
+             $plan.will_install -ne $false -or $plan.tunnel_connected -ne $false){
+            throw 'INSTALLER_DRY_RUN_CONTRACT_FAILED'
+          }
+          $bundle=Join-Path $env:RUNNER_TEMP 'tunnel-client-v0.0.19-windows-amd64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/openai/tunnel-client/releases/download/v0.0.19/tunnel-client-v0.0.19-windows-amd64.zip' -OutFile $bundle
+          $expected='1d0ecc3a54f2a51e27a635ac155f40fbb95df58c52cdeddf6c75532cc0bbeb25'
+          if((Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected){throw 'OFFICIAL_ZIP_MISMATCH'}
+          $destination=Join-Path $env:RUNNER_TEMP 'oec-tunnel-verified'
+          foreach($i in 1..2){
+            $out=& powershell.exe -NoProfile -NonInteractive -File $script -Apply -ArchivePath $bundle -Destination $destination
+            if($LASTEXITCODE -ne 0){throw 'OFFICIAL_INSTALL_FAILED'}
+            $doc=($out | Out-String).Trim() | ConvertFrom-Json
+            if($doc.schema -ne 'suprachat-tunnel-client-install-receipt/v1' -or
+               $doc.installed -ne $true -or $doc.archive_sha256 -ne $expected -or
+               $doc.credentials_read -ne $false -or $doc.tunnel_connected -ne $false){
+              throw 'OFFICIAL_INSTALL_RECEIPT_INVALID'
+            }
+          }
+          $exe=Join-Path $destination 'tunnel-client.exe'
+          if(!(Test-Path -LiteralPath $exe -PathType Leaf)){throw 'OFFICIAL_BINARY_NOT_INSTALLED'}
+          $version=(& $exe --version | Out-String)
+          if($LASTEXITCODE -ne 0 -or $version -notmatch 'v?0\.0\.19'){throw 'OFFICIAL_INSTALL_VERSION_FAILED'}
+          $bad=Join-Path $env:RUNNER_TEMP 'synthetic-corrupt-tunnel.zip'
+          Copy-Item -LiteralPath $bundle -Destination $bad
+          $stream=[IO.File]::Open($bad,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+          try{$stream.Position=8192;$b=$stream.ReadByte();$stream.Position=8192;$stream.WriteByte([byte]($b -bxor 1))}
+          finally{$stream.Dispose()}
+          $negative= & powershell.exe -NoProfile -NonInteractive -File $script -Apply -ArchivePath $bad -Destination $destination 2>&1 | Out-String
+          if($LASTEXITCODE -eq 0 -or $negative -notmatch 'OFFICIAL_ARCHIVE_DIGEST_MISMATCH'){
+            throw 'CORRUPT_OFFICIAL_ARCHIVE_NOT_REFUSED'
+          }
+          $global:LASTEXITCODE=0
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          [pscustomobject]@{
+            schema='suprachat-official-windows-installer-rdte/v1'
+            evidence_class='PUBLIC_OFFLINE_UPSTREAM_BINARY'
+            upstream_release='v0.0.19'
+            sha256=$expected
+            dry_run_passed=$true
+            idempotent_install_two_passes=$true
+            corrupted_archive_refused=$true
+            admin_required=$false
+            chatgpt_connected=$false
+          } | ConvertTo-Json -Compress | Set-Content -LiteralPath evidence/windows-installer.json -Encoding utf8
+          Write-Host 'QUALIFIED_PINNED_OFFICIAL_WINDOWS_PS51_INSTALL AND_CORRUPT_REFUSAL'
+      - name: Upload sanitized Windows installer receipt
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-windows-official-tunnel-installer
+          path: evidence/windows-installer.json
+          retention-days: 7
+          if-no-files-found: error
