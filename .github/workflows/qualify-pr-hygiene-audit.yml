@@ -1,0 +1,83 @@
+name: Qualify read-only PR hygiene census (public)
+on:
+  pull_request:
+    paths:
+      - 'tools/pr-hygiene-audit/**'
+      - '.github/workflows/qualify-pr-hygiene-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: pr-hygiene-readonly-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  qualify-classifier:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: tools/pr-hygiene-audit
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Vet and run bounded offline census security tests
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test -shuffle=on -count=6 -timeout=6m ./...
+      - name: Race detection
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          go test -race -shuffle=on -count=3 -timeout=6m ./...
+      - name: Synthetic evidence only
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          printf '%s\n' '{"schema":"suprachat-pr-hygiene-census-qualification/v1","read_only":true,"github_mutations":false,"real_github_census_performed":false,"credentials_recorded":false,"exact_blob_gate_tested":true,"unique_source_preserved":true}' > evidence/qualification.json
+      - name: Upload no-secret classifier receipt
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-hygiene-classifier-${{ matrix.os }}
+          path: tools/pr-hygiene-audit/evidence/qualification.json
+          retention-days: 7
+          if-no-files-found: error
+  operator-requested-readonly-census:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: tools/pr-hygiene-audit
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Strictly read public GitHub PR source fingerprints
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          sha="$(git rev-parse HEAD)"
+          go run ./cmd/census --repo "$GITHUB_REPOSITORY" --main-sha "$sha" > evidence/public-pr-census.json
+      - name: Upload read-only reconciliation candidates
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-pr-census-readonly
+          path: tools/pr-hygiene-audit/evidence/public-pr-census.json
+          retention-days: 7
+          if-no-files-found: error
