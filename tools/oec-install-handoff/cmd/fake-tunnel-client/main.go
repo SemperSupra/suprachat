@@ -21,12 +21,14 @@ func main(){
    }else if os.Getenv("OPENAI_ADMIN_KEY")!=""{refuse()}
    send(map[string]any{"alias":os.Getenv("SYNTHETIC_ALIAS")})
   case "status":
-   if a[len(a)-1]!=os.Getenv("SYNTHETIC_ALIAS")||os.Getenv("OPENAI_ADMIN_KEY")!=""{refuse()}
+   if a[len(a)-1]!=os.Getenv("SYNTHETIC_ALIAS")||os.Getenv("OPENAI_ADMIN_KEY")!=""||
+     os.Getenv("CONTROL_PLANE_API_KEY")!=os.Getenv("SYNTHETIC_RUNTIME"){refuse()}
    id:=os.Getenv("SYNTHETIC_TUNNEL")
    if os.Getenv("SYNTHETIC_FAULT")=="wrong-tunnel"{id="tunnel_ffffffffffffffffffffffffffffffff"}
    send(map[string]any{"alias":os.Getenv("SYNTHETIC_ALIAS"),"tunnel_id":id,"healthy":true,"ready":true,"process_running":true})
   case "stop":
-   if os.Getenv("CONTROL_PLANE_API_KEY")!=""||os.Getenv("OPENAI_ADMIN_KEY")!=""{refuse()}
+   if os.Getenv("CONTROL_PLANE_API_KEY")!=""||os.Getenv("OPENAI_ADMIN_KEY")!=""||
+     a[len(a)-1]!=os.Getenv("SYNTHETIC_ALIAS"){refuse()}
    send(map[string]any{"stopped":true})
   default:refuse()
   }
