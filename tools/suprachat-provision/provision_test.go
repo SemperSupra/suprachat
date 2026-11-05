@@ -36,7 +36,10 @@ func TestUpgradeUndoAndArchive(t *testing.T){
  r.Mode="uninstall";r.Observed=[]Resource{{Kind:Project,Key:"project-test",Version:"v1",Scope:"personal-workspace",Owner:r.InstallID}}
  r.Cap.PlatformAdmin=true;p,_=Build(r)
  if operation(p,Project)!="operator_archive_approval"{t.Fatal("unapproved project archive")}
- r.Cap.ArchiveApproved=true;p,_=Build(r)
+ r.Cap.ArchiveApproved=true
+ r.Observed[0].RemoteID="proj_fake_123"
+ r.Observed[0].RecordedFingerprint=digest(r.Observed[0]);r.Observed[0].ObservedFingerprint=r.Observed[0].RecordedFingerprint
+ p,_=Build(r)
  if operation(p,Project)!="archive_owned_project"{t.Fatal("project archive not available")}
 }
 func TestDeterminismAndBadInputs(t *testing.T){
