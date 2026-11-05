@@ -18,7 +18,10 @@ func TestInstallDryRunAndUIHold(t *testing.T){
 func TestUninstallAttachedPreservesTunnel(t *testing.T){
  r:=fixture(t,"uninstall.json");p,e:=Build(r);if e!=nil{t.Fatal(e)}
  if operation(p,ChatGPT)!="operator_disconnect"||operation(p,Tunnel)!="defer_tunnel_delete"||operation(p,Runtime)!="stop_owned_runtime"{t.Fatal("teardown order violated")}
- r.Observed[2].Connected=false;p,_=Build(r)
+ r.Observed[2].Connected=false
+ r.Observed[0].RemoteID="tunnel_fake"
+ r.Observed[0].RecordedFingerprint=digest(r.Observed[0]);r.Observed[0].ObservedFingerprint=r.Observed[0].RecordedFingerprint
+ p,_=Build(r)
  if operation(p,Tunnel)!="delete_owned_tunnel"{t.Fatal("detached owned tunnel not removable")}
 }
 func TestForeignOwnershipAndFingerprintDrift(t *testing.T){
@@ -51,4 +54,17 @@ func TestPluginManifestAndMarketplace(t *testing.T){
  b,e=os.ReadFile("../../.agents/plugins/marketplace.json");if e!=nil{t.Fatal(e)}
  var m struct{Name string `json:"name"`;Plugins []struct{Name string `json:"name"`;Source struct{Path string `json:"path"`}} `json:"plugins"`}
  if json.Unmarshal(b,&m)!=nil||m.Name!="suprachat-local"||len(m.Plugins)!=1||m.Plugins[0].Source.Path!="./plugins/suprachat"{t.Fatal("invalid marketplace")}
+}
+
+func TestRemoteCleanupRequiresFreshMatchingIdentity(t *testing.T){
+ r:=fixture(t,"uninstall.json");r.Observed[2].Connected=false
+ p,_:=Build(r)
+ if operation(p,Tunnel)!="verify_remote_owner"{t.Fatal("unverified remote tunnel deletion admitted")}
+ r.Observed[0].RemoteID="tunnel_fake"
+ r.Observed[0].RecordedFingerprint=digest(r.Observed[0]);r.Observed[0].ObservedFingerprint=r.Observed[0].RecordedFingerprint
+ p,_=Build(r)
+ if operation(p,Tunnel)!="delete_owned_tunnel"{t.Fatal("fresh verified owned tunnel not removable")}
+ r.Observed[0].ObservedFingerprint="tampered"
+ p,_=Build(r)
+ if operation(p,Tunnel)!="refuse_drift"{t.Fatal("drift not fenced")}
 }
