@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'tools/oec-install-handoff/**'
+      - 'tools/oec-tunnel-bootstrap/**'
       - '.github/workflows/qualify-oec-install-handoff.yml'
   workflow_dispatch:
 permissions:
