@@ -1,0 +1,164 @@
+name: Qualify native UIA apartment differential (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-uia-apartments/**'
+      - '.github/workflows/qualify-oec-uia-apartments.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-uia-apartments-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-apartment-differential:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Parse PS5.1 syntax and refuse non-SupraChat processes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='tools/oec-uia-apartments/Inspect-ApartmentUIA.ps1'
+          $tokens=$null;$errors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){throw 'UIA_APARTMENT_PS51_PARSE_FAILED'}
+          $bad= & powershell.exe -NoProfile -NonInteractive -Sta -File $script -ProcessId $PID -Samples 1 2>&1 | Out-String
+          if($LASTEXITCODE -eq 0 -or $bad -notmatch 'WRONG_PROCESS_REFUSED'){throw 'NON_SUPRACHAT_ADMISSION_NOT_REFUSED'}
+          $global:LASTEXITCODE=0
+          Write-Host 'QUALIFIED_APARTMENT_PS51_PARSE_AND_REFUSAL'
+      - name: Build one unmodified native SupraChat application
+        shell: pwsh
+        run: |
+          dotnet publish SupraChat/SupraChat.csproj -c Release -r win-x64 --self-contained false -o out/oec-uia-apartment-fixture
+          if($LASTEXITCODE -ne 0 -or !(Test-Path out/oec-uia-apartment-fixture/SupraChat.exe)){throw 'UIA_APARTMENT_NATIVE_APP_BUILD_FAILED'}
+      - name: Compare PS7 default, PS5.1 STA and PS7 STA on the same process
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:SUPRACHAT_INSTALL_TRACE_ID=[Guid]::NewGuid().ToString('N')
+          $env:SUPRACHAT_INSTALL_SESSION_ID=[Guid]::NewGuid().ToString('N')
+          $app=(Resolve-Path 'out/oec-uia-apartment-fixture/SupraChat.exe').Path
+          $script=(Resolve-Path 'tools/oec-uia-apartments/Inspect-ApartmentUIA.ps1').Path
+          $temp=Join-Path $env:RUNNER_TEMP ('uia-apartments-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force $temp | Out-Null
+          $p=Start-Process -FilePath $app -PassThru
+          $results=New-Object 'System.Collections.Generic.List[object]'
+          try {
+            Start-Sleep -Seconds 8
+            $p.Refresh()
+            if($p.HasExited){throw 'NATIVE_APP_EXITED_EARLY'}
+            $variants=@(
+              @{name='ps7-default-initial';exe=(Get-Command pwsh).Source;sta=$false},
+              @{name='ps51-sta';exe=(Get-Command powershell.exe).Source;sta=$true},
+              @{name='ps7-sta';exe=(Get-Command pwsh).Source;sta=$true},
+              @{name='ps7-default-repeat';exe=(Get-Command pwsh).Source;sta=$false}
+            )
+            foreach($v in $variants) {
+              $out=Join-Path $temp ($v.name + '.json')
+              $err=Join-Path $temp ($v.name + '.err')
+              $argsList=@('-NoProfile','-NonInteractive')
+              if($v.sta){$argsList+= '-Sta'}
+              $argsList+=@('-File', ('"' + $script + '"'), '-ProcessId', [string]$p.Id, '-Samples','2')
+              $child=Start-Process -FilePath $v.exe -ArgumentList $argsList -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+              $finished=$child.WaitForExit(55000)
+              if(!$finished){Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue}
+              $class='EXECUTION_ERROR'
+              $valid=$false;$target=$false;$maxDesc=0;$walkDesc=0;$apt='UNKNOWN'
+              if($finished -and $child.ExitCode -eq 0 -and (Test-Path $out)){
+                try {
+                  $doc=Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
+                  if($doc.schema -ne 'suprachat-uia-apartment-differential/v1' -or
+                     $doc.evidence_class -ne 'PUBLIC_SYNTHETIC_NATIVE_UIA' -or
+                     $doc.captured_sensitive_content -ne $false -or
+                     @($doc.samples).Count -ne 2){throw 'UNEXPECTED_PROBE_RECEIPT'}
+                  $valid=(@($doc.samples | Where-Object { $_.root_valid }).Count -gt 0)
+                  $target=(@($doc.samples | Where-Object { $_.findall_target -or $_.walker_target }).Count -gt 0)
+                  $maxDesc=($doc.samples | Measure-Object -Property findall_count -Maximum).Maximum
+                  $walkDesc=($doc.samples | Measure-Object -Property walker_count -Maximum).Maximum
+                  $apt=[string]$doc.samples[0].apartment
+                  $class='COLLECTED'
+                } catch {$class='INVALID_PROBE_RECEIPT'}
+              } elseif (!$finished){$class='TIMEOUT'}
+              $results.Add([pscustomobject]@{
+                variant=$v.name;execution_class=$class;apartment=$apt
+                root_valid=$valid;tab_sessions_observed=$target
+                findall_max=[int]$maxDesc;walker_max=[int]$walkDesc
+              })
+            }
+            foreach($item in $results){
+              # Bounded structural booleans/counts only, no UI text or PIDs.
+              Write-Host ('UIA_APARTMENT_RESULT variant={0} class={1} apartment={2} root={3} tab={4} findall={5} walker={6}' -f
+                $item.variant,$item.execution_class,$item.apartment,
+                $item.root_valid,$item.tab_sessions_observed,$item.findall_max,$item.walker_max)
+            }
+            if($results.Count -ne 4){throw 'MISSING_APARTMENT_VARIANT'}
+            if(@($results | Where-Object { $_.root_valid }).Count -eq 0){throw 'NO_ACTUAL_NATIVE_UIA_ROOT_OBSERVED'}
+            # Compare the protected smoke's process-root search with HWND-root
+            # discovery on this *same* application instance. No user content.
+            $rootScript=(Resolve-Path 'tools/oec-uia-apartments/Inspect-RootSelection.ps1').Path
+            $rootOut=Join-Path $temp 'root-selection.json'
+            $rootErr=Join-Path $temp 'root-selection.err'
+            $rootArgs=@('-NoProfile','-NonInteractive','-Sta','-File',
+              ('"' + $rootScript + '"'), '-ProcessId',[string]$p.Id,'-Samples','2')
+            $rootChild=Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList $rootArgs -PassThru -RedirectStandardOutput $rootOut -RedirectStandardError $rootErr
+            $rootFinished=$rootChild.WaitForExit(50000)
+            if(!$rootFinished){
+              Stop-Process -Id $rootChild.Id -Force -ErrorAction SilentlyContinue
+              throw 'ROOT_PATH_DIFFERENTIAL_TIMEOUT'
+            }
+            if($rootChild.ExitCode -ne 0){throw 'ROOT_PATH_DIFFERENTIAL_PROCESS_FAILED'}
+            $rootDoc=Get-Content -LiteralPath $rootOut -Raw | ConvertFrom-Json
+            if($rootDoc.schema -ne 'suprachat-uia-root-selection/v1' -or
+               $rootDoc.evidence_class -ne 'PUBLIC_SYNTHETIC_NATIVE_UIA' -or
+               $rootDoc.readonly -ne $true -or
+               $rootDoc.captured_sensitive_content -ne $false -or
+               @($rootDoc.samples).Count -ne 2){throw 'ROOT_PATH_DIFFERENTIAL_SCHEMA_FAILED'}
+            $rootBrief=New-Object 'System.Collections.Generic.List[object]'
+            foreach($item in $rootDoc.samples){
+              $rootBrief.Add([pscustomobject]@{
+                sample=[int]$item.sample
+                handle_root_valid=($item.handle_root_valid -eq $true)
+                process_search_root_valid=($item.process_search_root_valid -eq $true)
+                handle_target=($item.handle_target -eq $true)
+                process_search_target=($item.process_search_target -eq $true)
+                handle_findall_target=($item.handle_findall_target -eq $true)
+                handle_descendants=[int]$item.handle_descendants
+                root_search_ms=[int]$item.root_search_ms
+                process_findfirst_ms=[int]$item.process_findfirst_ms
+                error_present=(-not [string]::IsNullOrEmpty([string]$item.error_class))
+              })
+              Write-Host ('UIA_ROOT_PATH_RESULT sample={0} hwnd_root={1} process_root={2} hwnd_target={3} process_target={4} hwnd_all_target={5} descendants={6} root_search_ms={7} process_target_ms={8} error={9}' -f
+                $item.sample,$item.handle_root_valid,$item.process_search_root_valid,
+                $item.handle_target,$item.process_search_target,$item.handle_findall_target,
+                $item.handle_descendants,$item.root_search_ms,$item.process_findfirst_ms,
+                (-not [string]::IsNullOrEmpty([string]$item.error_class)))
+            }
+            $summary=[ordered]@{
+              schema='suprachat-uia-apartment-summary/v1'
+              evidence_class='PUBLIC_SYNTHETIC_NATIVE_UIA'
+              source_application_modified=$false
+              protected_qualification_modified=$false
+              user_content_captured=$false
+              variants=$results.ToArray()
+              root_selection=$rootBrief.ToArray()
+            }
+            New-Item -ItemType Directory -Force tools/oec-uia-apartments/evidence | Out-Null
+            $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath tools/oec-uia-apartments/evidence/summary.json -Encoding utf8
+            Write-Host 'QUALIFIED_SAME_PROCESS_UIA_APARTMENT_DIFFERENTIAL data_class=metadata_only native_fix=false'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload sanitized comparison only
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: uia-apartment-comparison-public
+          path: tools/oec-uia-apartments/evidence/summary.json
+          if-no-files-found: error
+          retention-days: 7
