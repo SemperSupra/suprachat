@@ -1,6 +1,6 @@
 # Model A — owner-scoped crash-recoverable installation journal
 
-This Go standard-library transaction core journals local SupraChat install/upgrade/uninstall effects. It does **not** contact OpenAI, create a real tunnel, install a ChatGPT custom plugin, read browser state, or store credentials.
+This Go standard-library transaction core journals local SupraChat install and uninstall effects. It does **not** contact OpenAI, create a real tunnel, install a ChatGPT custom plugin, read browser state, or store credentials.
 
 Each installation has a distinct local journal, exclusive process lock, normalized IDs, resource scope and owner, and allowed operation/undo pairs. It writes `prepared` to disk before creating a resource and requires independent observed proof before writing `verified`. On interrupted creation it observes the resource; if uncertain, it refuses to repeat the action.
 
@@ -10,6 +10,6 @@ Three audiences: humans receive a nonsecret status summary; automation uses mach
 
 **Tested:** two installations in one workspace; idempotent install/delete; interrupted create, missing observation, interrupted delete, foreign owner/drift, unattended ChatGPT plugin denial, stale lock and corrupt journal. These are synthetic adapter oracles, not authorization to deploy.
 
-**Still required:** bounded adapter to merged official tunnel bootstrap, real plan-to-intent conversion, version migration, OS-specific owner-only state handling, authorized ChatGPT registration/detachment confirmation, and authenticated end-to-end HIL. Model B managed gateway is deferred.
+**Still required:** bounded adapter to merged official tunnel bootstrap, real plan-to-intent conversion, versioned upgrade/rollback semantics and migration, OS-specific owner-only state handling, authorized ChatGPT registration/detachment confirmation, and authenticated end-to-end HIL. Model B managed gateway is deferred.
 
 Run `go vet ./...` and `go test -race -shuffle=on -count=3 ./...` from this module.
