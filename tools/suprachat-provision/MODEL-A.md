@@ -15,3 +15,7 @@ The fleet planner is an **offline set of independent per-install lifecycle plans
 - Zero account claims or keys
 
 This layer does **not** prove that the real OpenAI ChatGPT app supports two registrations in a specific account or how an app picks the connection. Those require separate authorized ChatGPT account tests, not fabricated public-runner evidence. The original protected native Windows CI remains a separate gate.
+
+## Source and gate custody
+
+This workcell is rebased onto the merged provisioning baseline at public main d8d730623047349fff3066ab2e89810df965027a. Review only fleet.go, fleet_test.go, MODEL-A.md and the scoped-identity change to provision.go. An installation may reuse a plugin *product* manifest, but must not reuse a separately provisioned tunnel/runtime/ChatGPT connection identity. Existing per-user account-level ChatGPT plugin CRUD is still unverified. No Model B fleet gateway is authorized for MVP.
