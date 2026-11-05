@@ -1,0 +1,69 @@
+name: Qualify disposable local RDTE driver (Windows, no account)
+on:
+  pull_request:
+    paths:
+      - 'tools/local/rdte-driver/**'
+      - '.github/workflows/qualify-local-rdte-driver.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: local-rdte-driver-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  no-account-parse-and-plan:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Windows PowerShell 5.1 AST parse and no-touch self-test
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $PWD 'tools/local/rdte-driver/Invoke-SupraChat-RDTE.ps1'
+          $tokens=$null; $errors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if (@($errors).Count -gt 0) { throw 'LOCAL_RDTE_PS51_SYNTAX_REFUSED' }
+          $label='ci-model-free-01'
+          $root=Join-Path $HOME '.local/share/suprachat-rdte'
+          $before=@(Get-ChildItem $root -ErrorAction SilentlyContinue).Count
+          $self = & powershell.exe -NoProfile -File $path -Mode SelfTest -RunLabel $label | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $self.selftest -ne 'PASS' -or $self.files_changed) { throw 'LOCAL_RDTE_SELFTEST_REFUSED' }
+          $plan = & powershell.exe -NoProfile -File $path -Mode Plan -RunLabel $label | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $plan.mode -ne 'Plan' -or !$plan.no_global_installs -or
+              !$plan.no_repo_writes -or !$plan.local_appdata_webview_untouched -or $plan.chatgpt_login_automated) {
+            throw 'LOCAL_RDTE_PLAN_SCOPE_REFUSED'
+          }
+          $undo = & powershell.exe -NoProfile -File $path -Mode Undo -RunLabel $label
+          if ($LASTEXITCODE -ne 0 -or "$undo" -ne 'UNDO_ALREADY_CLEAN_NO_CHANGES') { throw 'LOCAL_RDTE_IDEMPOTENT_UNDO_REFUSED' }
+          $after=@(Get-ChildItem $root -ErrorAction SilentlyContinue).Count
+          if ($after -ne $before) { throw 'LOCAL_RDTE_PLAN_CREATED_STATE' }
+      - name: PowerShell 7 parser and same no-touch plan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $PWD 'tools/local/rdte-driver/Invoke-SupraChat-RDTE.ps1'
+          $tokens=$null; $errors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if (@($errors).Count -gt 0) { throw 'LOCAL_RDTE_PS7_SYNTAX_REFUSED' }
+          $self = & pwsh -NoProfile -File $path -Mode SelfTest | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $self.selftest -ne 'PASS') { throw 'LOCAL_RDTE_PS7_SELFTEST_REFUSED' }
+          $plan = & pwsh -NoProfile -File $path -Mode Plan | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $plan.mode -ne 'Plan' -or $plan.chatgpt_login_automated) {
+            throw 'LOCAL_RDTE_PS7_PLAN_REFUSED'
+          }
+      - name: Fixed-scope no-account qualification receipt
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          '{"schema":"suprachat-local-rdte-driver-qualification/v1","windows_ps51_parse":true,"ps7_parse":true,"read_only_selftest":true,"no_dle_credentials_used":true,"no_account_login":true,"no_real_app_launched":true,"no_user_profile_modified":true}' |
+            Set-Content -Path evidence/local-rdte-driver.json -Encoding utf8
+      - name: Upload synthetic-only qualification receipt
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: local-rdte-driver-windows-no-account
+          path: evidence/local-rdte-driver.json
+          retention-days: 7
+          if-no-files-found: error
