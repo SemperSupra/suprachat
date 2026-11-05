@@ -1,0 +1,57 @@
+name: Qualify Model A CLI installation handoff (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-install-handoff/**'
+      - '.github/workflows/qualify-oec-install-handoff.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-install-handoff-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  parallel-two-installations:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 14
+    defaults:
+      run:
+        working-directory: tools/oec-install-handoff
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Vet actual wrapper and synthetic integration harness
+        run: |
+          set -euo pipefail
+          go vet ./...
+          (cd ../oec-tunnel-bootstrap && go vet ./...)
+      - name: Compile actual tunnelctl and exercise parallel fake official clients
+        run: |
+          set -euo pipefail
+          go test -shuffle=on -count=2 -timeout=8m ./...
+      - name: Race detector for independently running CLI processes
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          go test -race -shuffle=on -count=2 -timeout=8m ./...
+      - name: Emit synthetic-only acceptance receipt
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          printf '%s\n' '{"schema":"suprachat-model-a-cli-handoff/v1","evidence_class":"PUBLIC_SYNTHETIC_OFFICIAL_CLIENT_FIXTURE","two_distinct_installations_exercised":true,"real_suprachat_tunnelctl_binary_exercised":true,"chatgpt_plugin_installed":false,"platform_tunnel_created":false,"user_credentials_used":false}' > evidence/summary.json
+      - name: Upload nonsecret receipt only
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-model-a-cli-handoff-${{ matrix.os }}
+          path: tools/oec-install-handoff/evidence/summary.json
+          retention-days: 7
+          if-no-files-found: error
