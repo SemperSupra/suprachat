@@ -100,6 +100,8 @@ func TestIndependentInstallsAndAttachedTunnelHold(t *testing.T){
  if err:=b.Install(ctx,intents("install-work","same-workspace","work"),f);err!=nil{t.Fatal(err)}
  if err:=b.Uninstall(ctx,f);err!=nil{t.Fatal(err)}
  if !errors.Is(a.Uninstall(ctx,f),ErrOperator){t.Fatal("still-attached tunnel removed")}
+ if f.undone!=2{t.Fatal("runtime removed before global ChatGPT attachment preflight")}
+ if _,exists:=f.live["runtime-home"];!exists{t.Fatal("runtime stopped while ChatGPT connection attached")}
  if _,exists:=f.live["tunnel-home"];!exists{t.Fatal("home tunnel missing")}
  if _,exists:=f.live["tunnel-work"];exists{t.Fatal("work tunnel still live")}
 }
@@ -124,4 +126,24 @@ func TestExclusiveLockAndTamperedJournal(t *testing.T){
  p:=filepath.Join(root,"journal-install-aaa.json")
  if err:=os.WriteFile(p,[]byte("{\"schema\":\"foreign\",\"install_id\":\"install-aaa\"}"),0600);err!=nil{t.Fatal(err)}
  if _,err:=Open(root,"install-aaa");!errors.Is(err,ErrScope){t.Fatal("corrupt authority accepted")}
+}
+
+func TestUninstallPreflightRefusesDriftWithoutPartialEffect(t *testing.T){
+ root:=t.TempDir();id:="install-aaa";e:=open(t,root,id);defer e.Close()
+ a:=intents(id,"workspace-one","alpha")
+ f:=&fake{}
+ if err:=e.Install(context.Background(),a,f);err!=nil{t.Fatal(err)}
+ wrong:=makeProof(a[0]);wrong.Fingerprint=SyntheticFingerprint("changed")
+ f.overridden=map[string]Proof{a[0].ID:wrong}
+ if !errors.Is(e.Uninstall(context.Background(),f),ErrDrift){t.Fatal("drift not rejected")}
+ if f.undone!=0{t.Fatal("destructive partial uninstall before detecting drift")}
+ if _,ok:=f.live[a[1].ID];!ok{t.Fatal("unrelated runtime was removed")}
+}
+func TestUninstallPreflightRefusesPreparedStateWithoutPartialEffect(t *testing.T){
+ root:=t.TempDir();id:="install-aaa";e:=open(t,root,id);defer e.Close()
+ a:=intents(id,"workspace-one","alpha")
+ f:=&fake{failCreateAfterEffect:true}
+ if !errors.Is(e.Install(context.Background(),a,f),ErrAdapter){t.Fatal("expected interrupted create")}
+ if !errors.Is(e.Uninstall(context.Background(),f),ErrReconcile){t.Fatal("uncertain intent allowed uninstall")}
+ if f.undone!=0{t.Fatal("prepared action triggered deletion")}
 }

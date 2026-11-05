@@ -175,8 +175,34 @@ func (e *Engine)Install(ctx context.Context,intents []Intent,a Adapter)error{
  }
  return nil
 }
+// Preflight ALL surviving resources before any teardown effect. In particular,
+// an attached ChatGPT connection must block uninstall BEFORE its runtime stops.
+// Recheck each scope immediately before Undo to guard against later drift.
+func (e *Engine)preflightUninstall(ctx context.Context,a Adapter)error{
+ if e.lock==nil{return ErrScope}
+ for n:=len(e.journal.Entries)-1;n>=0;n--{
+  rec:=e.journal.Entries[n]
+  switch rec.State{
+  case "removed":continue
+  case "undo_pending":
+   absent,err:=a.ObserveAbsent(ctx,rec.Intent,rec.Proof)
+   if err!=nil{return ErrAdapter}
+   if !absent{return ErrReconcile}
+  case "verified":
+   p,exists,err:=a.Observe(ctx,rec.Intent)
+   if err!=nil{return ErrAdapter}
+   if !exists||!reflect.DeepEqual(p,rec.Proof){return ErrDrift}
+   allowed,err:=a.SafeToUndo(ctx,rec.Intent,rec.Proof)
+   if err!=nil{return ErrAdapter}
+   if !allowed{return ErrOperator}
+  default:return ErrReconcile
+  }
+ }
+ return nil
+}
 func (e *Engine)Uninstall(ctx context.Context,a Adapter)error{
  if e.lock==nil{return ErrScope}
+ if err:=e.preflightUninstall(ctx,a);err!=nil{return err}
  for n:=len(e.journal.Entries)-1;n>=0;n--{
   rec:=e.journal.Entries[n]
   if rec.State=="removed"{continue}
