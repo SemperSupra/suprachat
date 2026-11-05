@@ -1,0 +1,83 @@
+name: Qualify Official OpenAI Tunnel Bootstrap (public, no credentials)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-tunnel-bootstrap/**'
+      - 'skills/suprachat-tunnel/**'
+      - '.github/workflows/qualify-oec-tunnel-bootstrap.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-official-tunnel-bootstrap-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  offline-lifecycle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 13
+    defaults:
+      run:
+        working-directory: tools/oec-tunnel-bootstrap
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.23.12'
+          cache: false
+      - name: Vet and repeat official tunnel composition negatives
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test -shuffle=on -count=5 -timeout=5m ./...
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          go test -race -shuffle=on -count=2 -timeout=5m ./...
+      - name: Build CLI and exercise credential-free plan
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          go build -trimpath -o evidence/oec-tunnelctl ./cmd/tunnelctl
+          ./evidence/oec-tunnelctl --action plan --tunnel-id tunnel_0123456789abcdef0123456789abcdef --alias suprachat-rdte > evidence/plan.json
+          python3 -c 'import json;d=json.load(open("evidence/plan.json"));assert d["schema"]=="suprachat-official-tunnel-plan/v1" and not d["execute"] and not d["chatgpt_connector_created"] and not d["chatgpt_account_access_verified"]'
+          if ./evidence/oec-tunnelctl --action connect --tunnel-id tunnel_0123456789abcdef0123456789abcdef > /dev/null 2>&1; then echo MUTATION_WITHOUT_EXECUTE_ACCEPTED;exit 1;fi
+          echo 'QUALIFIED_TUNNEL_BOOTSTRAP_OFFLINE actions_no_keys=true'
+      - name: Upload sanitized plan only
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oec-official-bootstrap-plan-${{ matrix.os }}
+          path: tools/oec-tunnel-bootstrap/evidence/plan.json
+          retention-days: 7
+          if-no-files-found: error
+  official-upstream-cli-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check official release archive and subcommand syntax without credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          url='https://github.com/openai/tunnel-client/releases/download/v0.0.19/tunnel-client-v0.0.19-linux-amd64.zip'
+          curl -fsSL --retry 3 --connect-timeout 10 --max-time 150 "$url" -o "$work/client.zip"
+          echo "9ee9448592345a9dd1517fb79791ab54d24f051142eb92bcbe8cd355effc9142  $work/client.zip" | sha256sum -c - >/dev/null
+          unzip -qq "$work/client.zip" -d "$work/expanded"
+          mapfile -t bins < <(find "$work/expanded" -type f -name tunnel-client)
+          if [[ "${#bins[@]}" != 1 ]];then echo UPSTREAM_BINARY_AMBIGUOUS;exit 1;fi
+          chmod 700 "${bins[0]}"
+          unset OPENAI_ADMIN_KEY CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID OPENAI_API_KEY
+          "${bins[0]}" --version >/dev/null
+          "${bins[0]}" runtimes connect --help >/dev/null
+          "${bins[0]}" runtimes status --help >/dev/null
+          "${bins[0]}" admin tunnels create --help >/dev/null
+          "${bins[0]}" codex plugin install --help >/dev/null
+          echo 'QUALIFIED_OFFICIAL_TUNNEL_CLIENT_CLI_CONTRACT no_credentials=true'
