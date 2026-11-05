@@ -12,6 +12,7 @@ import (
  "regexp"
  "strconv"
  "strings"
+ "time"
 )
 
 const Evidence="OFFLINE_CLI_SIMULATION_ONLY"
@@ -112,7 +113,18 @@ func decodeObject(raw []byte) (map[string]any,error){
 }
 // Apply does not create a ChatGPT app. Runtime health is not the same thing
 // as having a ChatGPT subscription that can attach a custom MCP connector.
+func waitForRuntime(ctx context.Context)error{
+ timer:=time.NewTimer(5*time.Second)
+ defer timer.Stop()
+ select {
+ case <-ctx.Done():return ctx.Err()
+ case <-timer.C:return nil
+ }
+}
 func Apply(ctx context.Context,c Config,r Runner)(Result,error){
+ return applyWithWait(ctx,c,r,waitForRuntime)
+}
+func applyWithWait(ctx context.Context,c Config,r Runner,wait func(context.Context)error)(Result,error){
  result:=Result{Schema:"suprachat-official-tunnel-result/v1",EvidenceClass:Evidence}
  if !c.Execute{return result,errors.New("apply requires explicit execute flag")}
  if _,e:=PlanFor(c);e!=nil{return result,e}
@@ -121,18 +133,25 @@ func Apply(ctx context.Context,c Config,r Runner)(Result,error){
  conn,e:=decodeObject(raw)
  if e!=nil{return result,e}
  if conn["alias"]!=c.Alias{return result,errors.New("connect alias mismatch")}
- raw,e=r.Run(ctx,Command{Args:[]string{"runtimes","--json","status",c.Alias}})
- if e!=nil{return result,errors.New("upstream status unavailable")}
- status,e:=decodeObject(raw);if e!=nil{return result,e}
- if status["alias"]!=c.Alias{return result,errors.New("status alias mismatch")}
- id,ok:=status["tunnel_id"].(string)
- if !ok || !validTunnel.MatchString(id) || (c.TunnelID!="" && c.TunnelID!=id){return result,errors.New("unexpected tunnel id")}
- result.RuntimeHealthy=status["healthy"]==true
- result.RuntimeReady=status["ready"]==true
- result.ProcessRunning=status["process_running"]==true
- if !result.RuntimeHealthy || !result.RuntimeReady || !result.ProcessRunning {
-  return result,errors.New("managed runtime not independently healthy and ready")
+ // New Platform tunnels can require 25-30s propagation before ready.
+ // Never classify a launched process as healthy without an exact-status proof.
+ ready:=false
+ for attempt:=0;attempt<8;attempt++{
+  raw,e=r.Run(ctx,Command{Args:[]string{"runtimes","--json","status",c.Alias}})
+  if e!=nil{return result,errors.New("upstream status unavailable")}
+  status,e:=decodeObject(raw);if e!=nil{return result,e}
+  if status["alias"]!=c.Alias{return result,errors.New("status alias mismatch")}
+  id,ok:=status["tunnel_id"].(string)
+  if !ok || !validTunnel.MatchString(id) || (c.TunnelID!="" && c.TunnelID!=id){return result,errors.New("unexpected tunnel id")}
+  result.RuntimeHealthy=status["healthy"]==true
+  result.RuntimeReady=status["ready"]==true
+  result.ProcessRunning=status["process_running"]==true
+  if result.RuntimeHealthy && result.RuntimeReady && result.ProcessRunning {ready=true;break}
+  if attempt<7 {
+   if err:=wait(ctx);err!=nil{return result,errors.New("managed runtime readiness deadline")}
+  }
  }
+ if !ready{return result,errors.New("managed runtime not independently healthy and ready")}
  if c.InstallCodex{
   if _,e=r.Run(ctx,Command{Args:[]string{"codex","plugin","install"}});e!=nil{return result,errors.New("upstream Codex plugin install failed")}
   raw,e=r.Run(ctx,Command{Args:[]string{"codex","status","--json"}})
