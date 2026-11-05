@@ -1,0 +1,149 @@
+name: Qualify upstream OpenAI Tunnel Client (offline, public)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/qualify-oec-openai-tunnel-offline.yml'
+      - 'tools/oec-tunnel-client-offline/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-tunnel-client-offline-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  offline-release-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify upstream ZIP SHA-256 and exercise CLI without a tunnel (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID OPENAI_ADMIN_KEY OPENAI_API_KEY || true
+          pkg="$RUNNER_TEMP/tunnel-client-v0.0.19-linux-amd64.zip"
+          url="https://github.com/openai/tunnel-client/releases/download/v0.0.19/tunnel-client-v0.0.19-linux-amd64.zip"
+          curl -fLsS --connect-timeout 15 --max-time 90 --retry 2 "$url" -o "$pkg"
+          echo "9ee9448592345a9dd1517fb79791ab54d24f051142eb92bcbe8cd355effc9142  $pkg" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/oec-tunnel-client"
+          unzip -q "$pkg" -d "$RUNNER_TEMP/oec-tunnel-client"
+          mapfile -d '' candidates < <(find "$RUNNER_TEMP/oec-tunnel-client" -type f -name tunnel-client -print0)
+          test "${#candidates[@]}" -eq 1
+          bin="${candidates[0]}"
+          chmod +x "$bin"
+          timeout 20s "$bin" --version > "$RUNNER_TEMP/tunnel-version.txt"
+          grep -Eq 'v?0\.0\.19' "$RUNNER_TEMP/tunnel-version.txt"
+          timeout 20s "$bin" help quickstart > /dev/null
+          timeout 20s "$bin" run --help > /dev/null
+          timeout 20s "$bin" dev mcp-stub --help > /dev/null
+          timeout 80s python3 tools/oec-tunnel-client-offline/exercise_local_proxy.py "$bin"
+          mkdir -p evidence
+          python3 - <<'PY'
+          import json,os,pathlib
+          source_sha=os.getenv('GITHUB_HEAD_SHA') or os.getenv('GITHUB_SHA')
+          doc={'schema':'oec-upstream-tunnel-offline/v1',
+               'evidence_class':'PUBLIC_OFFLINE_UPSTREAM_BINARY',
+               'upstream_repository':'openai/tunnel-client',
+               'upstream_release':'v0.0.19',
+               'platform':'linux-amd64',
+               'zip_sha256':'9ee9448592345a9dd1517fb79791ab54d24f051142eb92bcbe8cd355effc9142',
+               'source_sha':source_sha,
+               'cli_version_and_help':'PASS',
+               'local_inmemory_mcp_proxy':'PASS',
+               'openai_credentials_supplied':False,
+               'openai_tunnel_registered':False,
+               'real_mcp_session_observed':False,
+               'chatgpt_connected':False}
+          pathlib.Path('evidence/tunnel-offline-linux.json').write_text(json.dumps(doc,sort_keys=True,indent=2)+'\n')
+          PY
+          echo 'QUALIFIED_UPSTREAM_TUNNEL_CLI_OFFLINE platform=linux-amd64 actual_connection=false'
+      - name: Verify upstream ZIP SHA-256 and exercise CLI without a tunnel (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($key in @('CONTROL_PLANE_API_KEY','CONTROL_PLANE_TUNNEL_ID','OPENAI_ADMIN_KEY','OPENAI_API_KEY')) {
+            [Environment]::SetEnvironmentVariable($key, $null, 'Process')
+          }
+          $bundle=Join-Path $env:RUNNER_TEMP 'tunnel-client-v0.0.19-windows-amd64.zip'
+          $url='https://github.com/openai/tunnel-client/releases/download/v0.0.19/tunnel-client-v0.0.19-windows-amd64.zip'
+          Invoke-WebRequest -Uri $url -OutFile $bundle -MaximumRedirection 5
+          $expected='1d0ecc3a54f2a51e27a635ac155f40fbb95df58c52cdeddf6c75532cc0bbeb25'
+          $actual=(Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -cne $expected){throw 'UPSTREAM_RELEASE_DIGEST_MISMATCH'}
+          # Run the actual local operator preflight in stock Windows PS 5.1.
+          $check='tools/oec-tunnel-client-offline/Test-OpenAITunnelArchive.ps1'
+          $raw= & powershell.exe -NoProfile -NonInteractive -File $check -ArchivePath $bundle
+          if($LASTEXITCODE -ne 0){throw 'TUNNEL_LOCAL_PREFLIGHT_FAILED'}
+          $receipt=($raw | Out-String).Trim() | ConvertFrom-Json
+          if($receipt.schema -ne 'oec-tunnel-client-local-preflight/v1' -or
+             $receipt.upstream_zip_verified -ne $true -or
+             $receipt.archive_sha256 -ne $expected -or
+             $receipt.control_plane_runtime_key_present -ne $false -or
+             $receipt.tunnel_id_present -ne $false -or
+             $receipt.chatgpt_connected -ne $false -or
+             $receipt.authenticated_webui_observed -ne $false){
+            throw 'TUNNEL_LOCAL_PREFLIGHT_CONTRACT_FAILED'
+          }
+          $bad=Join-Path $env:RUNNER_TEMP 'synthetic-corrupt-release.zip'
+          Copy-Item -LiteralPath $bundle -Destination $bad
+          $stream=[IO.File]::Open($bad,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+          try {
+            $stream.Position=8192
+            $oldByte=$stream.ReadByte()
+            $stream.Position=8192
+            $stream.WriteByte([byte]($oldByte -bxor 1))
+          } finally {$stream.Dispose()}
+          $refusal= & powershell.exe -NoProfile -NonInteractive -File $check -ArchivePath $bad 2>&1 | Out-String
+          if($LASTEXITCODE -eq 0 -or $refusal -notmatch 'UPSTREAM_ARCHIVE_DIGEST_MISMATCH'){
+            throw 'CORRUPTED_ARCHIVE_NOT_REFUSED'
+          }
+          $global:LASTEXITCODE=0
+          Write-Host 'QUALIFIED_TUNNEL_ARCHIVE_PS51_VALID_AND_CORRUPT_NEGATIVE'
+          $dest=Join-Path $env:RUNNER_TEMP 'oec-tunnel-client'
+          Expand-Archive -LiteralPath $bundle -DestinationPath $dest
+          $binaries=@(Get-ChildItem -LiteralPath $dest -Recurse -File -Filter 'tunnel-client.exe')
+          if($binaries.Count -ne 1){throw 'UPSTREAM_BINARY_AMBIGUOUS'}
+          $binary=$binaries[0].FullName
+          $version=(& $binary --version | Out-String)
+          if($LASTEXITCODE -ne 0 -or $version -notmatch 'v?0\.0\.19'){throw 'UPSTREAM_VERSION_MISMATCH'}
+          $null= & $binary help quickstart
+          if($LASTEXITCODE -ne 0){throw 'UPSTREAM_QUICKSTART_HELP_FAILED'}
+          $null= & $binary run --help
+          if($LASTEXITCODE -ne 0){throw 'UPSTREAM_RUN_HELP_FAILED'}
+          $null= & $binary dev mcp-stub --help
+          if($LASTEXITCODE -ne 0){throw 'UPSTREAM_LOCAL_STUB_HELP_FAILED'}
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $doc=[ordered]@{
+            schema='oec-upstream-tunnel-offline/v1'
+            evidence_class='PUBLIC_OFFLINE_UPSTREAM_BINARY'
+            upstream_repository='openai/tunnel-client'
+            upstream_release='v0.0.19'
+            platform='windows-amd64'
+            zip_sha256=$expected
+            source_sha=$env:GITHUB_HEAD_SHA
+            cli_version_and_help='PASS'
+            openai_credentials_supplied=$false
+            openai_tunnel_registered=$false
+            real_mcp_session_observed=$false
+            chatgpt_connected=$false
+          }
+          $doc | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath evidence/tunnel-offline-windows.json -Encoding utf8
+          Write-Host 'QUALIFIED_UPSTREAM_TUNNEL_CLI_OFFLINE platform=windows-amd64 actual_connection=false'
+      - name: Upload bounded offline receipt (no binary or keys)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: success()
+        with:
+          name: oec-tunnel-client-offline-${{ runner.os }}
+          path: evidence/tunnel-offline-*.json
+          if-no-files-found: error
+          retention-days: 7
+    env:
+      GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
