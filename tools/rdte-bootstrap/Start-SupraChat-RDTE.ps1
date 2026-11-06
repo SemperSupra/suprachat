@@ -23,7 +23,7 @@ function Select-Promotion {
     if([string]$c.user.login -cne $script:ApprovedAuthor) { continue }
     $lines=@((Normalize-Text ([string]$c.body)).Split([char]10))
     if($lines[0] -cne $script:Marker) { continue }
-    if($lines.Count -lt 7 -or $lines[1] -cne '') { throw 'Malformed promotion envelope.' }
+    if($lines.Count -lt 6 -or $lines[1] -cne '') { throw 'Malformed promotion envelope.' }
     $map=@{}
     for($i=2;$i -lt $lines.Count;$i++) {
       $line=$lines[$i]
@@ -114,7 +114,7 @@ function Asset-Url($Admission) {
 function Write-State([string]$Path,$Value) {
   if(Test-Path -LiteralPath $Path) { throw 'Immutable state exists; no overwrite.' }
   $json=ConvertTo-Json -InputObject $Value -Depth 8 -Compress
-  [IO.File]::WriteAllText($Path,$json,(New-Object Text.UTF8Encoding($false)))
+  [IO.File]::WriteAllText($Path,$json,([Text.UTF8Encoding]::new($false)))
 }
 function Read-State([string]$Path) {
   if(-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Owned state missing.' }
@@ -199,7 +199,7 @@ try {
     Write-Output 'SELFTEST PASS: empty DLE fails closed.'
     exit 0
   }
-  $admission=Select-Promotion -Comments @(Read-DleComments)
+  $admission=Select-Promotion -Comments (Read-DleComments)
   $base=Join-Path $HOME '.local\share\suprachat-rdte\packages'
   if($Mode -eq 'Plan') {
     Write-Output ('PLAN source='+$admission.SourceSHA+' sha256='+$admission.AssetSHA256)
