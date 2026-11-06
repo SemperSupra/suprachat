@@ -62,6 +62,17 @@ try {
   Check ((Configure-Authority $configPath $fixtureRef) -ceq 'CONFIG_NOOP_VERIFIED') 'repeated config is NOOP'
   Check ((Read-Authority $configPath).repository -ceq 'ExampleOrg/owner-workset') 'config persisted unchanged'
   MustThrow {Configure-Authority $configPath 'DifferentOrg/other#73'} 'cannot redirect configured authority'
+  $immutable=Join-Path $base 'immutable-state.json'
+  Write-State $immutable ([pscustomobject]@{value='original'})
+  MustThrow { Write-State $immutable ([pscustomobject]@{value='overwritten'}) } 'atomic create-new prevents overwrite'
+  Check ((Read-State $immutable).value -ceq 'original') 'existing immutable content preserved'
+  $real=Join-Path $base 'real-directory'
+  New-Item -ItemType Directory -Path $real | Out-Null
+  $junction=Join-Path $base 'test-junction'
+  New-Item -ItemType Junction -Path $junction -Target $real -ErrorAction Stop | Out-Null
+  MustThrow { Assert-AncestorsSafe (Join-Path $junction 'nested\owned.json') } 'junction ancestor denied'
+  MustThrow { Configure-Authority (Join-Path $junction 'bootstrap\authority.json') $fixtureRef } 'owned config refuses redirected ancestor'
+  Remove-Item -LiteralPath $junction -Force
   $state=[pscustomobject]@{count=0;mode='valid'}
   $download={
     param($url,$dest)
