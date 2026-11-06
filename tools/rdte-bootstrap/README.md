@@ -10,7 +10,7 @@ The launcher uses Windows-included PowerShell 5.1 and either the operator's **al
 
 ## Promotion contract
 
-The authoritative private owner issue is `SemperSupra/suprachat-private#2`. The launcher admits only a first-line exact `SUPRACHAT-RDTE-PROMOTION/V1` envelope **authored by the designated repository owner identity**, containing:
+The operator configures an existing authenticated private owner issue **once**, using `-Mode Configure -AuthorityRef 'Owner/PrivateWorkset#123'`. The validated reference is saved without credentials at `$HOME\.local\share\suprachat-rdte\bootstrap\authority.json`. Subsequent runs reuse it; `Unconfigure -ConfirmUndo` removes it only if no owned package slots remain. The public repository deliberately does **not** embed the real private DLE identifier. The launcher admits only a first-line exact `SUPRACHAT-RDTE-PROMOTION/V1` envelope **authored by the designated repository owner identity**, containing:
 
 ```text
 SUPRACHAT-RDTE-PROMOTION/V1
