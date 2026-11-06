@@ -70,7 +70,7 @@ function Collect-DlePages {
     if($items.Count -lt 100) { $ended=$true;break }
   }
   if(-not $ended) { throw 'Private DLE exceeds bounded comment window.' }
-  return ,$all.ToArray()
+  return $all.ToArray()
 }
 function Read-DleComments {
   $token=$env:GH_TOKEN
