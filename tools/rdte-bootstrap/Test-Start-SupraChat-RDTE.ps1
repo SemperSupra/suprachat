@@ -34,6 +34,10 @@ MustThrow {Select-Promotion -Comments @($embedded,$foreign)} 'embedded and forei
 $p=Select-Promotion -Comments @($embedded,$foreign,$valid)
 Check ($p.id -eq 1000 -and $p.SourceSHA -ceq $source -and $p.AssetSHA256 -ceq $sha) 'valid exact owner admission'
 MustThrow {Select-Promotion -Comments @($valid,$revoked)} 'latest revoke wins'
+$historicalOwner=[pscustomobject]@{source_sha=$source;asset_sha256=$sha}
+$oldPromotion=Select-UndoPromotion -Comments @($valid,$revoked) -Owner $historicalOwner
+Check ($oldPromotion.id -eq 1000 -and $oldPromotion.Status -ceq 'ADMITTED') 'revocation still permits owner-scoped rollback only'
+MustThrow {Select-UndoPromotion -Comments @($revoked) -Owner $historicalOwner} 'rollback requires actual historical admission'
 MustThrow {Select-Promotion -Comments @($valid,$valid)} 'duplicate id conflicts'
 MustThrow {Select-Promotion -Comments @($unknown)} 'unknown promotion status'
 MustThrow {Select-Promotion -Comments @($conflictingPath)} 'path disallowed'
@@ -52,6 +56,8 @@ try {
   Check ($parsed.repository -ceq 'ExampleOrg/owner-workset' -and $parsed.issue -eq 72) 'one-time issue reference parsing'
   MustThrow {Parse-Authority 'https://evil.example/' } 'unknown network host cannot enter authority'
   MustThrow {Parse-Authority 'owner/repo#0'} 'invalid issue zero rejected'
+  MustThrow {Parse-Authority '../repo#3'} 'relative owner path denied'
+  MustThrow {Parse-Authority 'owner/..#3'} 'relative repo path denied'
   Check ((Configure-Authority $configPath $fixtureRef) -ceq 'CONFIG_WRITTEN_VERIFIED') 'immutable one-time configuration'
   Check ((Configure-Authority $configPath $fixtureRef) -ceq 'CONFIG_NOOP_VERIFIED') 'repeated config is NOOP'
   Check ((Read-Authority $configPath).repository -ceq 'ExampleOrg/owner-workset') 'config persisted unchanged'
