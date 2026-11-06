@@ -22,8 +22,11 @@ func service(t *testing.T,variant string)*httptest.Server{
   switch {
   case strings.Contains(r.URL.Path,"/git/trees/"):
    if variant=="truncated"{fmt.Fprint(w,`{"truncated":true,"tree":[]}`);return}
+   if variant=="missingtree"{fmt.Fprint(w,`{"truncated":false}`);return}
+   if variant=="nulltree"{fmt.Fprint(w,`{"truncated":false,"tree":null}`);return}
    fmt.Fprintf(w,`{"truncated":false,"tree":[{"path":"file/exact.go","sha":"%s","type":"blob"},{"path":"file/drift.go","sha":"%s","type":"blob"}]}`,exactSHA,driftSHA)
   case strings.HasSuffix(r.URL.Path,"/pulls"):
+   if variant=="nullprs"{fmt.Fprint(w,`null`);return}
    if variant=="many"{
     pulls:=[]map[string]any{}
     for i:=1;i<=100;i++{pulls=append(pulls,map[string]any{"number":i,"head":map[string]any{"sha":mainSHA}})}
@@ -59,8 +62,8 @@ func TestSourceClassifierDeterministicAndNoMutations(t *testing.T){
  raw,_:=json.Marshal(first)
  if strings.Contains(string(raw),"SYNTHETIC_TOKEN_CANARY"){t.Fatal("leaked GitHub credential in report")}
 }
-func TestFailClosedTruncatedCensusAndPagination(t *testing.T){
- for _,mode:=range []string{"truncated","many"}{
+func TestFailClosedTruncatedCensusPaginationAndMalformedShapes(t *testing.T){
+ for _,mode:=range []string{"truncated","many","missingtree","nulltree","nullprs"}{
   srv:=service(t,mode)
   c:=Client{Root:srv.URL,Token:"SYNTHETIC_TOKEN_CANARY",HTTP:srv.Client()}
   if _,e:=c.Collect(context.Background(),"SemperSupra/suprachat",mainSHA);e==nil{t.Fatal("accepted unbounded or incomplete data")}
@@ -84,4 +87,16 @@ func TestTokenRequiredNeverEchoed(t *testing.T){
  c:=Client{Root:srv.URL,Token:"INVALID_SECRET",HTTP:srv.Client()}
  if _,e:=c.Collect(context.Background(),"SemperSupra/suprachat",mainSHA);e==nil||
   strings.Contains(e.Error(),"INVALID_SECRET"){t.Fatal("denial missing or leaked token")}
+}
+
+func TestRejectRedirectBeforeReleasingToken(t *testing.T){
+ followed:=make(chan struct{},1)
+ srv:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  if r.URL.Path=="/unexpected"{followed<-struct{}{};fmt.Fprint(w,`{}`);return}
+  http.Redirect(w,r,"/unexpected",http.StatusFound)
+ }))
+ defer srv.Close()
+ c:=Client{Root:srv.URL,Token:"SYNTHETIC_TOKEN_CANARY",HTTP:srv.Client()}
+ if _,e:=c.Collect(context.Background(),"SemperSupra/suprachat",mainSHA);e==nil{t.Fatal("redirect accepted")}
+ select{case <-followed:t.Fatal("redirect followed and forwarded authority");default:}
 }

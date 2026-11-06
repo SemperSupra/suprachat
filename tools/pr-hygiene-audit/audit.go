@@ -16,6 +16,7 @@ import(
 const Schema="suprachat-public-pr-hygiene-census/v1"
 var repoRE=regexp.MustCompile("^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 var shaRE=regexp.MustCompile("^[a-f0-9]{40}$")
+var loopbackAPIRE=regexp.MustCompile("^http://127[.]0[.]0[.]1:[0-9]{1,5}$")
 type PR struct{
  Number int `json:"number"`
  Title string `json:"title"`
@@ -56,7 +57,7 @@ type Client struct{
 }
 func (c Client)get(ctx context.Context,path string,v any)error{
  base:=strings.TrimSuffix(c.Root,"/")
- if !strings.HasPrefix(base,"https://")&&!strings.HasPrefix(base,"http://127.0.0.1:"){
+ if base!="https://api.github.com"&&!loopbackAPIRE.MatchString(base){
   return errors.New("untrusted API origin")
  }
  if c.HTTP==nil{c.HTTP=&http.Client{Timeout:15*time.Second}}
@@ -64,7 +65,10 @@ func (c Client)get(ctx context.Context,path string,v any)error{
  if err!=nil{return errors.New("request creation failed")}
  req.Header.Set("Accept","application/vnd.github+json")
  if c.Token!=""{req.Header.Set("Authorization","Bearer "+c.Token)}
- resp,err:=c.HTTP.Do(req);if err!=nil{return errors.New("GitHub read failed")}
+ // Do not forward tokens or source metadata to unexpected redirect destinations.
+ client:=*c.HTTP
+ client.CheckRedirect=func(_ *http.Request,_ []*http.Request)error{return http.ErrUseLastResponse}
+ resp,err:=client.Do(req);if err!=nil{return errors.New("GitHub read failed")}
  defer resp.Body.Close()
  if resp.StatusCode!=200{return fmt.Errorf("GitHub read rejected with HTTP %d",resp.StatusCode)}
  body,err:=io.ReadAll(io.LimitReader(resp.Body,2097153))
@@ -81,13 +85,14 @@ func (c Client)Collect(ctx context.Context,repo,mainSHA string)(Report,error){
   ActionsApplied:false,PRs:[]Outcome{},Counts:map[string]int{}}
  var tree treeResult
  if err:=c.get(ctx,"/repos/"+repo+"/git/trees/"+mainSHA+"?recursive=1",&tree);err!=nil{return Report{},err}
- if tree.Truncated||len(tree.Tree)>100000{return Report{},errors.New("main source tree incomplete")}
+ if tree.Tree==nil||tree.Truncated||len(tree.Tree)>100000{return Report{},errors.New("main source tree incomplete")}
  main:=map[string]string{}
  for _,x:=range tree.Tree{
   if x.Type=="blob"{main[x.Path]=x.SHA}
  }
  var prs []PR
  if err:=c.get(ctx,"/repos/"+repo+"/pulls?state=open&per_page=100",&prs);err!=nil{return Report{},err}
+ if prs==nil{return Report{},errors.New("missing open PR array")}
  if len(prs)>=100{return Report{},errors.New("open PR pagination needed; refuse incomplete census")}
  sort.Slice(prs,func(i,j int)bool{return prs[i].Number<prs[j].Number})
  for _,p:=range prs{
