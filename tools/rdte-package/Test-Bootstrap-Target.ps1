@@ -39,10 +39,10 @@ try {
     throw 'Repeat install was not a strict no-op.'
   }
   $asset=Verify-Installed $admission $base 'integration-a'
-  $run=@('SelfTest','LocalSmoke')
-  foreach($mode in $run){
-    & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $asset -Mode $mode
-    if($LASTEXITCODE -ne 0){throw ('Verified downloaded target failed native '+$mode)}
+  $childModes=@('SelfTest','LocalSmoke')
+  foreach($childMode in $childModes){
+    & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $asset -Mode $childMode
+    if($LASTEXITCODE -ne 0){throw ('Verified downloaded target failed native '+$childMode)}
   }
   # Execution before owner/DLE configuration must fail without attempting live GitHub writes.
   & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $asset -Mode Plan 2>$null | Out-Null
