@@ -57,6 +57,21 @@ function Select-Promotion {
   if($latest.Status -cne 'ADMITTED') { throw 'Latest promotion revoked.' }
   return $latest
 }
+function Collect-DlePages {
+  param([Parameter(Mandatory=$true)][scriptblock]$ReadPage)
+  $all=New-Object System.Collections.ArrayList
+  $ended=$false
+  for($page=1;$page -le 10;$page++) {
+    $items=@(& $ReadPage $page)
+    foreach($item in $items) {
+      if($null -eq $item -or $null -eq $item.id) { throw 'Malformed DLE comment in page.' }
+      [void]$all.Add($item)
+    }
+    if($items.Count -lt 100) { $ended=$true;break }
+  }
+  if(-not $ended) { throw 'Private DLE exceeds bounded comment window.' }
+  return ,$all.ToArray()
+}
 function Read-DleComments {
   $token=$env:GH_TOKEN
   if([string]::IsNullOrWhiteSpace($token)) { $token=$env:GITHUB_TOKEN }
@@ -65,9 +80,8 @@ function Read-DleComments {
     $gh=Get-Command gh -ErrorAction SilentlyContinue
     if($null -eq $gh) { throw 'Existing authenticated gh or process-local token required.' }
   }
-  $all=New-Object System.Collections.ArrayList
-  $ended=$false
-  for($page=1;$page -le 10;$page++) {
+  $fetch={
+    param($page)
     $route='repos/SemperSupra/suprachat-private/issues/2/comments?per_page=100&page='+$page
     if(-not [string]::IsNullOrWhiteSpace($token)) {
       $h=@{Authorization=('Bearer '+$token);Accept='application/vnd.github+json'}
@@ -77,11 +91,9 @@ function Read-DleComments {
       if($LASTEXITCODE -ne 0) { throw 'Authenticated DLE read failed.' }
       $items=@(($json -join [Environment]::NewLine | ConvertFrom-Json))
     }
-    foreach($item in $items) { [void]$all.Add($item) }
-    if($items.Count -lt 100) { $ended=$true;break }
-  }
-  if(-not $ended) { throw 'Private DLE exceeds bounded comment window.' }
-  return ,$all.ToArray()
+    foreach($item in $items) { Write-Output $item }
+  }.GetNewClosure()
+  return (Collect-DlePages -ReadPage $fetch)
 }
 function Assert-NoReparse([string]$Path) {
   if(-not (Test-Path -LiteralPath $Path)) { return }
