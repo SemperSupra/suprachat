@@ -11,7 +11,7 @@ function Normalize-SupraReceiptText {
 function Get-SupraReceipt {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][object[]]$Comments,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Comments,
         [Parameter(Mandatory = $true)][string]$Marker,
         [Parameter(Mandatory = $true)][string]$ExpectedBody
     )
