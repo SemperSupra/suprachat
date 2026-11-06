@@ -98,168 +98,7 @@ function Read-DleComments {
   return (Collect-DlePages -ReadPage $fetch)
 }
 function Parse-Authority([string]$Reference) {
-  $pattern='^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#([1-9][0-9]{0,8})([string]$Path) {
-  if(-not (Test-Path -LiteralPath $Path)) { return }
-  $item=Get-Item -LiteralPath $Path -Force
-  if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-    throw 'Unowned reparse point detected.'
-  }
-  if($item.PSIsContainer) {
-    foreach($child in @(Get-ChildItem -LiteralPath $Path -Force)) {
-      Assert-NoReparse $child.FullName
-    }
-  }
-}
-function Owned-Path([string]$Base,[string]$Label) {
-  if($Label -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' -or $Label -in @('.','..')) {
-    throw 'Invalid run label.'
-  }
-  $root=[IO.Path]::GetFullPath($Base).TrimEnd('\','/')
-  $path=[IO.Path]::GetFullPath((Join-Path $root $Label))
-  if(-not $path.StartsWith(($root+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Run path escapes owned root.'
-  }
-  return $path
-}
-function Asset-Url($Admission) {
-  if($Admission.SourceSHA -cnotmatch '^[0-9a-f]{40}$' -or
-    $Admission.AssetPath -cne $script:AssetPath) { throw 'Invalid artifact locator.' }
-  return ('https://raw.githubusercontent.com/SemperSupra/suprachat/'+$Admission.SourceSHA+'/'+$script:AssetPath)
-}
-function Write-State([string]$Path,$Value) {
-  if(Test-Path -LiteralPath $Path) { throw 'Immutable state exists; no overwrite.' }
-  $json=ConvertTo-Json -InputObject $Value -Depth 8 -Compress
-  [IO.File]::WriteAllText($Path,$json,([Text.UTF8Encoding]::new($false)))
-}
-function Read-State([string]$Path) {
-  if(-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Owned state missing.' }
-  return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
-}
-function Check-Identity($Owner,$Admission,[string]$Label) {
-  if([string]$Owner.contract -cne 'suprachat-asset/v1' -or
-     [string]$Owner.label -cne $Label -or
-     [string]$Owner.source_sha -cne [string]$Admission.SourceSHA -or
-     [string]$Owner.asset_sha256 -cne [string]$Admission.AssetSHA256 -or
-     [string]$Owner.asset_path -cne $script:AssetPath) {
-    throw 'Owner state does not match current DLE admission.'
-  }
-}
-function Verify-Installed($Admission,[string]$Base,[string]$Label) {
-  $dir=Owned-Path $Base $Label
-  Assert-NoReparse $dir
-  $owner=Read-State (Join-Path $dir 'owner.json')
-  Check-Identity $owner $Admission $Label
-  $ready=Read-State (Join-Path $dir 'ready.json')
-  if([string]$ready.status -cne 'READY' -or
-     [string]$ready.asset_sha256 -cne [string]$Admission.AssetSHA256) {
-    throw 'Asset not in READY state.'
-  }
-  $file=Join-Path $dir 'Invoke-SupraChat-RDTE.ps1'
-  if(-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Asset missing.' }
-  $hash=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-  if($hash -cne [string]$Admission.AssetSHA256) { throw 'Installed asset hash drift.' }
-  return $file
-}
-function Install-Artifact {
-  param($Admission,[string]$Base,[string]$Label,[scriptblock]$Downloader)
-  $target=Owned-Path $Base $Label
-  $url=Asset-Url $Admission
-  if(Test-Path -LiteralPath $target) {
-    $old=Verify-Installed $Admission $Base $Label
-    return [pscustomobject]@{Status='NOOP_VERIFIED';Asset=$old}
-  }
-  if(-not (Test-Path -LiteralPath $Base)) {
-    New-Item -ItemType Directory -Path $Base -Force | Out-Null
-  }
-  Assert-NoReparse $Base
-  New-Item -ItemType Directory -Path $target -ErrorAction Stop | Out-Null
-  Write-State (Join-Path $target 'owner.json') ([pscustomobject]@{
-    contract='suprachat-asset/v1';label=$Label;source_sha=$Admission.SourceSHA;
-    asset_path=$script:AssetPath;asset_sha256=$Admission.AssetSHA256
-  })
-  $partial=Join-Path $target 'artifact.pending'
-  & $Downloader $url $partial
-  if(-not (Test-Path -LiteralPath $partial -PathType Leaf)) { throw 'Download missing.' }
-  Assert-NoReparse $partial
-  if((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-     [string]$Admission.AssetSHA256) { throw 'Downloaded hash mismatch; preserve incomplete run.' }
-  $file=Join-Path $target 'Invoke-SupraChat-RDTE.ps1'
-  Move-Item -LiteralPath $partial -Destination $file -ErrorAction Stop
-  Write-State (Join-Path $target 'ready.json') ([pscustomobject]@{
-    status='READY';asset_sha256=$Admission.AssetSHA256
-  })
-  $verified=Verify-Installed $Admission $Base $Label
-  return [pscustomobject]@{Status='READY_VERIFIED';Asset=$verified}
-}
-function Undo-Artifact($Admission,[string]$Base,[string]$Label,[bool]$Confirmed) {
-  if(-not $Confirmed) { throw 'Undo confirmation required.' }
-  $dir=Owned-Path $Base $Label
-  if(-not (Test-Path -LiteralPath $dir)) { return 'NOOP_ABSENT' }
-  Assert-NoReparse $dir
-  Check-Identity (Read-State (Join-Path $dir 'owner.json')) $Admission $Label
-  foreach($entry in @(Get-ChildItem -LiteralPath $dir -Force)) {
-    if($entry.Name -cnotin @('owner.json','ready.json','artifact.pending','Invoke-SupraChat-RDTE.ps1')) {
-      throw 'Unexpected run content; refuse Undo.'
-    }
-  }
-  Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop
-  return 'UNDO_COMPLETE'
-}
-if($MyInvocation.InvocationName -eq '.') { return }
-try {
-  if($Mode -eq 'SelfTest') {
-    $rejected=$false
-    try { Select-Promotion -Comments @() | Out-Null } catch { $rejected=$true }
-    if(-not $rejected) { throw 'Empty DLE should fail.' }
-    Write-Output 'SELFTEST PASS: empty DLE fails closed.'
-    exit 0
-  }
-  $configPath=Join-Path $HOME '.local\share\suprachat-rdte\bootstrap\authority.json'
-  if($Mode -eq 'Configure') {
-    $requested=Parse-Authority $AuthorityRef
-    [void]@(Read-DleComments -Authority $requested)
-    Write-Output (Configure-Authority $configPath $AuthorityRef)
-    exit 0
-  }
-  if($Mode -eq 'Unconfigure') {
-    if(-not $ConfirmUndo) { throw 'Unconfigure requires ConfirmUndo.' }
-    if(Test-Path -LiteralPath (Join-Path $HOME '.local\share\suprachat-rdte\packages')) {
-      $packages=@(Get-ChildItem -LiteralPath (Join-Path $HOME '.local\share\suprachat-rdte\packages') -Force)
-      if($packages.Count -gt 0) { throw 'Unconfigure blocked while owned package slots remain.' }
-    }
-    if(-not (Test-Path -LiteralPath $configPath)) { Write-Output 'CONFIG_NOOP_ABSENT';exit 0 }
-    [void](Read-Authority $configPath)
-    Remove-Item -LiteralPath $configPath -Force
-    Write-Output 'CONFIG_REMOVED'
-    exit 0
-  }
-  $authority=Read-Authority $configPath
-  $admission=Select-Promotion -Comments @(Read-DleComments -Authority $authority)
-  $base=Join-Path $HOME '.local\share\suprachat-rdte\packages'
-  if($Mode -eq 'Plan') {
-    Write-Output ('PLAN source='+$admission.SourceSHA+' sha256='+$admission.AssetSHA256)
-    Write-Output ('run='+$RunLabel+' existing='+(Test-Path -LiteralPath (Owned-Path $base $RunLabel)))
-    Write-Output 'NO automatic update, global install, login, user Git mutation, merge or release.'
-  } elseif($Mode -eq 'Apply') {
-    $download={ param($Url,$Path) Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing -TimeoutSec 120 }
-    $result=Install-Artifact $admission $base $RunLabel $download
-    Write-Output ('APPLY '+$result.Status+': artifact verified, not executed.')
-  } elseif($Mode -eq 'Verify') {
-    $file=Verify-Installed $admission $base $RunLabel
-    Write-Output ('VERIFY PASS: '+$file)
-  } elseif($Mode -eq 'Run') {
-    $file=Verify-Installed $admission $base $RunLabel
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -Mode $TargetMode -RunLabel $RunLabel
-    if($LASTEXITCODE -ne 0) { throw 'Child exit code nonzero.' }
-    Write-Output 'Child exited zero; DLE semantic acceptance separate.'
-  } elseif($Mode -eq 'Undo') {
-    Write-Output (Undo-Artifact $admission $base $RunLabel ([bool]$ConfirmUndo))
-  }
-} catch {
-  Write-Error ('RDTE bootstrap '+$Mode+' failed: '+$_.Exception.Message)
-  exit 1
-}
-
+  $pattern='^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#([1-9][0-9]{0,8})$'
   $parsed=[regex]::Match($Reference,$pattern)
   if(-not $parsed.Success) { throw 'Invalid owner DLE issue reference.' }
   return [pscustomobject]@{
@@ -415,7 +254,27 @@ try {
     Write-Output 'SELFTEST PASS: empty DLE fails closed.'
     exit 0
   }
-  $admission=Select-Promotion -Comments (Read-DleComments)
+  $configPath=Join-Path $HOME '.local\share\suprachat-rdte\bootstrap\authority.json'
+  if($Mode -eq 'Configure') {
+    $requested=Parse-Authority $AuthorityRef
+    [void]@(Read-DleComments -Authority $requested)
+    Write-Output (Configure-Authority $configPath $AuthorityRef)
+    exit 0
+  }
+  if($Mode -eq 'Unconfigure') {
+    if(-not $ConfirmUndo) { throw 'Unconfigure requires ConfirmUndo.' }
+    if(Test-Path -LiteralPath (Join-Path $HOME '.local\share\suprachat-rdte\packages')) {
+      $packages=@(Get-ChildItem -LiteralPath (Join-Path $HOME '.local\share\suprachat-rdte\packages') -Force)
+      if($packages.Count -gt 0) { throw 'Unconfigure blocked while owned package slots remain.' }
+    }
+    if(-not (Test-Path -LiteralPath $configPath)) { Write-Output 'CONFIG_NOOP_ABSENT';exit 0 }
+    [void](Read-Authority $configPath)
+    Remove-Item -LiteralPath $configPath -Force
+    Write-Output 'CONFIG_REMOVED'
+    exit 0
+  }
+  $authority=Read-Authority $configPath
+  $admission=Select-Promotion -Comments @(Read-DleComments -Authority $authority)
   $base=Join-Path $HOME '.local\share\suprachat-rdte\packages'
   if($Mode -eq 'Plan') {
     Write-Output ('PLAN source='+$admission.SourceSHA+' sha256='+$admission.AssetSHA256)
