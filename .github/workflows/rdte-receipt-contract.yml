@@ -1,0 +1,39 @@
+name: RDTE receipt contract - native Windows PowerShell 5.1
+
+on:
+  pull_request:
+    paths:
+      - 'tools/rdte-receipt-contract/**'
+      - '.github/workflows/rdte-receipt-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-ps51:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Assert native Windows PowerShell 5.1 and run deterministic failure-oracles
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw "Expected Windows PowerShell 5.1 Desktop, not a different runtime"
+          }
+          $script = Join-Path $env:GITHUB_WORKSPACE 'tools\rdte-receipt-contract\Test-ReceiptContract.ps1'
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script
+          if ($LASTEXITCODE -ne 0) { throw "Native receipt contract tests failed: $LASTEXITCODE" }
+      - name: Confirm no credentialed installation or external I/O is required
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content -LiteralPath 'tools/rdte-receipt-contract/ReceiptContract.psm1' -Raw
+          if ($source -match '(?i)(Invoke-RestMethod|Invoke-WebRequest|New-Item|Remove-Item|Set-Content|GH_TOKEN|GITHUB_TOKEN|api\.github\.com|SemperSupra/suprachat-private)') {
+            throw 'Receipt contract module unexpectedly contains external I/O or private references.'
+          }
+          Write-Output 'Source-only / synthetic receipt boundary PASS.'
