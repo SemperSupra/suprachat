@@ -17,7 +17,7 @@ function Normalize-Text([string]$Value) {
   return $Value.Replace(([string][char]13 + [char]10),[string][char]10)
 }
 function Select-Promotion {
-  param([Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Comments)
+  param([Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Comments,[switch]$AllowRevoked)
   $candidates=New-Object System.Collections.ArrayList
   foreach($c in $Comments) {
     if($null -eq $c -or $null -eq $c.body -or $null -eq $c.user) { continue }
@@ -55,7 +55,7 @@ function Select-Promotion {
     if($sorted[$i].id -eq $sorted[$i-1].id) { throw 'Duplicate promotion IDs.' }
   }
   $latest=$sorted[-1]
-  if($latest.Status -cne 'ADMITTED') { throw 'Latest promotion revoked.' }
+  if($latest.Status -cne 'ADMITTED' -and -not $AllowRevoked) { throw 'Latest promotion revoked.' }
   return $latest
 }
 function Collect-DlePages {
@@ -72,6 +72,24 @@ function Collect-DlePages {
   }
   if(-not $ended) { throw 'Private DLE exceeds bounded comment window.' }
   return $all.ToArray()
+}
+function Select-UndoPromotion {
+  param([Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Comments,[object]$Owner)
+  $admitted=New-Object System.Collections.ArrayList
+  foreach($comment in $Comments) {
+    if($null -eq $comment -or $null -eq $comment.body -or $null -eq $comment.user) { continue }
+    if([string]$comment.user.login -cne $script:ApprovedAuthor) { continue }
+    $lines=@((Normalize-Text ([string]$comment.body)).Split([char]10))
+    if($lines[0] -cne $script:Marker) { continue }
+    $p=Select-Promotion -Comments @($comment) -AllowRevoked
+    if($p.Status -cne 'ADMITTED') { continue }
+    if([string]$p.SourceSHA -ceq [string]$Owner.source_sha -and
+       [string]$p.AssetSHA256 -ceq [string]$Owner.asset_sha256) {
+      [void]$admitted.Add($p)
+    }
+  }
+  if($admitted.Count -eq 0) { throw 'No owner-authored historical admission for safe Undo.' }
+  return @($admitted | Sort-Object -Property id)[-1]
 }
 function Read-DleComments {
   param([object]$Authority)
@@ -100,7 +118,7 @@ function Read-DleComments {
 function Parse-Authority([string]$Reference) {
   $pattern='^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#([1-9][0-9]{0,8})$'
   $parsed=[regex]::Match($Reference,$pattern)
-  if(-not $parsed.Success) { throw 'Invalid owner DLE issue reference.' }
+  if(-not $parsed.Success -or $parsed.Groups[1].Value.Contains('..') -or $parsed.Groups[2].Value.Contains('..') -or $parsed.Groups[1].Value -in @('.','..') -or $parsed.Groups[2].Value -in @('.','..')) { throw 'Invalid owner DLE issue reference.' }
   return [pscustomobject]@{
     contract='suprachat-dle-authority/v1'
     repository=($parsed.Groups[1].Value+'/'+$parsed.Groups[2].Value)
@@ -274,7 +292,19 @@ try {
     exit 0
   }
   $authority=Read-Authority $configPath
-  $admission=Select-Promotion -Comments @(Read-DleComments -Authority $authority)
+  $comments=@(Read-DleComments -Authority $authority)
+  if($Mode -eq 'Undo') {
+    if(-not $ConfirmUndo) { throw 'Explicit Undo confirmation missing.' }
+    $base=Join-Path $HOME '.local\share\suprachat-rdte\packages'
+    $run=Owned-Path $base $RunLabel
+    if(-not (Test-Path -LiteralPath $run)) { Write-Output 'NOOP_ABSENT';exit 0 }
+    Assert-NoReparse $run
+    $owner=Read-State (Join-Path $run 'owner.json')
+    $old=Select-UndoPromotion -Comments $comments -Owner $owner
+    Write-Output (Undo-Artifact $old $base $RunLabel $true)
+    exit 0
+  }
+  $admission=Select-Promotion -Comments $comments
   $base=Join-Path $HOME '.local\share\suprachat-rdte\packages'
   if($Mode -eq 'Plan') {
     Write-Output ('PLAN source='+$admission.SourceSHA+' sha256='+$admission.AssetSHA256)
@@ -292,8 +322,6 @@ try {
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -Mode $TargetMode -RunLabel $RunLabel
     if($LASTEXITCODE -ne 0) { throw 'Child exit code nonzero.' }
     Write-Output 'Child exited zero; DLE semantic acceptance separate.'
-  } elseif($Mode -eq 'Undo') {
-    Write-Output (Undo-Artifact $admission $base $RunLabel ([bool]$ConfirmUndo))
   }
 } catch {
   Write-Error ('RDTE bootstrap '+$Mode+' failed: '+$_.Exception.Message)
