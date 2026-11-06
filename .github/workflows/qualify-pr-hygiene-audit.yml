@@ -9,8 +9,8 @@ permissions:
   contents: read
   pull-requests: read
 concurrency:
-  group: pr-hygiene-readonly-${{ github.ref }}
-  cancel-in-progress: true
+  group: pr-hygiene-readonly-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 jobs:
   qualify-classifier:
     strategy:
@@ -24,8 +24,10 @@ jobs:
         working-directory: tools/pr-hygiene-audit
         shell: bash
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.23.12'
           cache: false
@@ -46,7 +48,7 @@ jobs:
           printf '%s\n' '{"schema":"suprachat-pr-hygiene-census-qualification/v1","read_only":true,"github_mutations":false,"real_github_census_performed":false,"credentials_recorded":false,"exact_blob_gate_tested":true,"unique_source_preserved":true}' > evidence/qualification.json
       - name: Upload no-secret classifier receipt
         if: success()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: pr-hygiene-classifier-${{ matrix.os }}
           path: tools/pr-hygiene-audit/evidence/qualification.json
@@ -61,8 +63,10 @@ jobs:
         shell: bash
         working-directory: tools/pr-hygiene-audit
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.23.12'
           cache: false
@@ -75,7 +79,7 @@ jobs:
           sha="$(git rev-parse HEAD)"
           go run ./cmd/census --repo "$GITHUB_REPOSITORY" --main-sha "$sha" > evidence/public-pr-census.json
       - name: Upload read-only reconciliation candidates
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: public-pr-census-readonly
           path: tools/pr-hygiene-audit/evidence/public-pr-census.json
