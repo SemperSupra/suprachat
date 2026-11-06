@@ -35,7 +35,7 @@ jobs:
         shell: powershell
         run: |
           $source = Get-Content 'tools/rdte-bootstrap/Start-SupraChat-RDTE.ps1' -Raw
-          if ($source -match '(?i)(Set-ExecutionPolicy|Set-ItemProperty|Set-EnvironmentVariable|Start-Process\s+.*-Verb\s+RunAs|gh\s+auth\s+login|docker\s+run|git\s+reset)') {
+          if ($source -match '(?i)(suprachat-private|Set-ExecutionPolicy|Set-ItemProperty|Set-EnvironmentVariable|Start-Process\s+.*-Verb\s+RunAs|gh\s+auth\s+login|docker\s+run|git\s+reset)') {
             throw 'Unexpected global host change command in bootstrap.'
           }
           Write-Output 'No global install, privileged host change, or Git reset patterns.'
