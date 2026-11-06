@@ -148,6 +148,7 @@ function Configure-Authority([string]$Path,[string]$Reference) {
     return 'CONFIG_NOOP_VERIFIED'
   }
   $dir=Split-Path -Parent $Path
+  Assert-AncestorsSafe $dir
   if(-not (Test-Path -LiteralPath $dir)) {
     New-Item -Path $dir -ItemType Directory -Force | Out-Null
   }
@@ -168,6 +169,20 @@ function Assert-NoReparse([string]$Path) {
     }
   }
 }
+function Assert-AncestorsSafe([string]$Path) {
+  $current=[IO.Path]::GetFullPath($Path)
+  while($true) {
+    if(Test-Path -LiteralPath $current) {
+      $item=Get-Item -LiteralPath $current -Force
+      if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Reparse point in RDTE path ancestry.'
+      }
+    }
+    $parent=[IO.Directory]::GetParent($current)
+    if($null -eq $parent -or $parent.FullName -ceq $current) { break }
+    $current=$parent.FullName
+  }
+}
 function Owned-Path([string]$Base,[string]$Label) {
   if($Label -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' -or $Label -in @('.','..')) {
     throw 'Invalid run label.'
@@ -185,11 +200,19 @@ function Asset-Url($Admission) {
   return ('https://raw.githubusercontent.com/SemperSupra/suprachat/'+$Admission.SourceSHA+'/'+$script:AssetPath)
 }
 function Write-State([string]$Path,$Value) {
-  if(Test-Path -LiteralPath $Path) { throw 'Immutable state exists; no overwrite.' }
+  Assert-AncestorsSafe $Path
   $json=ConvertTo-Json -InputObject $Value -Depth 8 -Compress
-  [IO.File]::WriteAllText($Path,$json,([Text.UTF8Encoding]::new($false)))
+  $bytes=([Text.UTF8Encoding]::new($false)).GetBytes($json)
+  $handle=New-Object IO.FileStream($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+  try {
+    $handle.Write($bytes,0,$bytes.Length)
+    $handle.Flush($true)
+  } finally {
+    $handle.Dispose()
+  }
 }
 function Read-State([string]$Path) {
+  Assert-AncestorsSafe $Path
   if(-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Owned state missing.' }
   return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
 }
@@ -204,6 +227,7 @@ function Check-Identity($Owner,$Admission,[string]$Label) {
 }
 function Verify-Installed($Admission,[string]$Base,[string]$Label) {
   $dir=Owned-Path $Base $Label
+  Assert-AncestorsSafe $dir
   Assert-NoReparse $dir
   $owner=Read-State (Join-Path $dir 'owner.json')
   Check-Identity $owner $Admission $Label
@@ -221,6 +245,7 @@ function Verify-Installed($Admission,[string]$Base,[string]$Label) {
 function Install-Artifact {
   param($Admission,[string]$Base,[string]$Label,[scriptblock]$Downloader)
   $target=Owned-Path $Base $Label
+  Assert-AncestorsSafe $target
   $url=Asset-Url $Admission
   if(Test-Path -LiteralPath $target) {
     $old=Verify-Installed $Admission $Base $Label
@@ -252,6 +277,7 @@ function Install-Artifact {
 function Undo-Artifact($Admission,[string]$Base,[string]$Label,[bool]$Confirmed) {
   if(-not $Confirmed) { throw 'Undo confirmation required.' }
   $dir=Owned-Path $Base $Label
+  Assert-AncestorsSafe $dir
   if(-not (Test-Path -LiteralPath $dir)) { return 'NOOP_ABSENT' }
   Assert-NoReparse $dir
   Check-Identity (Read-State (Join-Path $dir 'owner.json')) $Admission $Label
@@ -287,6 +313,7 @@ try {
     }
     if(-not (Test-Path -LiteralPath $configPath)) { Write-Output 'CONFIG_NOOP_ABSENT';exit 0 }
     [void](Read-Authority $configPath)
+    Assert-AncestorsSafe $configPath
     Remove-Item -LiteralPath $configPath -Force
     Write-Output 'CONFIG_REMOVED'
     exit 0
