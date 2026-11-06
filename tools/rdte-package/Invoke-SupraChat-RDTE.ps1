@@ -312,56 +312,105 @@ function Create-IsolatedEnvironment {
   }
   return $isolated
 }
-function Invoke-Test([string]$name,[string]$executable,[string]$arguments,[string]$cwd,[int]$seconds) {
-  $logDir = Join-Path $script:RunRoot 'logs'
-  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-  $logOut=Join-Path $logDir ($name + '.out.txt')
-  $logErr=Join-Path $logDir ($name + '.err.txt')
-  $p = New-Object Diagnostics.Process
-  $p.StartInfo.FileName = $executable
-  $p.StartInfo.Arguments = $arguments
-  $p.StartInfo.WorkingDirectory = $cwd
-  $p.StartInfo.UseShellExecute = $false
-  $p.StartInfo.CreateNoWindow = $true
-  $p.StartInfo.RedirectStandardOutput = $true
-  $p.StartInfo.RedirectStandardError = $true
-  $isolated = Create-IsolatedEnvironment
-  $p.StartInfo.EnvironmentVariables['DOTNET_CLI_HOME'] = Join-Path $isolated 'dotnet'
-  $p.StartInfo.EnvironmentVariables['DOTNET_SKIP_FIRST_TIME_EXPERIENCE'] = '1'
-  $p.StartInfo.EnvironmentVariables['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1'
-  $p.StartInfo.EnvironmentVariables['NUGET_PACKAGES'] = Join-Path $isolated 'nuget'
-  $p.StartInfo.EnvironmentVariables['GOCACHE'] = Join-Path $isolated 'go-cache'
-  $p.StartInfo.EnvironmentVariables['GOMODCACHE'] = Join-Path $isolated 'go-mod'
-  $p.StartInfo.EnvironmentVariables['GOPATH'] = Join-Path $isolated 'go-path'
-  $p.StartInfo.EnvironmentVariables['XDG_CACHE_HOME'] = Join-Path $isolated 'xdg'
-  $p.StartInfo.EnvironmentVariables['TMP'] = Join-Path $isolated 'tmp'
-  $p.StartInfo.EnvironmentVariables['TEMP'] = Join-Path $isolated 'tmp'
-  $p.StartInfo.EnvironmentVariables['USERPROFILE'] = Join-Path $isolated 'home'
-  $p.StartInfo.EnvironmentVariables['APPDATA'] = Join-Path $isolated 'home'
-  $p.StartInfo.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $isolated 'home'
-  $p.StartInfo.EnvironmentVariables['GOTOOLCHAIN'] = 'local'
-  $p.StartInfo.EnvironmentVariables['DOTNET_MULTILEVEL_LOOKUP'] = '0'
-  foreach ($k in @($p.StartInfo.EnvironmentVariables.Keys)) {
-    if ($k -match '^(GH_TOKEN|GITHUB_TOKEN|GIT_ASKPASS|OPENAI_.*|ANTHROPIC_.*|AZURE_.*|AWS_.*|GOOGLE_.*|CLOUDFLARE_.*|MCP_.*|SSH_AUTH_SOCK)$') { $p.StartInfo.EnvironmentVariables.Remove($k) }
+function Stop-RdteProcessTree([Diagnostics.Process]$Process) {
+  if($null -eq $Process){return $false}
+  try { if($Process.HasExited){return $true} } catch {return $false}
+  $exe=Join-Path $env:SystemRoot 'System32\taskkill.exe'
+  if(Test-Path -LiteralPath $exe -PathType Leaf) {
+    $killer=New-Object Diagnostics.Process
+    $killer.StartInfo.FileName=$exe
+    $killer.StartInfo.Arguments=('/PID '+[int]$Process.Id+' /T /F')
+    $killer.StartInfo.UseShellExecute=$false
+    $killer.StartInfo.CreateNoWindow=$true
+    try {
+      [void]$killer.Start()
+      [void]$killer.WaitForExit(10000)
+    } catch {} finally { $killer.Dispose() }
   }
+  try {
+    if(-not $Process.HasExited){$Process.Kill()}
+    [void]$Process.WaitForExit(10000)
+    return [bool]$Process.HasExited
+  } catch {return $false}
+}
+function Invoke-Test([string]$name,[string]$executable,[string]$arguments,[string]$cwd,[int]$seconds) {
+  if($name -cnotmatch '^[A-Za-z0-9_-]{1,48}$' -or $seconds -lt 1 -or $seconds -gt 420){
+    throw 'Invalid bounded test parameters.'
+  }
+  Assert-LocalSafety
+  $logDir=Join-Path $script:RunRoot 'logs'
+  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+  $logOut=Join-Path $logDir ($name+'.out.txt')
+  $logErr=Join-Path $logDir ($name+'.err.txt')
+  if((Test-Path -LiteralPath $logOut) -or (Test-Path -LiteralPath $logErr)){
+    throw 'Test logs already exist; refusing uncertain duplicate execution.'
+  }
+  $isolated=Create-IsolatedEnvironment
   $status='FAIL';$exit=-1
+  $stdout='';$stderr=''
+  $p=New-Object Diagnostics.Process
+  $p.StartInfo.FileName=$executable
+  $p.StartInfo.Arguments=$arguments
+  $p.StartInfo.WorkingDirectory=$cwd
+  $p.StartInfo.UseShellExecute=$false
+  $p.StartInfo.CreateNoWindow=$true
+  $p.StartInfo.RedirectStandardOutput=$true
+  $p.StartInfo.RedirectStandardError=$true
+  # Allowlist instead of removing only known provider secrets.
+  $p.StartInfo.EnvironmentVariables.Clear()
+  $sysroot=[Environment]::GetEnvironmentVariable('SystemRoot')
+  if([string]::IsNullOrWhiteSpace($sysroot)){throw 'Windows system root unavailable.'}
+  $p.StartInfo.EnvironmentVariables['SystemRoot']=$sysroot
+  $p.StartInfo.EnvironmentVariables['windir']=$sysroot
+  $p.StartInfo.EnvironmentVariables['PATH']=(Split-Path -Parent $executable)+';'+(Join-Path $sysroot 'System32')
+  $p.StartInfo.EnvironmentVariables['ComSpec']=Join-Path $sysroot 'System32\cmd.exe'
+  foreach($envName in @('USERPROFILE','APPDATA','LOCALAPPDATA','HOME')){
+    $p.StartInfo.EnvironmentVariables[$envName]=Join-Path $isolated 'home'
+  }
+  $p.StartInfo.EnvironmentVariables['TMP']=Join-Path $isolated 'tmp'
+  $p.StartInfo.EnvironmentVariables['TEMP']=Join-Path $isolated 'tmp'
+  $p.StartInfo.EnvironmentVariables['DOTNET_CLI_HOME']=Join-Path $isolated 'dotnet'
+  $p.StartInfo.EnvironmentVariables['DOTNET_SKIP_FIRST_TIME_EXPERIENCE']='1'
+  $p.StartInfo.EnvironmentVariables['DOTNET_CLI_TELEMETRY_OPTOUT']='1'
+  $p.StartInfo.EnvironmentVariables['DOTNET_MULTILEVEL_LOOKUP']='0'
+  $p.StartInfo.EnvironmentVariables['NUGET_PACKAGES']=Join-Path $isolated 'nuget'
+  $p.StartInfo.EnvironmentVariables['GOCACHE']=Join-Path $isolated 'go-cache'
+  $p.StartInfo.EnvironmentVariables['GOMODCACHE']=Join-Path $isolated 'go-mod'
+  $p.StartInfo.EnvironmentVariables['GOPATH']=Join-Path $isolated 'go-path'
+  $p.StartInfo.EnvironmentVariables['GOTOOLCHAIN']='local'
+  $p.StartInfo.EnvironmentVariables['XDG_CACHE_HOME']=Join-Path $isolated 'xdg'
   try {
     [void]$p.Start()
-    $outTask = $p.StandardOutput.ReadToEndAsync()
-    $errTask = $p.StandardError.ReadToEndAsync()
-    if (-not $p.WaitForExit($seconds * 1000)) {
-      try { $p.Kill() } catch { }
-      [void]$p.WaitForExit(10000)
+    $outTask=$p.StandardOutput.ReadToEndAsync()
+    $errTask=$p.StandardError.ReadToEndAsync()
+    if(-not $p.WaitForExit($seconds*1000)){
       $status='TIMEOUT'
+      if(-not (Stop-RdteProcessTree $p)){throw 'Process tree not confirmed stopped.'}
     } else {
-      $exit = $p.ExitCode
-      if ($exit -eq 0) { $status='PASS' }
+      $exit=$p.ExitCode
+      if($exit -eq 0){$status='PASS'}
     }
-    $outTask.Wait();$errTask.Wait()
-    [IO.File]::WriteAllText($logOut,[string]$outTask.Result,([System.Text.UTF8Encoding]::new($false)))
-    [IO.File]::WriteAllText($logErr,[string]$errTask.Result,([System.Text.UTF8Encoding]::new($false)))
-  } finally { $p.Dispose() }
-  return [ordered]@{name=$name;status=$status;exit=$exit;stdout_sha256=(Hash-File $logOut);stderr_sha256=(Hash-File $logErr)}
+    if(-not $outTask.Wait(10000) -or -not $errTask.Wait(10000)){
+      throw 'Child output drain timed out.'
+    }
+    $stdout=[string]$outTask.Result
+    $stderr=[string]$errTask.Result
+  } catch {
+    if($status -ne 'TIMEOUT'){$status='FAIL'}
+    $stderr='RUNNER_'+$_.Exception.GetType().Name
+    if(-not (Stop-RdteProcessTree $p)){$stderr='RUNNER_PROCESS_REAP_UNCONFIRMED'}
+  } finally {
+    $p.Dispose()
+    # Bounded local evidence; full test output is intentionally not persisted.
+    if($stdout.Length -gt 2097152){$stdout=$stdout.Substring(0,2097152)+'[TRUNCATED]'}
+    if($stderr.Length -gt 2097152){$stderr=$stderr.Substring(0,2097152)+'[TRUNCATED]'}
+    [IO.File]::WriteAllText($logOut,$stdout,([Text.UTF8Encoding]::new($false)))
+    [IO.File]::WriteAllText($logErr,$stderr,([Text.UTF8Encoding]::new($false)))
+  }
+  return [ordered]@{
+    name=$name;status=$status;exit=$exit;
+    stdout_sha256=(Hash-File $logOut);stderr_sha256=(Hash-File $logErr)
+  }
 }
 function Run-Matrix([string]$source,[string]$dn,[string]$go) {
   $results=New-Object System.Collections.ArrayList
