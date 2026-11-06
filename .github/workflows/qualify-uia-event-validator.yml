@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Synthetic fixed-schema and contradiction refusal checks
         shell: pwsh
         run: ./tools/local/Test-UiaEventReceipt.ps1 -SelfTest

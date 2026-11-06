@@ -68,10 +68,11 @@ internal static class BrokerContractTests
         Require(restarted.Error == BrokerErrorCodes.BrokerRestarted, "pre-restart lease survived broker epoch change");
         var reacquired = broker.Acquire(new BrokerAcquireRequest(
             "req-after-restart", "consumer-a", "binding-a", new[] { "models.read" }, TimeSpan.FromSeconds(300)));
-        Require(reacquired.Error is null && reacquired.Lease!.Epoch > priorEpoch, "restart reacquire did not use new epoch");
+        var reacquiredLease = reacquired.Lease ?? throw new InvalidOperationException("restart reacquire did not return a lease");
+        Require(reacquired.Error is null && reacquiredLease.Epoch > priorEpoch, "restart reacquire did not use new epoch");
 
         var capDenied = broker.TryAdmitProviderOperation(
-            "op-cap-denied", reacquired.Lease.LeaseId, "consumer-a", "binding-a", "responses.create");
+            "op-cap-denied", reacquiredLease.LeaseId, "consumer-a", "binding-a", "responses.create");
         Require(capDenied.Error == BrokerErrorCodes.CapabilityDenied, "lease authority widened beyond granted capability");
 
         Require(
