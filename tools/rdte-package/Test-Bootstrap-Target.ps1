@@ -45,8 +45,15 @@ try {
     if($LASTEXITCODE -ne 0){throw ('Verified downloaded target failed native '+$childMode)}
   }
   # Execution before owner/DLE configuration must fail without attempting live GitHub writes.
-  & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $asset -Mode Plan 2>$null | Out-Null
-  if($LASTEXITCODE -eq 0){throw 'Unconfigured target unexpectedly planned an authenticated campaign.'}
+  $previousPreference=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
+  try {
+    $null=& powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $asset -Mode Plan 2>&1 | Out-String
+    $heldExitCode=$LASTEXITCODE
+  } finally {
+    $ErrorActionPreference=$previousPreference
+  }
+  if($heldExitCode -eq 0){throw 'Unconfigured target unexpectedly planned an authenticated campaign.'}
   $removed=Undo-Artifact $admission $base 'integration-a' $true
   if($removed -cne 'UNDO_COMPLETE'){throw 'Owned cleanup failed.'}
   if((Undo-Artifact $admission $base 'integration-a' $true) -cne 'NOOP_ABSENT'){throw 'Repeated cleanup was not idempotent.'}
