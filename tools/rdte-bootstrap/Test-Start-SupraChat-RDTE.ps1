@@ -46,6 +46,16 @@ MustThrow {Undo-Artifact $p 'C:\empty-test' 'unit' $false} 'undo explicit confir
 $base=Join-Path $env:RUNNER_TEMP ('rdte-bootstrap-test-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $base -Force | Out-Null
 try {
+  $configPath=Join-Path $base 'bootstrap\authority.json'
+  $fixtureRef='ExampleOrg/owner-workset#72'
+  $parsed=Parse-Authority $fixtureRef
+  Check ($parsed.repository -ceq 'ExampleOrg/owner-workset' -and $parsed.issue -eq 72) 'one-time issue reference parsing'
+  MustThrow {Parse-Authority 'https://evil.example/' } 'unknown network host cannot enter authority'
+  MustThrow {Parse-Authority 'owner/repo#0'} 'invalid issue zero rejected'
+  Check ((Configure-Authority $configPath $fixtureRef) -ceq 'CONFIG_WRITTEN_VERIFIED') 'immutable one-time configuration'
+  Check ((Configure-Authority $configPath $fixtureRef) -ceq 'CONFIG_NOOP_VERIFIED') 'repeated config is NOOP'
+  Check ((Read-Authority $configPath).repository -ceq 'ExampleOrg/owner-workset') 'config persisted unchanged'
+  MustThrow {Configure-Authority $configPath 'DifferentOrg/other#73'} 'cannot redirect configured authority'
   $state=[pscustomobject]@{count=0;mode='valid'}
   $download={
     param($url,$dest)
