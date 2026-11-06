@@ -442,9 +442,10 @@ function Invoke-SelfTest {
   Assert-LocalSafety
   if($script:DriverSha -cnotmatch '^[0-9a-f]{64}$'){throw 'Driver digest invalid.'}
   $promotion=@('SUPRACHAT-RDTE-PROMOTION/V1','','Status: ADMITTED',
-    'SourceSHA: '+('1'*40),
+    ('SourceSHA: '+('1'*40)),
     'AssetPath: tools/rdte-package/Invoke-SupraChat-RDTE.ps1',
-    'AssetSHA256: '+('2'*64)) -join [Environment]::NewLine
+    ('AssetSHA256: '+('2'*64))) -join [Environment]::NewLine
+  if(@($promotion.Split([char]10)).Count -ne 6){throw 'Promotion fixture must have exactly six lines.'}
   $owner=[pscustomobject]@{login='mark-e-deyoung'}
   $valid=[pscustomobject]@{id=[long]42;user=$owner;body=$promotion}
   $embedded=[pscustomobject]@{id=[long]43;user=$owner;body=('Example: '+[Environment]::NewLine+$promotion)}
