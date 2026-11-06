@@ -4,6 +4,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Superseded revisions of one PR must not fan out costly cross-platform
+# runs. Manual workflow_dispatch reps remain independently observable.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
