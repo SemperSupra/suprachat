@@ -21,7 +21,7 @@ AssetPath: tools/rdte-package/Invoke-SupraChat-RDTE.ps1
 AssetSHA256: <exact 64 lowercase SHA-256>
 ```
 
-The latest owner-authored promotion wins; `REVOKED` fails closed. Paths are allowlisted; the URL is derived solely from `raw.githubusercontent.com/SemperSupra/suprachat/<SourceSHA>/<AssetPath>`, never injected from DLE text. No actual promotion comment or release asset has been created in this PR. An illustrative contract is not admission.
+The latest owner-authored promotion wins for install/verify/run; `REVOKED` fails closed for execution. A prior owner-admitted, locally owner-marked slot may still be undone safely after a subsequent revocation or promotion change. This never permits running the revoked artifact. Paths are allowlisted; the URL is derived solely from `raw.githubusercontent.com/SemperSupra/suprachat/<SourceSHA>/<AssetPath>`, never injected from DLE text. No actual promotion comment or release asset has been created in this PR. An illustrative contract is not admission.
 
 A green CI run is a necessary gate, not unilateral permission to create a production promotion. Promotion requires qualified full-driver source, exact digest, and owner admission, with existing HIL and release holds enforced.
 
