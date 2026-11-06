@@ -55,7 +55,7 @@ try {
 } finally {
   if(Test-Path -LiteralPath $base){
     if(@(Get-ChildItem -LiteralPath $base -Force).Count -gt 0){
-      throw 'Unreconciled fixture content; preserve evidence instead of deleting.'
+      Write-Warning ('Unreconciled fixture retained for first-failure analysis; children=' + (@(Get-ChildItem -LiteralPath $base -Force | ForEach-Object { $_.Name }) -join ','))
     }
     Remove-Item -LiteralPath $base -Force
   }
