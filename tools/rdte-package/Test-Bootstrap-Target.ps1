@@ -56,7 +56,8 @@ try {
   if(Test-Path -LiteralPath $base){
     if(@(Get-ChildItem -LiteralPath $base -Force).Count -gt 0){
       Write-Warning ('Unreconciled fixture retained for first-failure analysis; children=' + (@(Get-ChildItem -LiteralPath $base -Force | ForEach-Object { $_.Name }) -join ','))
+    } else {
+      Remove-Item -LiteralPath $base -Force
     }
-    Remove-Item -LiteralPath $base -Force
   }
 }
