@@ -90,4 +90,24 @@ try {
 } finally {
   if(Test-Path -LiteralPath $base) { Remove-Item -LiteralPath $base -Recurse -Force }
 }
+# Transport pagination is tested without any private token or live GitHub call.
+$first=@(1..100 | ForEach-Object { [pscustomobject]@{id=$_;body='fixture';user=$owner} })
+$second=@(101..104 | ForEach-Object { [pscustomobject]@{id=$_;body='fixture';user=$owner} })
+$pagination=[pscustomobject]@{calls=0}
+$reader={
+  param($page)
+  $pagination.calls++
+  if($page -eq 1) { foreach($x in $first){Write-Output $x} }
+  if($page -eq 2) { foreach($x in $second){Write-Output $x} }
+}.GetNewClosure()
+$collected=@(Collect-DlePages -ReadPage $reader)
+Check ($collected.Count -eq 104) 'two-page DLE fetch returns each comment exactly once'
+Check ($pagination.calls -eq 2) 'pagination terminates on short page'
+Check ($collected[0].id -eq 1 -and $collected[-1].id -eq 104) 'pagination preserves sequence'
+$emptyPage={ param($page) }.GetNewClosure()
+Check (@(Collect-DlePages -ReadPage $emptyPage).Count -eq 0) 'empty DLE page is empty, not an array wrapper'
+$malformedPage={ param($page) [pscustomobject]@{body='missing id'} }.GetNewClosure()
+MustThrow { Collect-DlePages -ReadPage $malformedPage } 'malformed page item fails closed'
+$fullPage={param($page) foreach($x in $first){Write-Output $x}}.GetNewClosure()
+MustThrow { Collect-DlePages -ReadPage $fullPage } 'ten-page boundary fails closed'
 Write-Output ('NATIVE WINDOWS PS5.1 BOOTSTRAP PASS; assertions='+$script:checks)
