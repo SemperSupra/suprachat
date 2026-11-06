@@ -1,0 +1,43 @@
+name: RDTE model-free package - native Windows PS5.1
+
+on:
+  pull_request:
+    paths:
+      - 'tools/rdte-package/**'
+      - '.github/workflows/rdte-package-ps51.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-package:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Exercise native Windows PowerShell 5.1 with no real DLE/account
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw 'Required Windows PowerShell Desktop 5.1 unavailable.'
+          }
+          $driver = Join-Path $env:GITHUB_WORKSPACE 'tools\rdte-package\Invoke-SupraChat-RDTE.ps1'
+          $tests = Join-Path $env:GITHUB_WORKSPACE 'tools\rdte-package\Test-Invoke-SupraChat-RDTE.ps1'
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $driver -Mode SelfTest
+          if ($LASTEXITCODE -ne 0) { throw 'Native driver SelfTest failed.' }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $driver -Mode LocalSmoke
+          if ($LASTEXITCODE -ne 0) { throw 'Native disposable LocalSmoke failed.' }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Native fake DLE/receipt tests failed.' }
+      - name: Public-safe redaction, no hardcoded private DLE identity
+        shell: powershell
+        run: |
+          $source = Get-Content 'tools/rdte-package/Invoke-SupraChat-RDTE.ps1' -Raw
+          if ($source -match '(?i)(suprachat-private|SemperSupra/agent-dispatch-private|Recover-V5Hygiene|hygiene-b-01|Get-BrowserCookie|Get-Secret|Set-ExecutionPolicy|git\s+reset|docker\s+run)') {
+            throw 'Public candidate retains private identity, historic recovery or forbidden operation.'
+          }
+          Write-Output 'PUBLIC SAFE STATIC BOUNDARY PASS'
