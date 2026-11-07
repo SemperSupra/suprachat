@@ -1233,12 +1233,21 @@ jobs:
                   $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
                   $found = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
                   $queue = New-Object System.Collections.Generic.Queue[System.Windows.Automation.AutomationElement]
+                  if ($maxNodes -lt 1 -or $maxNodes -gt 4000) {
+                    throw 'UIA_OWNED_TRAVERSAL_INVALID_BOUND'
+                  }
                   $queue.Enqueue($root)
                   $visited = 0
-                  while ($queue.Count -gt 0 -and $visited -lt $maxNodes) {
+                  while ($queue.Count -gt 0) {
                     $node = $queue.Dequeue()
                     $child = $walker.GetFirstChild($node)
                     while ($child) {
+                      # The queue guard alone is insufficient: a single node
+                      # can expose more than maxNodes siblings. Reject on the
+                      # inner path *before* dereferencing the next UIA peer.
+                      if ($visited -ge $maxNodes) {
+                        throw 'UIA_OWNED_TRAVERSAL_BUDGET_EXHAUSTED'
+                      }
                       $visited++
                       $id = $child.Current.AutomationId
                       if ($automationId) {
