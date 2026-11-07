@@ -33,7 +33,7 @@ public sealed record PromoUiStatus(
 /// <summary>
 /// Architectural implementation of Campaign Package P5:
 /// Managed userscript lifecycle, cryptographic hash verification, zero-grant enforcement, and reversible promotional UI management.
-/// Integrates the ChatGPT Lock to Chat Mode userscript fixture (PR #97 / #96) with fail-closed security.
+/// Holds an inert synthetic-only placeholder; no privately qualified userscript is imported or installed.
 /// </summary>
 public sealed class ManagedUserscriptManager
 {
@@ -134,7 +134,7 @@ public sealed class ManagedUserscriptManager
                 return new UserscriptVerificationResult(false, "REFUSED_REVOKED");
             }
 
-            // No independently approved userscripts-private #97 artifact digest,
+            // No independently approved external userscript artifact digest,
             // human publication approval or native WebView execution receipt yet.
             // A caller-provided matching hash MUST NOT promote itself.
             return new UserscriptVerificationResult(false, "REFUSED_SOURCE_AUTHORITY_MISSING", computedHash);
