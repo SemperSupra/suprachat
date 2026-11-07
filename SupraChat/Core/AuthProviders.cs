@@ -67,6 +67,8 @@ public sealed record SubscriptionCredential(
             : !string.IsNullOrWhiteSpace(AccountId)
                 ? $"ChatGPT subscription ({AccountId})"
                 : "ChatGPT subscription";
+
+    public bool SupportsDirectRestApi => SubscriptionCredentialStore.HasDirectRestScopes(AccessToken);
 }
 
 public sealed record ApiKeyCredential(
@@ -325,6 +327,52 @@ public static class SubscriptionCredentialStore
         }
     }
 
+    public static bool HasDirectRestScopes(string? jwt)
+    {
+        if (string.IsNullOrWhiteSpace(jwt))
+            return false;
+
+        try
+        {
+            var parts = jwt.Split('.');
+            if (parts.Length < 2) return false;
+            var payload = parts[1].Replace('-', '+').Replace('_', '/');
+            switch (payload.Length % 4)
+            {
+                case 2: payload += "=="; break;
+                case 3: payload += "="; break;
+            }
+            var bytes = Convert.FromBase64String(payload);
+            using var doc = JsonDocument.Parse(bytes);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("scp", out var scpProp) && scpProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in scpProp.EnumerateArray())
+                {
+                    var s = item.GetString();
+                    if (string.Equals(s, SiwcProtocol.RequiredPlanScope, StringComparison.Ordinal) ||
+                        string.Equals(s, "api.model.read", StringComparison.Ordinal))
+                        return true;
+                }
+            }
+
+            if (root.TryGetProperty("scope", out var scopeProp) && scopeProp.ValueKind == JsonValueKind.String)
+            {
+                var scopeStr = scopeProp.GetString() ?? string.Empty;
+                if (scopeStr.Contains(SiwcProtocol.RequiredPlanScope, StringComparison.Ordinal) ||
+                    scopeStr.Contains("api.model.read", StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static async Task<T?> ReadProtectedJsonAsync<T>(string path)
     {
         if (!File.Exists(path))
@@ -464,9 +512,10 @@ public static class AuthResolver
         AuthPolicy? policy = null,
         bool requirePlanUsage = false,
         SiwcClient? siwcClient = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireDirectRestAccess = false)
     {
-        var report = await EvaluateAsync(policy, requirePlanUsage, siwcClient, cancellationToken).ConfigureAwait(false);
+        var report = await EvaluateAsync(policy, requirePlanUsage, siwcClient, cancellationToken, requireDirectRestAccess).ConfigureAwait(false);
         return report.Resolved ?? throw new AuthResolutionException(report);
     }
 
@@ -474,7 +523,8 @@ public static class AuthResolver
         AuthPolicy? policy = null,
         bool requirePlanUsage = false,
         SiwcClient? siwcClient = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireDirectRestAccess = false)
     {
         policy ??= await AuthPolicyStore.LoadAsync().ConfigureAwait(false);
         var evaluations = new List<ProviderEvaluation>();
@@ -489,6 +539,16 @@ public static class AuthResolver
                     var sub = await SubscriptionCredentialStore.TryLoadAsync(policy.PreferCodexAuthJson).ConfigureAwait(false);
                     if (sub is not null && !string.IsNullOrWhiteSpace(sub.AccessToken) && !sub.IsExpired)
                     {
+                        if (requireDirectRestAccess && !sub.SupportsDirectRestApi)
+                        {
+                            evaluations.Add(new ProviderEvaluation(
+                                AuthModes.Subscription,
+                                Available: false,
+                                Reason: $"Subscription token from {sub.Source} is scoped for codex-app-server and lacks direct REST scopes ({SiwcProtocol.RequiredPlanScope} / api.model.read)",
+                                PrincipalLabel: sub.DisplayLabel));
+                            break;
+                        }
+
                         var resolved = new ResolvedAuthCredential(
                             AuthModes.Subscription,
                             sub.AccessToken,
