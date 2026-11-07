@@ -89,6 +89,7 @@ internal static class Program
                 "browser-actuators" => WriteSuccess(BrowserCapabilityRegistry.Default.GetActuators()),
                 "browser-sensor-observe" => WriteSuccess(await BrowserSensorObserveAsync(args[1..])),
                 "browser-actuator-execute" => WriteSuccess(await BrowserActuatorExecuteAsync(args[1..])),
+                "browser-mode-preflight" => WriteSuccess(BrowserModePreflight(args[1..])),
                 "browser-snapshot" => WriteSuccess(await BrowserSnapshotAsync(args[1..])),
                 "browser-click" => WriteSuccess(await BrowserClickConfirmedAsync(args[1..])),
                 "browser-fill" => WriteSuccess(await BrowserFillConfirmedAsync(args[1..])),
@@ -175,6 +176,7 @@ internal static class Program
             new { name = "browser-actuators", description = "List registered typed browser actuators and authority requirements." },
             new { name = "browser-sensor-observe", description = "Query observation data from a registered browser sensor.", syntax = "browser-sensor-observe [--id <sensor-id>]" },
             new { name = "browser-actuator-execute", description = "Execute actuation through an authorized lease gate.", syntax = "browser-actuator-execute --id <actuator-id> --lease <lease-id> [--url <url>] [--selector <sel>] [--action <act>]" },
+            new { name = "browser-mode-preflight", description = "Evaluate fail-closed Chat vs Work experience mode policy preflight.", syntax = "browser-mode-preflight [--intent <CHAT|WORK>] [--session <id>] [--epoch <num>] [--lease-confirmed] [--audience <human|automation|agent>]" },
             new { name = "browser-snapshot", description = "Navigate and return an ARIA semantic snapshot.", syntax = "browser-snapshot --url <https-url>" },
             new { name = "browser-click", description = "Explicitly click one element by ARIA role and accessible name.", syntax = "browser-click --confirm --url <https-url> --role <role> --name <accessible-name>" },
             new { name = "browser-fill", description = "Explicitly fill one field by accessible label.", syntax = "browser-fill --confirm --url <https-url> --label <label> --value <text>" },
@@ -275,6 +277,7 @@ internal static class Program
             "browser/actuators/list",
             "browser/sensor/observe",
             "browser/actuator/execute",
+            "browser/mode/preflight",
             "browser/snapshot",
             "browser/start",
             "browser/navigate",
@@ -452,6 +455,107 @@ internal static class Program
             Parameters: dict);
 
         return await BrowserCapabilityRegistry.Default.ExecuteActuatorAsync(request);
+    }
+
+    private static object BrowserModePreflight(string[] args)
+    {
+        var intent = Option(args, "--intent") ?? "CHAT";
+        var session = Option(args, "--session") ?? "session-local-001";
+        var epochStr = Option(args, "--epoch");
+        var epoch = long.TryParse(epochStr, out var ep) ? ep : 1;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var candidate = new BrowserExperienceModePolicy.CandidatePayload(
+            Source: "SYNTHETIC_TYPED_ADAPTER",
+            Origin: BrowserExperienceModePolicy.Origin,
+            Session: session,
+            Epoch: epoch,
+            Timestamp: now - 100,
+            Locale: "en",
+            Controls: new[]
+            {
+                new BrowserExperienceModePolicy.ControlElement("experience-switch", "tab", "Chat", true, intent == "CHAT"),
+                new BrowserExperienceModePolicy.ControlElement("experience-switch", "tab", "Work", true, intent == "WORK")
+            });
+
+        BrowserExperienceModePolicy.HostWorkLease? lease = null;
+        var leaseConfirmed = HasFlag(args, "--lease-confirmed");
+        if (leaseConfirmed)
+        {
+            lease = new BrowserExperienceModePolicy.HostWorkLease(
+                Type: "EXPLICIT_HOST_WORK_LEASE",
+                Session: session,
+                Epoch: epoch,
+                Confirmed: true,
+                Expires: now + 60000);
+        }
+
+        var decision = BrowserExperienceModePolicy.Preflight(new BrowserExperienceModePolicy.PreflightRequest(
+            Intent: intent,
+            Candidate: candidate,
+            Session: session,
+            Epoch: epoch,
+            Now: now,
+            Lease: lease));
+
+        var audience = Option(args, "--audience") ?? "automation";
+        return BrowserExperienceModePolicy.ForAudience(decision, audience);
+    }
+
+    private static object RpcBrowserModePreflight(JsonElement? parameters)
+    {
+        var intent = "CHAT";
+        var session = "session-local-001";
+        long epoch = 1;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        BrowserExperienceModePolicy.CandidatePayload? candidate = null;
+        BrowserExperienceModePolicy.HostWorkLease? lease = null;
+        var audience = "agent";
+
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object)
+        {
+            var p = parameters.Value;
+            if (p.TryGetProperty("intent", out var i) && i.ValueKind == JsonValueKind.String)
+                intent = i.GetString() ?? "CHAT";
+            if (p.TryGetProperty("session", out var s) && s.ValueKind == JsonValueKind.String)
+                session = s.GetString() ?? session;
+            if (p.TryGetProperty("epoch", out var ep) && ep.TryGetInt64(out var epVal))
+                epoch = epVal;
+            if (p.TryGetProperty("audience", out var a) && a.ValueKind == JsonValueKind.String)
+                audience = a.GetString() ?? audience;
+            if (p.TryGetProperty("lease", out var l) && l.ValueKind == JsonValueKind.Object)
+            {
+                var lType = l.TryGetProperty("type", out var lt) ? lt.GetString() : null;
+                var lSession = l.TryGetProperty("session", out var ls) ? ls.GetString() : null;
+                long? lEpoch = l.TryGetProperty("epoch", out var le) && le.TryGetInt64(out var lev) ? lev : null;
+                bool? lConf = l.TryGetProperty("confirmed", out var lc) && lc.ValueKind is JsonValueKind.True or JsonValueKind.False ? lc.GetBoolean() : null;
+                long? lExp = l.TryGetProperty("expires", out var lx) && lx.TryGetInt64(out var lxv) ? lxv : null;
+                lease = new BrowserExperienceModePolicy.HostWorkLease(lType, lSession, lEpoch, lConf, lExp);
+            }
+        }
+
+        candidate ??= new BrowserExperienceModePolicy.CandidatePayload(
+            Source: "SYNTHETIC_TYPED_ADAPTER",
+            Origin: BrowserExperienceModePolicy.Origin,
+            Session: session,
+            Epoch: epoch,
+            Timestamp: now - 100,
+            Locale: "en",
+            Controls: new[]
+            {
+                new BrowserExperienceModePolicy.ControlElement("experience-switch", "tab", "Chat", true, intent == "CHAT"),
+                new BrowserExperienceModePolicy.ControlElement("experience-switch", "tab", "Work", true, intent == "WORK")
+            });
+
+        var decision = BrowserExperienceModePolicy.Preflight(new BrowserExperienceModePolicy.PreflightRequest(
+            Intent: intent,
+            Candidate: candidate,
+            Session: session,
+            Epoch: epoch,
+            Now: now,
+            Lease: lease));
+
+        return BrowserExperienceModePolicy.ForAudience(decision, audience);
     }
 
     private static async Task<object> AccessibilityPreferencesAsync()
@@ -1223,6 +1327,7 @@ internal static class Program
             "browser/actuators/list" => BrowserCapabilityRegistry.Default.GetActuators(),
             "browser/sensor/observe" => await RpcBrowserSensorObserveAsync(parameters),
             "browser/actuator/execute" => await RpcBrowserActuatorExecuteAsync(parameters),
+            "browser/mode/preflight" => RpcBrowserModePreflight(parameters),
             "browser/snapshot" => await RpcBrowserSnapshotAsync(parameters),
             "browser/start" => await RpcBrowserStartAsync(),
             "browser/navigate" => await RpcBrowserNavigateAsync(parameters),
