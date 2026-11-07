@@ -313,6 +313,19 @@ public sealed class AriaSnapshotSensor : IBrowserSensor
 
 public sealed class NetworkMetadataSensor : IBrowserSensor
 {
+    private readonly SyntheticTraceShapeOracle _oracle;
+    private readonly TraceShapeSessionHandle _session;
+
+    public SyntheticTraceShapeOracle Oracle => _oracle;
+    public TraceShapeSessionHandle SessionHandle => _session;
+
+    public NetworkMetadataSensor(SyntheticTraceShapeOracle? oracle = null)
+    {
+        _oracle = oracle ?? new SyntheticTraceShapeOracle();
+        _session = _oracle.Session();
+        _oracle.Enable(_session, true);
+    }
+
     public BrowserSensorDescriptor Descriptor { get; } = new(
         "network-metadata",
         OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux",
@@ -325,28 +338,32 @@ public sealed class NetworkMetadataSensor : IBrowserSensor
 
     public ValueTask<BrowserSensorObservation> ObserveAsync(CancellationToken cancellationToken = default)
     {
+        var snapshot = _oracle.Snapshot(_session);
         var data = new Dictionary<string, object?>
         {
             ["cdp_attached"] = true,
-            ["observed_http_requests"] = 4,
-            ["observed_sse_streams"] = 1,
-            ["observed_ws_frames"] = 0,
-            ["loss_incidents"] = 0,
+            ["observed_http_requests"] = snapshot.Events.Count(e => e.Kind is "requestWillBeSent" or "responseReceived"),
+            ["observed_sse_streams"] = snapshot.Events.Count(e => e.Kind == "eventSourceMessageReceived"),
+            ["observed_ws_frames"] = snapshot.Events.Count(e => e.Kind is "webSocketFrameSent" or "webSocketFrameReceived"),
+            ["loss_incidents"] = snapshot.Gaps,
             ["contains_authorization_header"] = false,
             ["contains_cookie_header"] = false,
-            ["contains_body_payload"] = false
+            ["contains_body_payload"] = false,
+            ["trace_shape_schema"] = snapshot.Schema,
+            ["trace_grade"] = snapshot.Grade,
+            ["completeness"] = snapshot.Completeness,
+            ["events_count"] = snapshot.Events.Count
         };
 
         return ValueTask.FromResult(new BrowserSensorObservation(
             BrowserCapabilityContract.ObservationSchema,
             Descriptor.SensorId,
             DateTimeOffset.UtcNow,
-            "COMPLETE",
+            snapshot.Completeness,
             data,
-            0));
+            snapshot.Gaps));
     }
 }
-
 public sealed class PageNavigationActuator : IBrowserActuator
 {
     private static readonly Regex SafeUrlPattern = new(@"^https://(chatgpt\.com|openai\.com)(/.*)?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
