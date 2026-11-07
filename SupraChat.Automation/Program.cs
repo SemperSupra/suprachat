@@ -870,13 +870,13 @@ internal static class Program
         else if (!string.IsNullOrWhiteSpace(requestedOrder))
             policy = new AuthPolicy(AuthPolicy.NormalizeOrder(requestedOrder.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
 
+        var resolvedAuth = await Core.GetUsableAuthAsync(requirePlanUsage: false, policy: policy, requireDirectRestAccess: true);
         var models = await Core.ListModelsAsync(policy: policy);
-        var auth = await Core.GetAuthStatusAsync();
         return new
         {
             schema = Schema,
             binding = "siwc-responses",
-            auth_mode = auth.AuthMode,
+            auth_mode = resolvedAuth.AuthMode,
             models = models.Select(x => new { id = x.Slug, display_name = x.DisplayName }).ToArray()
         };
     }
@@ -1219,7 +1219,7 @@ internal static class Program
             }
         }
 
-        var auth = await RequireAuthAsync(args);
+        var auth = await RequireAuthAsync(args, requireDirectRestAccess: true);
 
         var result = await TracedResponses.StreamAsync(
             auth.AccessToken,
@@ -1255,7 +1255,7 @@ internal static class Program
         if (string.IsNullOrWhiteSpace(raw))
             throw new MachineException(2, "USAGE", "Provide --body <json> or JSON on stdin.");
 
-        var auth = await RequireAuthAsync(args);
+        var auth = await RequireAuthAsync(args, requireDirectRestAccess: true);
         var result = await TracedResponses.StreamRawAsync(
             auth.AccessToken,
             model,
@@ -2009,7 +2009,7 @@ internal static class Program
             return _agentResponsesSocket;
 
         await StopAgentResponsesAsync();
-        var auth = await RequireAuthAsync();
+        var auth = await RequireAuthAsync(requireDirectRestAccess: true);
         _agentResponsesSocket = await ResponsesWebSocketClient.ConnectAsync(auth.AccessToken, trace: Trace.Binding, controls: Trace.Controls);
         _agentResponsesCts = new CancellationTokenSource();
         var socket = _agentResponsesSocket;
@@ -2288,7 +2288,7 @@ internal static class Program
         };
     }
 
-    private static async Task<ResolvedAuthCredential> RequireAuthAsync(string[]? args = null, bool requirePlanUsage = false)
+    private static async Task<ResolvedAuthCredential> RequireAuthAsync(string[]? args = null, bool requirePlanUsage = false, bool requireDirectRestAccess = false)
     {
         var requestedMode = Option(args ?? Array.Empty<string>(), "--auth-mode");
         var requestedOrder = Option(args ?? Array.Empty<string>(), "--auth-order");
@@ -2306,7 +2306,7 @@ internal static class Program
 
         try
         {
-            return await Core.GetUsableAuthAsync(requirePlanUsage: requirePlanUsage, policy: policy);
+            return await Core.GetUsableAuthAsync(requirePlanUsage: requirePlanUsage, policy: policy, requireDirectRestAccess: requireDirectRestAccess);
         }
         catch (AuthResolutionException ex)
         {
