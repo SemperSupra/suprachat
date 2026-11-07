@@ -1145,6 +1145,11 @@ jobs:
           Stop-Process -Id $p.Id -Force
           "SupraChat remained alive through an 8-second self-contained Windows launch smoke."
 
+      - name: Qualify UIA startup classifier without leaking exception content
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./tools/local/Test-SupraChatStartupClassification.ps1
+
       - name: Windows live UI Automation accessibility smoke
         if: runner.os == 'Windows'
         shell: pwsh
@@ -1154,6 +1159,9 @@ jobs:
           Add-Type -AssemblyName UIAutomationTypes
 
           $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
+          . (Join-Path $PWD 'tools/local/Get-SupraChatStartupClassification.ps1')
+          $uiaStartupLog = Join-Path $env:RUNNER_TEMP ('suprachat-uia-' + [guid]::NewGuid().ToString('N') + '.log')
+          $env:SUPRACHAT_STARTUP_LOG = $uiaStartupLog
           $p = Start-Process -FilePath $exe -PassThru
           try {
             $deadline = (Get-Date).AddSeconds(20)
@@ -1280,6 +1288,10 @@ jobs:
                       $observedExitCode = 'unavailable'
                       try { $observedExitCode = [string][int]$p.ExitCode } catch {}
                       Write-Host ('UIA host lifetime: processAlive=False exitCode=' + $observedExitCode)
+                      # Emit only allowlisted exception type, never message/stack or raw startup log.
+                      $startupClass = Get-SupraChatStartupClassification -Path $uiaStartupLog
+                      Write-Host ('UIA startup classification: logPresent={0} fatalMarker={1} exceptionType={2}' -f
+                        $startupClass.LogPresent, $startupClass.FatalMarker, $startupClass.ExceptionType)
                       throw 'UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS'
                     }
                     $window = $null
@@ -1765,6 +1777,7 @@ jobs:
           }
           finally {
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Remove-Item -LiteralPath $uiaStartupLog -Force -ErrorAction SilentlyContinue
           }
 
       - name: Qualify synthetic secret UIA boundary for v0.0.1
