@@ -1383,6 +1383,20 @@ jobs:
                       }
                     }
                   }
+                  # Terminal status must print even when the HWND and process
+                  # tree cannot be reacquired; otherwise child probes are silent.
+                  # Only bounded booleans; never emit process/user/browser values.
+                  $terminalProcessAlive = $false
+                  $terminalHwndNonzero = $false
+                  try {
+                    $p.Refresh()
+                    $terminalProcessAlive = -not $p.HasExited
+                    if ($terminalProcessAlive) {
+                      $terminalHwndNonzero = $p.MainWindowHandle -ne [IntPtr]::Zero
+                    }
+                  } catch {}
+                  Write-Host ("UIA terminal-boundary windowAvailable={0} processAlive={1} mainHwndNonzero={2}" -f
+                    [bool]$window, $terminalProcessAlive, $terminalHwndNonzero)
                   Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
