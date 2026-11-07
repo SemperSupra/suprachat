@@ -12,32 +12,57 @@
     AutomationProperties.AutomationId="SupraChat.MainWindow"
     AutomationProperties.Name="SupraChat">
   <Grid RowDefinitions="Auto,*">
-    <Border Grid.Row="0" Padding="8">
+    <Border Grid.Row="0" Padding="8" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
       <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
-        <Button Grid.Column="0" Margin="0,0,6,0" Content="Back" Click="Back_Click"
+        <Button Grid.Column="0" Margin="0,0,6,0" Content="◀ Back" Click="Back_Click"
                  AutomationProperties.AutomationId="Nav.Back"
                  AutomationProperties.HelpText="Go back in the embedded ChatGPT product view." />
-        <Button Grid.Column="1" Margin="0,0,6,0" Content="Forward" Click="Forward_Click"
+        <Button Grid.Column="1" Margin="0,0,6,0" Content="Forward ▶" Click="Forward_Click"
                  AutomationProperties.AutomationId="Nav.Forward"
                  AutomationProperties.HelpText="Go forward in the embedded ChatGPT product view." />
-        <Button Grid.Column="2" Margin="0,0,6,0" Content="Reload" Click="Reload_Click"
+        <Button Grid.Column="2" Margin="0,0,6,0" Click="Reload_Click"
                  AutomationProperties.AutomationId="Nav.Reload"
-                 AutomationProperties.HelpText="Reload the embedded ChatGPT product view." />
+                 AutomationProperties.HelpText="Reload the embedded ChatGPT product view.">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+            <TextBlock Text="Reload" />
+          </StackPanel>
+        </Button>
         <Button Grid.Column="3" Margin="0,0,6,0" Content="Home" Click="Home_Click"
                  AutomationProperties.AutomationId="Nav.Home"
                  AutomationProperties.HelpText="Navigate the embedded product view to ChatGPT home." />
         <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
           <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="SupraChat Cockpit" />
-          <Border Background="#2E7D32" CornerRadius="12" Padding="8,3" VerticalAlignment="Center">
-            <TextBlock Text="🟢 LOCAL OPERATOR" Foreground="White" FontSize="11" FontWeight="Bold" />
+          <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                  BorderThickness="1" CornerRadius="12" Padding="8,3" VerticalAlignment="Center"
+                  AutomationProperties.AutomationId="Authority.Pill">
+            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+              <PathIcon Data="{StaticResource IconShield}" Width="11" Height="11" />
+              <TextBlock Text="LOCAL OPERATOR" FontSize="11" FontWeight="SemiBold" />
+            </StackPanel>
           </Border>
-          <Border Background="#0288D1" CornerRadius="12" Padding="8,3" VerticalAlignment="Center">
-            <TextBlock Text="✨ Plan: Subscription (No Work Spend)" Foreground="White" FontSize="11" FontWeight="Bold" />
-          </Border>
+          <Button x:Name="EntitlementPill" Click="EntitlementPill_Click"
+                  Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                  BorderThickness="1" CornerRadius="12" Padding="8,3" VerticalAlignment="Center"
+                  AutomationProperties.AutomationId="Entitlement.Pill"
+                  AutomationProperties.Name="Plan Entitlement Mode Indicator"
+                  AutomationProperties.HelpText="Click to view or toggle between Personal Subscription and Work Workspace plan modes.">
+            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+              <PathIcon x:Name="EntitlementIcon" Data="{StaticResource IconCheck}" Width="11" Height="11" />
+              <TextBlock x:Name="EntitlementPillText" Text="Personal Subscription (Zero Work Spend)" FontSize="11" FontWeight="SemiBold" />
+            </StackPanel>
+          </Button>
         </StackPanel>
-        <Button Grid.Column="5" Content="Open in browser" Click="OpenExternal_Click"
+        <Button Grid.Column="5" Click="OpenExternal_Click"
                  AutomationProperties.AutomationId="Nav.OpenExternal"
-                 AutomationProperties.HelpText="Open ChatGPT in the system browser." />
+                 AutomationProperties.HelpText="Open ChatGPT in the system browser.">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <PathIcon Data="{StaticResource IconExternal}" Width="11" Height="11" />
+            <TextBlock Text="Open in browser" />
+          </StackPanel>
+        </Button>
         <Button x:Name="NativeMetadataReview" Grid.Column="6" Margin="8,0,0,0" IsVisible="False"
                 Content="Review web metadata" Click="NativeMetadataReview_Click"
                 AutomationProperties.AutomationId="Native.Metadata.Review"
@@ -55,6 +80,7 @@
         <NativeWebView x:Name="ChatView"
                        Source="https://chatgpt.com/"
                        EnvironmentRequested="ChatView_EnvironmentRequested"
+                       NavigationCompleted="ChatView_NavigationCompleted"
                        AutomationProperties.AutomationId="ChatGPT.WebView"
                        AutomationProperties.Name="ChatGPT product view"
                        AutomationProperties.HelpText="Official ChatGPT web product surface. Web content exposes its own accessibility tree." />
@@ -109,7 +135,9 @@
               <Button Margin="0,0,8,8" Content="Add another account/workspace" Click="AddAccount_Click" AutomationProperties.AutomationId="Auth.AddAccount" />
             </WrapPanel>
 
-            <Border Padding="12" Margin="0,4,0,8" BorderThickness="1" CornerRadius="6">
+            <Border Padding="12" Margin="0,4,0,8" BorderThickness="1" CornerRadius="6"
+                    Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
               <StackPanel Spacing="8">
                 <TextBlock FontWeight="SemiBold"
                            Text="Portable credentials"
@@ -119,10 +147,10 @@
                 <TextBlock TextWrapping="Wrap"
                            Text="Export an encrypted renewable SIWC credential bundle for another trusted runtime, or import one here. Copies share renewable authority and can interfere if multiple hosts rotate the same refresh lineage; use intentionally and protect the bundle and passphrase." />
                 <local:SecurePassphraseTextBox x:Name="CredentialPassphraseBox"
-                         PlaceholderText="Bundle passphrase (12+ characters)"
-                         AutomationProperties.AutomationId="Auth.BundlePassphrase"
-                         AutomationProperties.Name="Credential bundle passphrase"
-                         AutomationProperties.HelpText="Passphrase used only in memory to encrypt or decrypt the selected portable credential bundle." />
+                          PlaceholderText="Bundle passphrase (12+ characters)"
+                          AutomationProperties.AutomationId="Auth.BundlePassphrase"
+                          AutomationProperties.Name="Credential bundle passphrase"
+                          AutomationProperties.HelpText="Passphrase used only in memory to encrypt or decrypt the selected portable credential bundle." />
                 <WrapPanel Orientation="Horizontal">
                   <Button Margin="0,0,8,0"
                           Content="Export encrypted bundle…"
@@ -530,31 +558,39 @@
         </ScrollViewer>
       </TabItem>
 
-            <TabItem Header="Remote Control"
+      <TabItem Header="Remote Control"
                AutomationProperties.AutomationId="Tab.RemoteControl"
                AutomationProperties.AcceleratorKey="Command+4 / Control+4"
                AutomationProperties.HelpText="Codex Remote reverse tunnel, pairing codes, and connected client management.">
         <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="20" Spacing="16" MaxWidth="900">
             <!-- Hero Header Card -->
-            <Border Background="#F4F6F9" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Border Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
               <StackPanel Spacing="8">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                  <TextBlock FontSize="20" FontWeight="SemiBold" Text="Codex Remote Control Hub"
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                  <PathIcon Data="{StaticResource IconTerminal}" Width="16" Height="16" />
+                  <TextBlock FontSize="18" FontWeight="SemiBold" Text="Codex Remote Control Hub"
                              AutomationProperties.ControlTypeOverride="Header"
                              AutomationProperties.HeadingLevel="2"
                              AutomationProperties.AutomationId="RemoteControl.Heading" />
-                  <Border Background="#2E7D32" CornerRadius="12" Padding="8,2" VerticalAlignment="Center">
-                    <TextBlock Text="REVERSE TUNNEL" Foreground="White" FontSize="10" FontWeight="Bold" />
+                  <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                          BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                          BorderThickness="1" CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                    <TextBlock Text="REVERSE TUNNEL" FontSize="10" FontWeight="SemiBold" />
                   </Border>
                 </StackPanel>
-                <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
+                <TextBlock TextWrapping="Wrap"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Text="Secure reverse tunnel enabling a remote ChatGPT session to inspect and pair with your local SupraChat host. All consequential actions require explicit operator confirmation; no background action is taken without your consent." />
               </StackPanel>
             </Border>
 
             <!-- Status & Enablement Card -->
-            <Border Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
               <StackPanel Spacing="10">
                 <TextBlock FontSize="16" FontWeight="SemiBold" Text="1. Tunnel Readiness &amp; Control" />
                 <CheckBox x:Name="RemoteConfirmBox"
@@ -562,12 +598,27 @@
                           AutomationProperties.AutomationId="RemoteControl.Confirm"
                           AutomationProperties.HelpText="Must be checked immediately before enable, disable, pairing start, or client revoke." />
                 <WrapPanel Orientation="Horizontal">
-                  <Button Margin="0,0,8,8" Content="Read status" Click="ReadRemoteStatus_Click"
-                          AutomationProperties.AutomationId="RemoteControl.Status" />
-                  <Button Margin="0,0,8,8" Content="Enable Remote" Click="RemoteEnable_Click"
-                          AutomationProperties.AutomationId="RemoteControl.Enable" />
-                  <Button Margin="0,0,8,8" Content="Disable Remote" Click="RemoteDisable_Click"
-                          AutomationProperties.AutomationId="RemoteControl.Disable" />
+                  <Button Margin="0,0,8,8" Click="ReadRemoteStatus_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Status">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+                      <TextBlock Text="Read status" />
+                    </StackPanel>
+                  </Button>
+                  <Button Margin="0,0,8,8" Click="RemoteEnable_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Enable">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconPlay}" Width="11" Height="11" />
+                      <TextBlock Text="Enable Remote" />
+                    </StackPanel>
+                  </Button>
+                  <Button Margin="0,0,8,8" Click="RemoteDisable_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Disable">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconStop}" Width="11" Height="11" />
+                      <TextBlock Text="Disable Remote" />
+                    </StackPanel>
+                  </Button>
                 </WrapPanel>
                 <TextBlock FontWeight="SemiBold" Text="Environment ID" />
                 <TextBox x:Name="RemoteEnvironmentBox"
@@ -577,22 +628,40 @@
             </Border>
 
             <!-- Pairing Card -->
-            <Border Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
               <StackPanel Spacing="10">
                 <TextBlock FontSize="16" FontWeight="SemiBold" Text="2. ChatGPT Device Pairing" />
-                <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
+                <TextBlock TextWrapping="Wrap"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Text="Generate an ephemeral one-time pairing code to enter into ChatGPT on the web or mobile to authorize the remote session." />
                 <CheckBox x:Name="RemoteManualCodeBox"
                           Content="Request a manual pairing code"
                           AutomationProperties.AutomationId="RemoteControl.ManualCode"
                           AutomationProperties.HelpText="Request a text pairing code in addition to the normal pairing token." />
                 <WrapPanel Orientation="Horizontal">
-                  <Button Margin="0,0,8,8" Content="Start pairing" Click="RemotePairingStart_Click"
-                          AutomationProperties.AutomationId="RemoteControl.PairingStart" />
-                  <Button Margin="0,0,8,8" Content="Check pairing status" Click="RemotePairingStatus_Click"
-                          AutomationProperties.AutomationId="RemoteControl.PairingStatus" />
-                  <Button Margin="0,0,8,8" Content="Copy code to clipboard" Click="CopyPairingCode_Click"
-                          AutomationProperties.AutomationId="RemoteControl.CopyCode" />
+                  <Button Margin="0,0,8,8" Click="RemotePairingStart_Click"
+                          AutomationProperties.AutomationId="RemoteControl.PairingStart">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconPlay}" Width="11" Height="11" />
+                      <TextBlock Text="Start pairing" />
+                    </StackPanel>
+                  </Button>
+                  <Button Margin="0,0,8,8" Click="RemotePairingStatus_Click"
+                          AutomationProperties.AutomationId="RemoteControl.PairingStatus">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+                      <TextBlock Text="Check pairing status" />
+                    </StackPanel>
+                  </Button>
+                  <Button Margin="0,0,8,8" Click="CopyPairingCode_Click"
+                          AutomationProperties.AutomationId="RemoteControl.CopyCode">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconCopy}" Width="11" Height="11" />
+                      <TextBlock Text="Copy code" />
+                    </StackPanel>
+                  </Button>
                 </WrapPanel>
                 <TextBlock FontWeight="SemiBold" Text="Pairing code" />
                 <TextBox x:Name="RemotePairingCodeBox" FontSize="16" FontFamily="Consolas, monospace"
@@ -606,20 +675,32 @@
             </Border>
 
             <!-- Active Clients & Revocation Card -->
-            <Border Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
               <StackPanel Spacing="10">
                 <TextBlock FontSize="16" FontWeight="SemiBold" Text="3. Connected Remote Clients &amp; Revocation" />
                 <WrapPanel Orientation="Horizontal">
-                  <Button Margin="0,0,8,8" Content="List clients" Click="RemoteClients_Click"
-                          AutomationProperties.AutomationId="RemoteControl.Clients" />
+                  <Button Margin="0,0,8,8" Click="RemoteClients_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Clients">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+                      <TextBlock Text="List clients" />
+                    </StackPanel>
+                  </Button>
                 </WrapPanel>
                 <TextBlock FontWeight="SemiBold" Text="Client ID to revoke" />
                 <TextBox x:Name="RemoteClientIdBox"
                          AutomationProperties.AutomationId="RemoteControl.ClientId"
                          AutomationProperties.Name="Remote client ID to revoke" />
-                <Button HorizontalAlignment="Left" Content="Revoke client" Click="RemoteRevoke_Click"
+                <Button HorizontalAlignment="Left" Click="RemoteRevoke_Click"
                         AutomationProperties.AutomationId="RemoteControl.Revoke"
-                        AutomationProperties.HelpText="Requires the confirmation checkbox and both environment and client IDs." />
+                        AutomationProperties.HelpText="Requires the confirmation checkbox and both environment and client IDs.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconWarning}" Width="11" Height="11" />
+                    <TextBlock Text="Revoke client" />
+                  </StackPanel>
+                </Button>
               </StackPanel>
             </Border>
           </StackPanel>

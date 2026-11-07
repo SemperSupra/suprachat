@@ -74,7 +74,7 @@ public partial class WorkbenchView : UserControl
         {
             TerminalRunButton.IsEnabled = !isRunning;
             TerminalStopButton.IsEnabled = isRunning;
-            TerminalStatusText.Text = isRunning ? "⏳ Shell Running..." : "🟢 Shell Ready";
+            TerminalStatusText.Text = isRunning ? "Running..." : "Shell Ready";
         });
     }
 
@@ -134,13 +134,13 @@ public partial class WorkbenchView : UserControl
             {
                 _terminalHost.WorkingDirectory = active.WorkspaceKey;
                 TerminalWorkingDirectory.Text = "Working Dir: " + active.WorkspaceKey;
-                WorkbenchPairStatusText.Text = $"💻 Session: {active.Title}";
+                WorkbenchPairStatusText.Text = $"Session: {active.Title}";
             }
             else
             {
                 _terminalHost.WorkingDirectory = Directory.GetCurrentDirectory();
                 TerminalWorkingDirectory.Text = "Working Dir: " + Directory.GetCurrentDirectory();
-                WorkbenchPairStatusText.Text = "💻 Local Execution Bound";
+                WorkbenchPairStatusText.Text = "Local Execution Bound";
             }
         }
         finally { _refreshing = false; }
@@ -388,19 +388,10 @@ public partial class WorkbenchView : UserControl
     {
         var text = W2DraftInput.Text ?? string.Empty;
         var hasSensitive = TerminalTransferBridge.ContainsSensitiveTokens(text);
-        if (hasSensitive)
+        DraftSafetyText.Text = hasSensitive ? "Secret / Token Detected!" : "Secret Scan Clean";
+        if (this.FindResource(hasSensitive ? "IconWarning" : "IconShield") is Avalonia.Media.Geometry geom)
         {
-            DraftSafetyBadge.Background = new SolidColorBrush(Color.Parse("#FFEBEE"));
-            DraftSafetyBadge.BorderBrush = new SolidColorBrush(Color.Parse("#EF9A9A"));
-            DraftSafetyText.Text = "⚠️ Secret / Token Detected!";
-            DraftSafetyText.Foreground = new SolidColorBrush(Color.Parse("#C62828"));
-        }
-        else
-        {
-            DraftSafetyBadge.Background = new SolidColorBrush(Color.Parse("#E8F5E9"));
-            DraftSafetyBadge.BorderBrush = new SolidColorBrush(Color.Parse("#A5D6A7"));
-            DraftSafetyText.Text = "🛡️ Secret Scan Clean";
-            DraftSafetyText.Foreground = new SolidColorBrush(Color.Parse("#2E7D32"));
+            DraftSafetyIcon.Data = geom;
         }
     }
 
@@ -560,18 +551,18 @@ public partial class WorkbenchView : UserControl
         try
         {
             var exitCode = await _terminalHost.ExecuteCommandAsync(cmd);
-            TerminalStatusText.Text = $"🟢 Exit: {exitCode}";
+            TerminalStatusText.Text = $"Exit: {exitCode}";
         }
         catch (Exception ex)
         {
-            TerminalStatusText.Text = "⚠️ Error: " + ex.Message;
+            TerminalStatusText.Text = "Error: " + ex.Message;
         }
     }
 
     private void TerminalStop_Click(object? sender, RoutedEventArgs e)
     {
         _terminalHost.Stop();
-        TerminalStatusText.Text = "⏹ Stopped by operator";
+        TerminalStatusText.Text = "Stopped by operator";
     }
 
     private void TerminalClear_Click(object? sender, RoutedEventArgs e)

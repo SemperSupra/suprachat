@@ -11,12 +11,18 @@
                    AutomationProperties.ControlTypeOverride="Header"
                    AutomationProperties.HeadingLevel="1"
                    AutomationProperties.AutomationId="Sessions.Heading" />
-        <Border x:Name="WorkbenchPairStatus" Background="#E3F2FD" BorderBrush="#90CAF9" BorderThickness="1"
-                CornerRadius="12" Padding="10,2" VerticalAlignment="Center">
-          <TextBlock x:Name="WorkbenchPairStatusText" Text="💻 Local Execution Bound" FontSize="11" Foreground="#0D47A1" FontWeight="Medium" />
+        <Border x:Name="WorkbenchPairStatus"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                BorderThickness="1" CornerRadius="12" Padding="8,2" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+            <PathIcon Data="{StaticResource IconTerminal}" Width="11" Height="11" />
+            <TextBlock x:Name="WorkbenchPairStatusText" Text="Local Execution Bound" FontSize="11" FontWeight="Medium" />
+          </StackPanel>
         </Border>
       </StackPanel>
-      <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#666666"
+      <TextBlock TextWrapping="Wrap" FontSize="12"
+                 Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                  Text="Pair interactive ChatGPT discussions with an autonomous local CLI terminal. Ephemeral ledger isolation ensures no unconsented execution or credential leak." />
     </StackPanel>
 
@@ -28,9 +34,11 @@
         <StackPanel Spacing="12">
           
           <!-- Card 1: Session Ledger Manager -->
-          <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="8" Padding="12">
+          <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                  BorderThickness="1" CornerRadius="8" Padding="12">
             <StackPanel Spacing="8">
-              <TextBlock Text="Session Ledger" FontSize="15" FontWeight="SemiBold" Foreground="#333333" />
+              <TextBlock Text="Session Ledger" FontSize="15" FontWeight="SemiBold" />
               <WrapPanel Orientation="Horizontal">
                 <TextBox x:Name="W0NewTitle" Width="160" MaxLength="80" Margin="0,0,6,6"
                          PlaceholderText="Session Title"
@@ -61,10 +69,16 @@
                         AutomationProperties.HelpText="Restores an archived session back to the active list." />
               </WrapPanel>
 
-              <Border x:Name="W0CollisionBorder" IsVisible="False" Background="#FFF3CD" BorderBrush="#FFEEBA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,2"
+              <Border x:Name="W0CollisionBorder" IsVisible="False"
+                      Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                      BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                      BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,2"
                       AutomationProperties.AutomationId="Sessions.CollisionWarnings"
                       AutomationProperties.Name="Session collision warnings">
-                <TextBlock x:Name="W0CollisionText" TextWrapping="Wrap" Foreground="#856404" FontSize="11" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <PathIcon Data="{StaticResource IconWarning}" Width="12" Height="12" VerticalAlignment="Center" />
+                  <TextBlock x:Name="W0CollisionText" TextWrapping="Wrap" FontSize="11" />
+                </StackPanel>
               </Border>
 
               <ListBox x:Name="W0Sessions" MinHeight="85" MaxHeight="140"
@@ -81,7 +95,8 @@
                 </ListBox.ItemTemplate>
               </ListBox>
 
-              <TextBlock x:Name="W0Status" TextWrapping="Wrap" FontSize="11" Foreground="#555555"
+              <TextBlock x:Name="W0Status" TextWrapping="Wrap" FontSize="11"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                          Text="No local sessions. Terminal execution and chat submission disabled."
                          AutomationProperties.AutomationId="Sessions.Status"
                          AutomationProperties.LiveSetting="Polite"
@@ -90,82 +105,124 @@
           </Border>
 
           <!-- Card 2: Bi-Directional Draft Staging & Code Extraction -->
-          <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="8" Padding="12">
+          <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                  BorderThickness="1" CornerRadius="8" Padding="12">
             <StackPanel Spacing="8">
               <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <TextBlock Text="Selective Draft Review &amp; Staging" FontSize="15" FontWeight="SemiBold"
                            AutomationProperties.AutomationId="Sessions.DraftHeading"
                            AutomationProperties.ControlTypeOverride="Header"
                            AutomationProperties.HeadingLevel="2" />
-                <Border x:Name="DraftSafetyBadge" Background="#E8F5E9" BorderBrush="#A5D6A7" BorderThickness="1"
-                        CornerRadius="8" Padding="6,1" VerticalAlignment="Center">
-                  <TextBlock x:Name="DraftSafetyText" Text="🛡️ Secret Scan Clean" FontSize="10" Foreground="#2E7D32" FontWeight="SemiBold" />
+                <Border x:Name="DraftSafetyBadge"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="6,1" VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <PathIcon x:Name="DraftSafetyIcon" Data="{StaticResource IconShield}" Width="10" Height="10" />
+                    <TextBlock x:Name="DraftSafetyText" Text="Secret Scan Clean" FontSize="10" FontWeight="SemiBold" />
+                  </StackPanel>
                 </Border>
               </StackPanel>
 
-              <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#666666"
+              <TextBlock TextWrapping="Wrap" FontSize="11"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                          Text="Draft text is held in memory for review. Use extraction buttons to isolate individual code snippets or command blocks before staging." />
 
               <TextBox x:Name="W2DraftInput" AcceptsReturn="True" TextWrapping="Wrap"
-                       FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                       FontFamily="Consolas, Cascadia Code, monospace"
                        MaxLength="16384" MinHeight="65" MaxHeight="120"
                        PlaceholderText="Enter or paste draft text, ChatGPT response, or command output..."
                        TextChanged="W2DraftInput_TextChanged"
                        AutomationProperties.AutomationId="Sessions.DraftInput"
                        AutomationProperties.Name="Unsent local draft input" />
 
-              <!-- Quick action extraction tools -->
+              <!-- Quick action extraction tools with standard vector icons -->
               <WrapPanel Orientation="Horizontal">
-                <Button Content="🔍 Parse Snippets" Click="ExtractSnippets_Click" Margin="0,0,6,6"
+                <Button Click="ExtractSnippets_Click" Margin="0,0,6,6"
                         AutomationProperties.AutomationId="Sessions.ExtractSnippets"
-                        AutomationProperties.HelpText="Parse fenced markdown code blocks from draft input." />
-                <Button Content="▶ Review to terminal draft" Click="W2ReviewToTerminal_Click" Margin="0,0,6,6"
+                        AutomationProperties.HelpText="Parse fenced markdown code blocks from draft input.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconCode}" Width="11" Height="11" />
+                    <TextBlock Text="Parse Snippets" />
+                  </StackPanel>
+                </Button>
+                <Button Click="W2ReviewToTerminal_Click" Margin="0,0,6,6"
                         AutomationProperties.AutomationId="Sessions.ReviewToTerminal"
-                        AutomationProperties.HelpText="Review for local-only terminal input staging; does not execute." />
-                <Button Content="💬 Review to chat draft" Click="W2ReviewToChat_Click" Margin="0,0,6,6"
+                        AutomationProperties.HelpText="Review for local-only terminal input staging; does not execute.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconTerminal}" Width="11" Height="11" />
+                    <TextBlock Text="Review to terminal draft" />
+                  </StackPanel>
+                </Button>
+                <Button Click="W2ReviewToChat_Click" Margin="0,0,6,6"
                         AutomationProperties.AutomationId="Sessions.ReviewToChat"
-                        AutomationProperties.HelpText="Review for local-only chat input staging; does not submit." />
-                <Button Content="✓ Stage reviewed text" Click="W2Stage_Click" Margin="0,0,6,6"
+                        AutomationProperties.HelpText="Review for local-only chat input staging; does not submit.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconSend}" Width="11" Height="11" />
+                    <TextBlock Text="Review to chat draft" />
+                  </StackPanel>
+                </Button>
+                <Button Click="W2Stage_Click" Margin="0,0,6,6"
                         AutomationProperties.AutomationId="Sessions.StageDraft"
-                        AutomationProperties.HelpText="Second explicit action. One-use review expires after two minutes." />
+                        AutomationProperties.HelpText="Second explicit action. One-use review expires after two minutes.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconCheck}" Width="11" Height="11" />
+                    <TextBlock Text="Stage reviewed text" />
+                  </StackPanel>
+                </Button>
               </WrapPanel>
 
               <!-- Parsed Snippets Picker (when markdown code blocks found) -->
-              <Border x:Name="SnippetsContainer" IsVisible="False" Background="#EEF2F6" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="6" Padding="8">
+              <Border x:Name="SnippetsContainer" IsVisible="False"
+                      Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                      BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                      BorderThickness="1" CornerRadius="6" Padding="8">
                 <StackPanel Spacing="6">
                   <TextBlock Text="Detected Code Snippets:" FontWeight="SemiBold" FontSize="12" />
                   <ListBox x:Name="SnippetsList" MaxHeight="100" SelectionChanged="SnippetsList_SelectionChanged" FontSize="11" />
                   <WrapPanel Orientation="Horizontal">
-                    <Button Content="Inject Selected into Terminal Draft" Click="InjectSnippetToTerminal_Click" Margin="0,0,6,0" FontSize="11" />
-                    <Button Content="Copy Snippet to Clipboard" Click="CopySnippet_Click" FontSize="11" />
+                    <Button Click="InjectSnippetToTerminal_Click" Margin="0,0,6,0" FontSize="11">
+                      <StackPanel Orientation="Horizontal" Spacing="4">
+                        <PathIcon Data="{StaticResource IconTerminal}" Width="10" Height="10" />
+                        <TextBlock Text="Inject into Terminal Draft" />
+                      </StackPanel>
+                    </Button>
+                    <Button Click="CopySnippet_Click" FontSize="11">
+                      <StackPanel Orientation="Horizontal" Spacing="4">
+                        <PathIcon Data="{StaticResource IconCopy}" Width="10" Height="10" />
+                        <TextBlock Text="Copy Snippet" />
+                      </StackPanel>
+                    </Button>
                   </WrapPanel>
                 </StackPanel>
               </Border>
 
               <TextBox x:Name="W2ReviewOutput" IsReadOnly="True" AcceptsReturn="True"
-                       FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                       FontFamily="Consolas, Cascadia Code, monospace"
                        TextWrapping="Wrap" MinHeight="45" MaxHeight="90" FontSize="11"
                        AutomationProperties.AutomationId="Sessions.DraftReview"
                        AutomationProperties.Name="Human preview of local draft before staging" />
 
-              <TextBlock x:Name="W2Status" TextWrapping="Wrap" FontSize="11" Foreground="#555555"
+              <TextBlock x:Name="W2Status" TextWrapping="Wrap" FontSize="11"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                          Text="No review pending. The local draft is not executable or submittable."
                          AutomationProperties.AutomationId="Sessions.DraftStatus"
                          AutomationProperties.LiveSetting="Polite" />
 
               <Grid ColumnDefinitions="1*,1*" Margin="0,4,0,0">
                 <StackPanel Grid.Column="0" Margin="0,0,4,0">
-                  <TextBlock Text="Terminal Draft (Staged)" FontWeight="SemiBold" FontSize="11" Foreground="#1976D2" />
+                  <TextBlock Text="Terminal Draft (Staged)" FontWeight="SemiBold" FontSize="11" />
                   <TextBox x:Name="W2TerminalDraft" IsReadOnly="True" AcceptsReturn="True"
-                           FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                           FontFamily="Consolas, Cascadia Code, monospace"
                            TextWrapping="Wrap" MinHeight="40" MaxHeight="70" FontSize="11"
                            AutomationProperties.AutomationId="Sessions.TerminalDraft"
                            AutomationProperties.Name="Current session local inert terminal draft" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Margin="4,0,0,0">
-                  <TextBlock Text="Chat Draft (Staged)" FontWeight="SemiBold" FontSize="11" Foreground="#388E3C" />
+                  <TextBlock Text="Chat Draft (Staged)" FontWeight="SemiBold" FontSize="11" />
                   <TextBox x:Name="W2ChatDraft" IsReadOnly="True" AcceptsReturn="True"
-                           FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+                           FontFamily="Consolas, Cascadia Code, monospace"
                            TextWrapping="Wrap" MinHeight="40" MaxHeight="70" FontSize="11"
                            AutomationProperties.AutomationId="Sessions.ChatDraft"
                            AutomationProperties.Name="Current session local unsent chat draft" />
@@ -179,7 +236,9 @@
           </Border>
 
           <!-- Card 3: Metadata Preview & Export -->
-          <Border Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="8" Padding="12">
+          <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                  BorderThickness="1" CornerRadius="8" Padding="12">
             <StackPanel Spacing="8">
               <TextBlock Text="Metadata Export Preview" FontSize="15" FontWeight="SemiBold"
                          AutomationProperties.ControlTypeOverride="Header"
@@ -196,7 +255,7 @@
                         AutomationProperties.AutomationId="Sessions.ExportMarkdownFile" />
               </WrapPanel>
               <TextBox x:Name="W0Output" IsReadOnly="True" MinHeight="70" MaxHeight="120"
-                       FontFamily="Cascadia Code,Consolas,Courier New,monospace" FontSize="11"
+                       FontFamily="Consolas, Cascadia Code, monospace" FontSize="11"
                        AcceptsReturn="True" TextWrapping="Wrap"
                        AutomationProperties.AutomationId="Sessions.ExportPreview"
                        AutomationProperties.Name="Unsaved metadata preview" />
@@ -207,39 +266,57 @@
       </ScrollViewer>
 
       <!-- ================= RIGHT PANE: PAIRED TERMINAL HOST ================= -->
-      <Border Grid.Column="1" Background="#1E1E2E" BorderBrush="#313244" BorderThickness="1" CornerRadius="8" Padding="12" Margin="8,0,0,0">
+      <Border Grid.Column="1"
+              Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
+              BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+              BorderThickness="1" CornerRadius="8" Padding="12" Margin="8,0,0,0">
         <Grid RowDefinitions="Auto,*,Auto,Auto">
           
           <!-- Terminal Header -->
           <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
             <StackPanel Grid.Column="0" Spacing="2">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <TextBlock Text="Paired Session Terminal" FontSize="16" FontWeight="SemiBold" Foreground="#CDD6F4"
+                <TextBlock Text="Paired Session Terminal" FontSize="16" FontWeight="SemiBold"
                            AutomationProperties.AutomationId="Terminal.Heading" />
-                <Border x:Name="TerminalStatusPill" Background="#313244" CornerRadius="10" Padding="8,2">
-                  <TextBlock x:Name="TerminalStatusText" Text="🟢 Shell Ready" FontSize="11" Foreground="#A6ADC8" FontWeight="SemiBold"
+                <Border x:Name="TerminalStatusPill"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                        BorderThickness="1" CornerRadius="10" Padding="8,2">
+                  <TextBlock x:Name="TerminalStatusText" Text="Shell Ready" FontSize="11" FontWeight="SemiBold"
                              AutomationProperties.AutomationId="Terminal.StatusPill" />
                 </Border>
               </StackPanel>
-              <TextBlock x:Name="TerminalWorkingDirectory" Text="Working Dir: (Default)" FontSize="11" Foreground="#6C7086"
-                         FontFamily="Cascadia Code,Consolas,Courier New,monospace"
+              <TextBlock x:Name="TerminalWorkingDirectory" Text="Working Dir: (Default)" FontSize="11"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                         FontFamily="Consolas, Cascadia Code, monospace"
                          AutomationProperties.AutomationId="Terminal.WorkingDir" />
             </StackPanel>
 
             <WrapPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-              <Button x:Name="TerminalStopButton" Content="⏹ Stop" Click="TerminalStop_Click" IsEnabled="False"
-                      Background="#F38BA8" Foreground="#11111B" CornerRadius="4" Margin="0,0,4,0" FontSize="11"
-                      AutomationProperties.AutomationId="Terminal.Stop" />
-              <Button Content="🧹 Clear" Click="TerminalClear_Click"
-                      Background="#45475A" Foreground="#CDD6F4" CornerRadius="4" FontSize="11"
-                      AutomationProperties.AutomationId="Terminal.Clear" />
+              <Button x:Name="TerminalStopButton" Click="TerminalStop_Click" IsEnabled="False"
+                      Margin="0,0,4,0" FontSize="11"
+                      AutomationProperties.AutomationId="Terminal.Stop">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <PathIcon Data="{StaticResource IconStop}" Width="10" Height="10" />
+                  <TextBlock Text="Stop" />
+                </StackPanel>
+              </Button>
+              <Button Click="TerminalClear_Click" FontSize="11"
+                      AutomationProperties.AutomationId="Terminal.Clear">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <PathIcon Data="{StaticResource IconClear}" Width="10" Height="10" />
+                  <TextBlock Text="Clear" />
+                </StackPanel>
+              </Button>
             </WrapPanel>
           </Grid>
 
           <!-- Terminal Output Console -->
           <TextBox Grid.Row="1" x:Name="TerminalConsoleOutput" IsReadOnly="True" AcceptsReturn="True"
-                   Background="#181825" Foreground="#A6E3A1" BorderBrush="#313244" BorderThickness="1" CornerRadius="4"
-                   FontFamily="Cascadia Code,Consolas,Courier New,monospace" FontSize="12"
+                   Background="#1E1E1E" Foreground="#E0E0E0"
+                   BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                   BorderThickness="1" CornerRadius="4"
+                   FontFamily="Consolas, Cascadia Code, monospace" FontSize="12"
                    TextWrapping="Wrap" Margin="0,0,0,8"
                    AutomationProperties.AutomationId="Terminal.ConsoleOutput"
                    AutomationProperties.Name="Paired terminal live console scrollback" />
@@ -247,37 +324,60 @@
           <!-- Command Input Row -->
           <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
             <TextBox Grid.Column="0" x:Name="TerminalCommandInput"
-                     Background="#11111B" Foreground="#CDD6F4" BorderBrush="#45475A" BorderThickness="1" CornerRadius="4"
-                     FontFamily="Cascadia Code,Consolas,Courier New,monospace" FontSize="12"
+                     FontFamily="Consolas, Cascadia Code, monospace" FontSize="12"
                      PlaceholderText="Enter shell command (e.g. dir, git status, dotnet test)..."
                      KeyDown="TerminalCommandInput_KeyDown"
                      AutomationProperties.AutomationId="Terminal.CommandInput"
                      AutomationProperties.Name="Terminal command input line" />
-            <Button Grid.Column="1" x:Name="TerminalRunButton" Content="▶ Run" Click="TerminalRun_Click"
-                    Background="#89B4FA" Foreground="#11111B" FontWeight="Bold" CornerRadius="4" Margin="6,0,0,0"
-                    AutomationProperties.AutomationId="Terminal.Run" />
-            <Button Grid.Column="2" Content="⬇ Paste Draft" Click="TerminalPasteDraft_Click"
-                    Background="#585B70" Foreground="#CDD6F4" CornerRadius="4" Margin="6,0,0,0"
+            <Button Grid.Column="1" x:Name="TerminalRunButton" Click="TerminalRun_Click"
+                    FontWeight="SemiBold" Margin="6,0,0,0"
+                    AutomationProperties.AutomationId="Terminal.Run">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <PathIcon Data="{StaticResource IconPlay}" Width="10" Height="10" />
+                <TextBlock Text="Run" />
+              </StackPanel>
+            </Button>
+            <Button Grid.Column="2" Click="TerminalPasteDraft_Click"
+                    Margin="6,0,0,0"
                     AutomationProperties.AutomationId="Terminal.PasteDraft"
-                    AutomationProperties.HelpText="Paste staged terminal draft into the command input." />
+                    AutomationProperties.HelpText="Paste staged terminal draft into the command input.">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <PathIcon Data="{StaticResource IconTerminal}" Width="10" Height="10" />
+                <TextBlock Text="Paste Draft" />
+              </StackPanel>
+            </Button>
           </Grid>
 
           <!-- Selective Bi-Directional Transfer to ChatGPT Draft Bar -->
-          <Border Grid.Row="3" Background="#24273A" BorderBrush="#363A4F" BorderThickness="1" CornerRadius="6" Padding="8">
+          <Border Grid.Row="3"
+                  Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                  BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                  BorderThickness="1" CornerRadius="6" Padding="8">
             <StackPanel Spacing="6">
-              <TextBlock Text="Selective Output Transfer to Chat Draft" FontSize="12" FontWeight="SemiBold" Foreground="#89B4FA" />
+              <TextBlock Text="Selective Output Transfer to Chat Draft" FontSize="12" FontWeight="SemiBold" />
               <WrapPanel Orientation="Horizontal">
-                <Button Content="📋 Send Last Output to Chat Draft" Click="TerminalSendLastOutput_Click"
-                        Background="#313244" Foreground="#CDD6F4" CornerRadius="4" Margin="0,0,6,4" FontSize="11"
+                <Button Click="TerminalSendLastOutput_Click"
+                        Margin="0,0,6,4" FontSize="11"
                         AutomationProperties.AutomationId="Terminal.SendLastOutput"
-                        AutomationProperties.HelpText="Transfers clean, ANSI-stripped output of last command to draft input." />
-                <Button Content="⚠️ Send Error Trace to Chat Draft" Click="TerminalSendErrorTrace_Click"
-                        Background="#313244" Foreground="#FAB387" CornerRadius="4" Margin="0,0,6,4" FontSize="11"
+                        AutomationProperties.HelpText="Transfers clean, ANSI-stripped output of last command to draft input.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconSend}" Width="10" Height="10" />
+                    <TextBlock Text="Send Output to Chat Draft" />
+                  </StackPanel>
+                </Button>
+                <Button Click="TerminalSendErrorTrace_Click"
+                        Margin="0,0,6,4" FontSize="11"
                         AutomationProperties.AutomationId="Terminal.SendErrorTrace"
-                        AutomationProperties.HelpText="Extracts error stack traces and captures for ChatGPT triage." />
+                        AutomationProperties.HelpText="Extracts error stack traces and captures for ChatGPT triage.">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconWarning}" Width="10" Height="10" />
+                    <TextBlock Text="Send Error Trace to Chat Draft" />
+                  </StackPanel>
+                </Button>
               </WrapPanel>
               <TextBlock Text="Transfers strip terminal ANSI codes and apply secret redaction before staging."
-                         FontSize="10" Foreground="#A6ADC8" />
+                         FontSize="10"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
             </StackPanel>
           </Border>
 

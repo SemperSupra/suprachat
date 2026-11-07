@@ -417,6 +417,56 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ChatView_NavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
+    {
+        UpdatePlanIndicatorFromUri(ChatView.Source);
+    }
+
+    private bool _isExplicitWorkPlanSelected;
+
+    private void UpdatePlanIndicatorFromUri(Uri? uri)
+    {
+        if (uri is null) return;
+        var uriStr = uri.ToString().ToLowerInvariant();
+
+        // Check if the current ChatGPT web session is operating under a Work/Team workspace
+        var isWork = uriStr.Contains("workspace") ||
+                     uriStr.Contains("/team") ||
+                     uriStr.Contains("/biz") ||
+                     uriStr.Contains("account=work");
+
+        if (isWork)
+        {
+            UpdatePlanIndicator(isWorkPlan: true, "Work Workspace (Approval Required)");
+        }
+        else if (!_isExplicitWorkPlanSelected)
+        {
+            UpdatePlanIndicator(isWorkPlan: false, "Personal Subscription (Zero Work Spend)");
+        }
+    }
+
+    private void UpdatePlanIndicator(bool isWorkPlan, string label)
+    {
+        EntitlementPillText.Text = label;
+        if (this.FindResource(isWorkPlan ? "IconWarning" : "IconCheck") is Avalonia.Media.Geometry geom)
+        {
+            EntitlementIcon.Data = geom;
+        }
+    }
+
+    private void EntitlementPill_Click(object? sender, RoutedEventArgs e)
+    {
+        _isExplicitWorkPlanSelected = !_isExplicitWorkPlanSelected;
+        if (_isExplicitWorkPlanSelected)
+        {
+            UpdatePlanIndicator(isWorkPlan: true, "Work Plan (Operator Confirmed)");
+        }
+        else
+        {
+            UpdatePlanIndicator(isWorkPlan: false, "Personal Subscription (Zero Work Spend)");
+        }
+    }
+
     private void OpenExternal_Click(object? sender, RoutedEventArgs e)
     {
         Process.Start(new ProcessStartInfo("https://chatgpt.com/") { UseShellExecute = true });
