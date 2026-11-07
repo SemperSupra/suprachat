@@ -577,10 +577,15 @@ foreach (var marker in new[]
     "\"browser-snapshot\"",
     "\"browser-trace-snapshot\"",
     "\"browser-differential-evaluate\"",
+    "\"userscript-status\"",
+    "\"userscript-verify\"",
     "\"browser/status\"",
     "\"browser/snapshot\"",
     "\"browser/trace/snapshot\"",
     "\"browser/differential/evaluate\"",
+    "\"userscript/list\"",
+    "\"userscript/status\"",
+    "\"userscript/verify\"",
     "\"browser/start\"",
     "\"browser/navigate\"",
     "\"browser/read\"",
@@ -707,4 +712,5 @@ await SupraChat.ContractTests.BrowserCapabilityContractTests.RunAsync();
 SupraChat.ContractTests.BrowserExperienceModePolicyTests.Run();
 await SupraChat.ContractTests.BrowserTraceShapeOracleTests.RunAsync();
 await SupraChat.ContractTests.MultiVantageDifferentialTests.RunAsync();
+await SupraChat.ContractTests.ManagedUserscriptLifecycleTests.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");
