@@ -78,6 +78,19 @@ public static class CodexEgressFlowOracleTests
         Require(passiveObservation.Allowed, "Passive synthetic observation must be permitted");
         Require(passiveObservation.Status == "PERMITTED_SYNTHETIC_OBSERVATION", "Status must be PERMITTED_SYNTHETIC_OBSERVATION");
 
+        // 7. Binding-aware auth scope verification (codex-app-server vs direct REST API)
+        var codexScopedPayload = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("""{"scp":["openid","profile","email","offline_access","model.request"]}"""))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var codexScopedJwt = $"eyJhbGciOiJSUzI1NiJ9.{codexScopedPayload}.sig";
+        Require(!SubscriptionCredentialStore.HasDirectRestScopes(codexScopedJwt),
+            "Codex-only subscription JWT without direct REST scopes must not report HasDirectRestScopes=true");
+
+        var directRestPayload = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("""{"scp":["openid","chatgpt.tokens.use.direct","api.model.read"]}"""))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var directRestJwt = $"eyJhbGciOiJSUzI1NiJ9.{directRestPayload}.sig";
+        Require(SubscriptionCredentialStore.HasDirectRestScopes(directRestJwt),
+            "Direct REST scoped JWT must report HasDirectRestScopes=true");
+
         await Task.CompletedTask;
     }
 }

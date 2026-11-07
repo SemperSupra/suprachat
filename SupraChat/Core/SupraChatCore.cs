@@ -83,25 +83,29 @@ public sealed class SupraChatCore
     public async Task<ResolvedAuthCredential> GetUsableAuthAsync(
         bool requirePlanUsage = false,
         AuthPolicy? policy = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireDirectRestAccess = false)
     {
         return await AuthResolver.ResolveAsync(
             policy: policy,
             requirePlanUsage: requirePlanUsage,
             siwcClient: _siwc,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken,
+            requireDirectRestAccess: requireDirectRestAccess).ConfigureAwait(false);
     }
 
     public async Task<AuthResolutionReport> GetAuthEvaluationAsync(
         AuthPolicy? policy = null,
         bool requirePlanUsage = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireDirectRestAccess = false)
     {
         return await AuthResolver.EvaluateAsync(
             policy: policy,
             requirePlanUsage: requirePlanUsage,
             siwcClient: _siwc,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken,
+            requireDirectRestAccess: requireDirectRestAccess).ConfigureAwait(false);
     }
 
     public async Task<SiwcCredential> GetUsableCredentialAsync(
@@ -168,7 +172,8 @@ public sealed class SupraChatCore
         var auth = await GetUsableAuthAsync(
             requirePlanUsage: false,
             policy: policy,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken,
+            requireDirectRestAccess: true).ConfigureAwait(false);
         return await _responses.ListModelsAsync(auth.AccessToken).ConfigureAwait(false);
     }
 
