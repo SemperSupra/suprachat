@@ -1,7 +1,17 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using SupraChat.Core;
 
 namespace SupraChat;
@@ -10,10 +20,12 @@ public partial class WorkbenchView : UserControl
 {
     private readonly IWorkbenchSessionAuthority _authority;
     private readonly LedgerLocalDrafts _drafts;
+    private readonly SessionTerminalHost _terminalHost = new();
     private string? _w2ReviewId;
     private bool _refreshing;
     private string? _selectedId;
     private int _refreshGeneration;
+    private IReadOnlyList<CodeSnippet> _extractedSnippets = Array.Empty<CodeSnippet>();
 
     public WorkbenchView() : this(CreateDefaultAuthority())
     {
@@ -35,7 +47,35 @@ public partial class WorkbenchView : UserControl
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
         _drafts = new LedgerLocalDrafts(_authority);
         InitializeComponent();
+
+        _terminalHost.OutputReceived += OnTerminalOutputReceived;
+        _terminalHost.StateChanged += OnTerminalStateChanged;
+
         _ = RefreshAsync();
+    }
+
+    private void OnTerminalOutputReceived(string line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (line == "\x1Bc")
+            {
+                TerminalConsoleOutput.Text = string.Empty;
+                return;
+            }
+            TerminalConsoleOutput.Text += line + Environment.NewLine;
+            TerminalConsoleOutput.CaretIndex = TerminalConsoleOutput.Text?.Length ?? 0;
+        });
+    }
+
+    private void OnTerminalStateChanged(bool isRunning)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            TerminalRunButton.IsEnabled = !isRunning;
+            TerminalStopButton.IsEnabled = isRunning;
+            TerminalStatusText.Text = isRunning ? "Running..." : "Shell Ready";
+        });
     }
 
     // A remote owner may reply asynchronously. Never block the Avalonia UI thread
@@ -86,8 +126,22 @@ public partial class WorkbenchView : UserControl
         try
         {
             W0Sessions.ItemsSource = receipt.Snapshot.Sessions;
-            W0Sessions.SelectedItem = receipt.Snapshot.Sessions
-                .FirstOrDefault(s => s.Id == _selectedId);
+            var active = receipt.Snapshot.Sessions.FirstOrDefault(s => s.Id == _selectedId);
+            W0Sessions.SelectedItem = active;
+
+            // Bind terminal working directory to active session workspace if available
+            if (active is not null && !string.IsNullOrWhiteSpace(active.WorkspaceKey))
+            {
+                _terminalHost.WorkingDirectory = active.WorkspaceKey;
+                TerminalWorkingDirectory.Text = "Working Dir: " + active.WorkspaceKey;
+                WorkbenchPairStatusText.Text = $"Session: {active.Title}";
+            }
+            else
+            {
+                _terminalHost.WorkingDirectory = Directory.GetCurrentDirectory();
+                TerminalWorkingDirectory.Text = "Working Dir: " + Directory.GetCurrentDirectory();
+                WorkbenchPairStatusText.Text = "Local Execution Bound";
+            }
         }
         finally { _refreshing = false; }
 
@@ -330,12 +384,83 @@ public partial class WorkbenchView : UserControl
         }
     }
 
+    private void W2DraftInput_TextChanged(object? sender, TextChangedEventArgs e)
+    {
+        var text = W2DraftInput.Text ?? string.Empty;
+        var hasSensitive = TerminalTransferBridge.ContainsSensitiveTokens(text);
+        DraftSafetyText.Text = hasSensitive ? "Secret / Token Detected!" : "Secret Scan Clean";
+        if (this.FindResource(hasSensitive ? "IconWarning" : "IconShield") is Avalonia.Media.Geometry geom)
+        {
+            DraftSafetyIcon.Data = geom;
+        }
+    }
+
+    private void ExtractSnippets_Click(object? sender, RoutedEventArgs e)
+    {
+        var text = W2DraftInput.Text ?? string.Empty;
+        _extractedSnippets = TerminalTransferBridge.ExtractCodeSnippets(text);
+        if (_extractedSnippets.Count == 0)
+        {
+            SnippetsContainer.IsVisible = false;
+            W2Status.Text = "No markdown code snippets found (use ```lang ... ``` blocks).";
+            return;
+        }
+
+        SnippetsList.ItemsSource = _extractedSnippets.Select((s, i) =>
+            $"Snippet #{i + 1} [{s.Language}]: {s.Lines.Count} line(s) - \"{s.Lines.FirstOrDefault() ?? ""}\"").ToList();
+        SnippetsContainer.IsVisible = true;
+        W2Status.Text = $"Extracted {_extractedSnippets.Count} code snippet block(s). Select to inject or copy.";
+    }
+
+    private void SnippetsList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Selection updated
+    }
+
+    private void InjectSnippetToTerminal_Click(object? sender, RoutedEventArgs e)
+    {
+        var idx = SnippetsList.SelectedIndex;
+        if (idx < 0 || idx >= _extractedSnippets.Count)
+        {
+            W2Status.Text = "Select a code snippet first.";
+            return;
+        }
+        var snippet = _extractedSnippets[idx];
+        TerminalCommandInput.Text = string.Join(" ", snippet.Lines.Select(l => l.Trim()));
+        W2Status.Text = $"Injected Snippet #{idx + 1} into terminal command line.";
+    }
+
+    private async void CopySnippet_Click(object? sender, RoutedEventArgs e)
+    {
+        var idx = SnippetsList.SelectedIndex;
+        if (idx < 0 || idx >= _extractedSnippets.Count)
+        {
+            W2Status.Text = "Select a code snippet first.";
+            return;
+        }
+        var snippet = _extractedSnippets[idx];
+        var top = TopLevel.GetTopLevel(this);
+        if (top?.Clipboard is not null)
+        {
+            await top.Clipboard.SetTextAsync(snippet.Content);
+            W2Status.Text = $"Copied Snippet #{idx + 1} to clipboard.";
+        }
+    }
+
     private async Task W2PrepareAsync(string direction)
     {
         W2ClearReview();
         try
         {
-            var review = await _drafts.PrepareAsync(direction, W2DraftInput.Text ?? string.Empty);
+            var rawText = W2DraftInput.Text ?? string.Empty;
+            // Clean ANSI escape codes and redact sensitive tokens before staging
+            var sanitized = TerminalTransferBridge.StripAnsi(rawText);
+            if (TerminalTransferBridge.ContainsSensitiveTokens(sanitized))
+            {
+                sanitized = TerminalTransferBridge.RedactSensitiveTokens(sanitized);
+            }
+
+            var review = await _drafts.PrepareAsync(direction, sanitized);
             _w2ReviewId = review.ReviewId;
             W2ReviewOutput.Text = review.PreviewText;
             W2Status.Text = "Review valid for two minutes, one use, selected session/version only. " +
@@ -364,7 +489,7 @@ public partial class WorkbenchView : UserControl
         }
         try
         {
-            var receipt = await _drafts.StageReviewedAsync(id, W2DraftInput.Text ?? string.Empty);
+            var receipt = await _drafts.StageReviewedAsync(id, W2ReviewOutput.Text ?? string.Empty);
             W2DraftInput.Text = string.Empty;
             W2ReviewOutput.Text = string.Empty;
             RefreshDraftFields();
@@ -399,5 +524,111 @@ public partial class WorkbenchView : UserControl
         W2DraftInput.Text = string.Empty;
         RefreshDraftFields();
         W2Status.Text = "Local session draft buffers discarded; no provider or terminal effects.";
+    }
+
+    // ================= PAIRED TERMINAL ACTIONS =================
+
+    private async void TerminalRun_Click(object? sender, RoutedEventArgs e)
+    {
+        await ExecuteTerminalCommandAsync();
+    }
+
+    private async void TerminalCommandInput_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            await ExecuteTerminalCommandAsync();
+        }
+    }
+
+    private async Task ExecuteTerminalCommandAsync()
+    {
+        var cmd = TerminalCommandInput.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(cmd)) return;
+
+        TerminalCommandInput.Text = string.Empty;
+        try
+        {
+            var exitCode = await _terminalHost.ExecuteCommandAsync(cmd);
+            TerminalStatusText.Text = $"Exit: {exitCode}";
+        }
+        catch (Exception ex)
+        {
+            TerminalStatusText.Text = "Error: " + ex.Message;
+        }
+    }
+
+    private void TerminalStop_Click(object? sender, RoutedEventArgs e)
+    {
+        _terminalHost.Stop();
+        TerminalStatusText.Text = "Stopped by operator";
+    }
+
+    private void TerminalClear_Click(object? sender, RoutedEventArgs e)
+    {
+        _terminalHost.ClearScrollback();
+    }
+
+    private void TerminalPasteDraft_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(W2TerminalDraft.Text))
+        {
+            TerminalCommandInput.Text = W2TerminalDraft.Text;
+            TerminalStatusText.Text = "Pasted staged terminal draft into command line.";
+        }
+        else
+        {
+            TerminalStatusText.Text = "No staged terminal draft to paste.";
+        }
+    }
+
+    private void TerminalSendLastOutput_Click(object? sender, RoutedEventArgs e)
+    {
+        var last = _terminalHost.LastOutput;
+        if (string.IsNullOrWhiteSpace(last))
+        {
+            W2Status.Text = "No command output to transfer.";
+            return;
+        }
+
+        var clean = TerminalTransferBridge.ExtractCleanLastCommandOutput(last);
+        clean = TerminalTransferBridge.StripAnsi(clean);
+        if (TerminalTransferBridge.ContainsSensitiveTokens(clean))
+        {
+            clean = TerminalTransferBridge.RedactSensitiveTokens(clean);
+        }
+
+        var formatted = TerminalTransferBridge.FormatTerminalOutputForChat(_terminalHost.LastCommand ?? "shell", clean);
+        W2DraftInput.Text = formatted;
+        W2Status.Text = "Transferred clean last command output to draft input for chat review.";
+    }
+
+    private void TerminalSendErrorTrace_Click(object? sender, RoutedEventArgs e)
+    {
+        var last = _terminalHost.LastOutput;
+        if (string.IsNullOrWhiteSpace(last))
+        {
+            W2Status.Text = "No command output to extract error trace from.";
+            return;
+        }
+
+        var errorTrace = TerminalTransferBridge.ExtractErrorTrace(last);
+        if (string.IsNullOrWhiteSpace(errorTrace))
+        {
+            W2Status.Text = "No error trace patterns detected in last output.";
+            return;
+        }
+
+        errorTrace = TerminalTransferBridge.StripAnsi(errorTrace);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Error trace from command `{_terminalHost.LastCommand}`:");
+        sb.AppendLine("```");
+        sb.AppendLine(errorTrace);
+        sb.AppendLine("```");
+        sb.AppendLine("Please diagnose this error trace and provide a fix.");
+
+        W2DraftInput.Text = sb.ToString();
+        W2Status.Text = "Extracted error trace and formatted for ChatGPT debugging draft.";
     }
 }
