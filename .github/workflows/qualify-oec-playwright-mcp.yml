@@ -1,0 +1,50 @@
+name: Qualify Playwright MCP Public UI Observer (synthetic and signed-out only)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-playwright-mcp/**'
+      - '.github/workflows/qualify-oec-playwright-mcp.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-playwright-mcp-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  playwright-mcp-public-fixture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/oec-playwright-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned upstream MCP packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          node -p 'require("./node_modules/@playwright/mcp/package.json").version'
+      - name: Install isolated Chromium browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/playwright install chromium
+      - name: Interactively exercise Playwright MCP with source-owned synthetic UI and public signed-out ChatGPT
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ./run-mcp-probe.mjs
+      - name: Upload only synthetic screenshot and sanitized verification metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-playwright-mcp-public-fixture
+          path: |
+            tools/oec-playwright-mcp/artifacts/receipt.json
+            tools/oec-playwright-mcp/artifacts/synthetic-interface.png
+          if-no-files-found: warn
+          retention-days: 7
