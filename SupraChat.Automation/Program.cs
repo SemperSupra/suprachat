@@ -187,7 +187,7 @@ internal static class Program
             new { name = "browser-trace-snapshot", description = "Read synthetic-only consented browser trace shape snapshot with HMAC aliases and capture gaps.", syntax = "browser-trace-snapshot [--origin <url>] [--limit <num>]" },
             new { name = "browser-differential-evaluate", description = "Evaluate multi-vantage two-session differential, security invariant, and accessibility acceptance.", syntax = "browser-differential-evaluate [--session-a <id>] [--session-b <id>] [--intent-a <CHAT|WORK>] [--intent-b <CHAT|WORK>] [--lease-b]" },
             new { name = "userscript-status", description = "Read managed userscript registry and promo UI status.", syntax = "userscript-status [--id <id>]" },
-            new { name = "userscript-verify", description = "Cryptographically verify and register candidate userscript against its SHA-256 hash.", syntax = "userscript-verify --id <id> [--script <text>]" },
+            new { name = "userscript-verify", description = "Fail-closed registration until independently qualified source and approval are present.", syntax = "userscript-verify --id <id> [--script <text>]" },
             new { name = "codex-egress-status", description = "Evaluate Codex CLI/OTEL posture, host/WSL/Hyper-V egress flow correlation, and Playwright sidecar decoupling.", syntax = "codex-egress-status [--seed <session-seed>]" },
             new { name = "first-party-hil-evaluate", description = "Evaluate first-party Chat-only HIL readback and physical/auth fallback (P8: T13, T16).", syntax = "first-party-hil-evaluate [--seed <session-seed>] [--intent <CHAT|WORK>] [--consented]" },
             new { name = "parity-drift-evaluate", description = "Evaluate cross-platform capability parity, provenance, and browser/locale drift revalidation (P9: T16, T17, T18).", syntax = "parity-drift-evaluate [--engine <version>] [--locale <lang>] [--ab-perturbation]" },
@@ -672,18 +672,9 @@ internal static class Program
 
     private static object UserscriptVerify(string[] args)
     {
-        var id = Option(args, "--id") ?? "chatgpt-lock-chat-mode";
-        var script = Option(args, "--script") ?? ManagedUserscriptManager.CanonicalChatLockScript;
-        var manifest = ManagedUserscriptManager.Default.GetManifest(id) ?? new UserscriptManifest(
-            Id: id,
-            Name: id,
-            Version: "1.0.0",
-            Origin: ManagedUserscriptManager.CanonicalOrigin,
-            RunAt: "document-start",
-            ContentHash: ManagedUserscriptManager.ComputeSha256(script),
-            Grants: new[] { "none" });
-
-        return ManagedUserscriptManager.Default.VerifyAndRegister(manifest, script);
+        _ = args;
+        // No source/capability promotion until independent #97 admission.
+        return new UserscriptVerificationResult(false, "REFUSED_SOURCE_AUTHORITY_MISSING");
     }
 
     private static object RpcUserscriptStatus(JsonElement? parameters)
@@ -703,19 +694,9 @@ internal static class Program
 
     private static object RpcUserscriptVerify(JsonElement? parameters)
     {
-        var p = RequireObject(parameters);
-        var id = RequiredProperty(p, "id");
-        var script = p.TryGetProperty("script", out var s) ? s.GetString() ?? "" : ManagedUserscriptManager.CanonicalChatLockScript;
-        var manifest = ManagedUserscriptManager.Default.GetManifest(id) ?? new UserscriptManifest(
-            Id: id,
-            Name: id,
-            Version: "1.0.0",
-            Origin: ManagedUserscriptManager.CanonicalOrigin,
-            RunAt: "document-start",
-            ContentHash: ManagedUserscriptManager.ComputeSha256(script),
-            Grants: new[] { "none" });
-
-        return ManagedUserscriptManager.Default.VerifyAndRegister(manifest, script);
+        _ = RequireObject(parameters);
+        // An asserted SHA of caller-supplied script text is not source qualification.
+        return new UserscriptVerificationResult(false, "REFUSED_SOURCE_AUTHORITY_MISSING");
     }
 
     private static object CodexEgressStatus(string[] args)
