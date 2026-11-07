@@ -1,0 +1,29 @@
+name: Qualify OEC OpenTelemetry Collector (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-otel/**'
+      - '.github/workflows/qualify-oec-otel.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-otel-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  collector:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run disposable official collector and synthetic OTLP privacy oracles
+        shell: bash
+        run: bash tools/oec-otel/qualify.sh
+      - name: Upload sanitized metadata-only receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-otel-sanitized-receipt
+          path: tools/oec-otel/evidence/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
