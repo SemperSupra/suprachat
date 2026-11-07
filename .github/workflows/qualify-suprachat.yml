@@ -1345,6 +1345,44 @@ jobs:
                       Write-Host ('UIA diagnostic traversal failed: ' + $_.Exception.GetType().Name)
                     }
                   }
+                  # Read-only terminal-failure differential; never emit names,
+                  # document contents, arbitrary IDs or page/profile state.
+                  # RawView vs ControlView immediate children distinguish a
+                  # missing/late Avalonia provider from projection filtering.
+                  if ($window) {
+                    foreach ($view in @('control', 'raw')) {
+                      $sampled = 0
+                      $sameProcess = 0
+                      $chromeFramework = 0
+                      $blankId = 0
+                      $stale = 0
+                      try {
+                        if ($view -eq 'control') {
+                          $sampleWalker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                        } else {
+                          $sampleWalker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+                        }
+                        $sample = $sampleWalker.GetFirstChild($window)
+                        while ($sample -and $sampled -lt 64) {
+                          $sampled++
+                          try {
+                            if ($sample.Current.ProcessId -eq $p.Id) { $sameProcess++ }
+                            if ($sample.Current.FrameworkId -eq 'Chrome') { $chromeFramework++ }
+                            if ([string]::IsNullOrWhiteSpace($sample.Current.AutomationId)) { $blankId++ }
+                          } catch [System.Windows.Automation.ElementNotAvailableException] {
+                            $stale++
+                          }
+                          $sample = $sampleWalker.GetNextSibling($sample)
+                        }
+                        $capped = [bool]$sample
+                        Write-Host ("UIA child-boundary view={0} sampled={1} sameProcess={2} chromeFramework={3} blankId={4} stale={5} capped={6}" -f
+                          $view, $sampled, $sameProcess, $chromeFramework, $blankId, $stale, $capped)
+                      } catch {
+                        Write-Host ('UIA child-boundary probe interrupted view=' + $view +
+                          ' exceptionType=' + $_.Exception.GetType().Name)
+                      }
+                    }
+                  }
                   Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
