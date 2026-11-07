@@ -699,4 +699,5 @@ await SharedSessionAdmissionChecks.RunAsync();
 await MetadataConsentChecks.RunAsync();
 ConsentCapacityChecks.Run();
 await NativeConsentChecks.RunAsync();
+await SupraChat.ContractTests.BrowserCapabilityContractTests.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");
