@@ -32,7 +32,7 @@ public static class BrowserCapabilityContract
         version = "1.0.0",
         audiences = new[] { "human", "automation", "agent" },
         invariants = Invariants,
-        default_sensors = new[] { "page-metadata", "aria-snapshot", "network-metadata" },
+        default_sensors = new[] { "page-metadata", "aria-snapshot", "network-metadata", "experience-mode-detector" },
         default_actuators = new[] { "page-navigation", "dom-interaction" }
     };
 }
@@ -203,9 +203,45 @@ public sealed class BrowserCapabilityRegistry
         registry.RegisterSensor(new PageMetadataSensor());
         registry.RegisterSensor(new AriaSnapshotSensor());
         registry.RegisterSensor(new NetworkMetadataSensor());
+        registry.RegisterSensor(new BrowserExperienceModeSensor());
         registry.RegisterActuator(new PageNavigationActuator());
         registry.RegisterActuator(new DomInteractionActuator());
         return registry;
+    }
+}
+
+public sealed class BrowserExperienceModeSensor : IBrowserSensor
+{
+    public BrowserSensorDescriptor Descriptor { get; } = new(
+        "experience-mode-detector",
+        OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux",
+        "BrowserParity/ModeDetector",
+        BrowserExperienceModePolicy.Origin,
+        "EXPERIENCE_MODE_POLICY",
+        "OBSERVER_READ_ONLY",
+        "SYNTHETIC_MODE_STATE",
+        true);
+
+    public ValueTask<BrowserSensorObservation> ObserveAsync(CancellationToken cancellationToken = default)
+    {
+        var data = new Dictionary<string, object?>
+        {
+            ["schema"] = BrowserExperienceModePolicy.Schema,
+            ["origin"] = BrowserExperienceModePolicy.Origin,
+            ["supported_locales"] = new[] { "en", "de", "th" },
+            ["default_mode"] = "CHAT",
+            ["work_lease_required"] = true,
+            ["evidence"] = "SYNTHETIC_ONLY",
+            ["adapter"] = "NOT_CONNECTED"
+        };
+
+        return ValueTask.FromResult(new BrowserSensorObservation(
+            BrowserCapabilityContract.ObservationSchema,
+            Descriptor.SensorId,
+            DateTimeOffset.UtcNow,
+            "COMPLETE",
+            data,
+            0));
     }
 }
 

@@ -23,10 +23,11 @@ public static class BrowserCapabilityContractTests
         var sensors = registry.GetSensors();
         var actuators = registry.GetActuators();
 
-        Require(sensors.Count >= 3, "Expected at least 3 default sensors");
+        Require(sensors.Count >= 4, "Expected at least 4 default sensors");
         Require(sensors.Any(s => s.SensorId == "page-metadata"), "page-metadata sensor missing");
         Require(sensors.Any(s => s.SensorId == "aria-snapshot"), "aria-snapshot sensor missing");
         Require(sensors.Any(s => s.SensorId == "network-metadata"), "network-metadata sensor missing");
+        Require(sensors.Any(s => s.SensorId == "experience-mode-detector"), "experience-mode-detector sensor missing");
 
         Require(actuators.Count >= 2, "Expected at least 2 default actuators");
         Require(actuators.Any(a => a.ActuatorId == "page-navigation"), "page-navigation actuator missing");
