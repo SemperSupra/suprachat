@@ -1,0 +1,58 @@
+name: Qualify OEC Observable-Surface Contract (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-observation-contract/**'
+      - '.github/workflows/qualify-oec-observation-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-observation-contract-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  strict-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run privacy and provenance negative tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m unittest discover -s tools/oec-observation-contract -p 'test_*.py' -v
+      - name: Emit only fixed-schema synthetic test receipt
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          out = pathlib.Path("tools/oec-observation-contract/evidence")
+          out.mkdir(exist_ok=True)
+          item = {
+              "schema": "oec-observation-contract-ci/v1",
+              "evidence_class": "PUBLIC_SYNTHETIC_CONTRACT_TEST",
+              "source_sha": os.environ["SOURCE_HEAD_SHA"],
+              "checkout_sha": os.environ["GITHUB_SHA"],
+              "runner_os": os.environ["RUNNER_OS"],
+              "privacy_negatives": "PASS",
+              "authenticated_local_run": False,
+              "openai_tunnel_connected": False,
+              "contains_user_content_or_credentials": False
+          }
+          (out / "receipt.json").write_text(json.dumps(item, sort_keys=True, indent=2) + "\n")
+          PY
+      - name: Upload redacted verification receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-contract-sanitized-${{ runner.os }}
+          path: tools/oec-observation-contract/evidence/receipt.json
+          retention-days: 7

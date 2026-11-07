@@ -1,0 +1,109 @@
+name: Qualify OEC Local Structural UIA Probe (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-observation-contract/**'
+      - '.github/workflows/qualify-oec-local-uia.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-local-uia-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-structure:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate PowerShell 5.1 syntax and admission negatives
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=Join-Path $PWD 'tools/oec-observation-contract/Inspect-SupraChatStructure.ps1'
+          $tokens=$null; $errors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if (@($errors).Count -ne 0){throw 'PS51_PARSE_FAILED'}
+          $missing= & powershell.exe -NoProfile -NonInteractive -File $script -ProcessId $PID -Samples 1 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $missing -notmatch 'EXPLICIT_OPERATOR_AUTH_ATTESTATION_REQUIRED') {
+            throw 'OPERATOR_ATTESTATION_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          $wrong= & powershell.exe -NoProfile -NonInteractive -File $script -ProcessId $PID -SyntheticFixture -Samples 1 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $wrong -notmatch 'REFUSED_NON_SUPRACHAT_PROCESS') {
+            throw 'NON_TARGET_PROCESS_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          Write-Host 'QUALIFIED_LOCAL_UIA_PS51_ADMISSION_NEGATIVES'
+          # The offline local-run packet never starts capture, a tunnel or an MCP listener.
+          $trial=Join-Path $PWD 'tools/oec-observation-contract/Invoke-LocalObservationTrial.ps1'
+          $tokens=$null; $parseErrors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseFile($trial,[ref]$tokens,[ref]$parseErrors)
+          if (@($parseErrors).Count -ne 0){throw 'LOCAL_TRIAL_PS51_PARSE_FAILED'}
+          $raw= & powershell.exe -NoProfile -NonInteractive -File $trial -SelfTest
+          if ($LASTEXITCODE -ne 0){throw 'LOCAL_TRIAL_PRECHECK_FAILED'}
+          $receipt=($raw | Out-String).Trim() | ConvertFrom-Json
+          if ($receipt.schema -ne 'oec-local-trial-preflight/v1' -or
+              $receipt.passed -ne $true -or $receipt.authenticated_state -ne 'NOT_ASSESSED' -or
+              $receipt.tunnel_connected -ne $false -or
+              $receipt.browser_launched -ne $false){throw 'LOCAL_TRIAL_PRECHECK_INVALID'}
+          $noReview= & powershell.exe -NoProfile -NonInteractive -File $trial 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $noReview -notmatch 'EXPLICIT_OPERATOR_REVIEW_REQUIRED'){
+            throw 'LOCAL_TRIAL_CONSENT_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          $unsafeSelfTest= & powershell.exe -NoProfile -NonInteractive -File $trial -SelfTest -IReviewedFirstPartyCapture 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $unsafeSelfTest -notmatch 'SELFTEST_NO_LIVE_ARGUMENTS_PERMITTED'){
+            throw 'LOCAL_TRIAL_MODE_CROSSOVER_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          $relative= & pwsh -NoProfile -NonInteractive -File $trial -IReviewedFirstPartyCapture -SummaryPath 'C:drive-relative.json' -AssemblyPath 'C:SupraChat.dll' -PrivateOutputDirectory 'C:relative-output' 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0 -or $relative -notmatch 'ABSOLUTE_PRIVATE_PATHS_REQUIRED'){
+            throw 'DRIVE_RELATIVE_PATH_ADMISSION_NEGATIVE_FAILED'
+          }
+          $global:LASTEXITCODE=0
+          Write-Host 'QUALIFIED_OFFLINE_LOCAL_TRIAL_SELFTEST_AND_CONSENT_REFUSALS'
+      - name: Build unmodified SupraChat synthetic test target
+        shell: pwsh
+        run: |
+          dotnet publish SupraChat/SupraChat.csproj -c Release -r win-x64 --self-contained false -o out/oec-observed-app
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path 'out/oec-observed-app/SupraChat.exe')) {
+            throw 'NATIVE_TARGET_BUILD_FAILED'
+          }
+      - name: Probe actual Windows UIA and validate privacy schema
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:SUPRACHAT_INSTALL_TRACE_ID=[Guid]::NewGuid().ToString('N')
+          $env:SUPRACHAT_INSTALL_SESSION_ID=[Guid]::NewGuid().ToString('N')
+          $exe=Join-Path $PWD 'out/oec-observed-app/SupraChat.exe'
+          $p=Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 1
+            if ($p.HasExited){throw 'TARGET_EXITED'}
+            $raw= & powershell.exe -NoProfile -NonInteractive -File 'tools/oec-observation-contract/Inspect-SupraChatStructure.ps1' -ProcessId $p.Id -SyntheticFixture -Samples 6 -IntervalMs 1000
+            if ($LASTEXITCODE -ne 0){throw 'NATIVE_UIA_PROBE_FAILED'}
+            New-Item -ItemType Directory -Force 'tools/oec-observation-contract/evidence' | Out-Null
+            $path='tools/oec-observation-contract/evidence/native-receipt.json'
+            $doc=($raw | Out-String).Trim()
+            [System.IO.File]::WriteAllText((Join-Path $PWD $path), $doc)
+            python -c "import pathlib,sys;sys.path.insert(0,'tools/oec-observation-contract');from contract import validate;x=validate(pathlib.Path(sys.argv[1]).read_bytes());assert x['measurements']['root_id_valid'] and x['measurements']['uia_descendant_count']>0;assert x['authentication_claim']=='NOT_ASSESSED'" $path
+            if ($LASTEXITCODE -ne 0){throw 'NATIVE_UIA_CONTRACT_FAILED'}
+            Write-Host 'QUALIFIED_NATIVE_UIA_SYNTHETIC_STRUCTURE_AND_PRIVACY_CONTRACT'
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Publish only bounded numeric and boolean receipt
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oec-native-structural-receipt
+          path: tools/oec-observation-contract/evidence/native-receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
