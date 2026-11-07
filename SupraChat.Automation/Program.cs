@@ -85,6 +85,10 @@ internal static class Program
                 "screen-status" => WriteSuccess(DesktopScreenCapture.Describe()),
                 "screen-capture" => WriteSuccess(await ScreenCaptureAsync(args[1..])),
                 "browser-status" => WriteSuccess(BrowserStatus()),
+                "browser-sensors" => WriteSuccess(BrowserCapabilityRegistry.Default.GetSensors()),
+                "browser-actuators" => WriteSuccess(BrowserCapabilityRegistry.Default.GetActuators()),
+                "browser-sensor-observe" => WriteSuccess(await BrowserSensorObserveAsync(args[1..])),
+                "browser-actuator-execute" => WriteSuccess(await BrowserActuatorExecuteAsync(args[1..])),
                 "browser-snapshot" => WriteSuccess(await BrowserSnapshotAsync(args[1..])),
                 "browser-click" => WriteSuccess(await BrowserClickConfirmedAsync(args[1..])),
                 "browser-fill" => WriteSuccess(await BrowserFillConfirmedAsync(args[1..])),
@@ -167,6 +171,10 @@ internal static class Program
             new { name = "screen-status", description = "Read the current platform screen-capture adapter and permission boundary." },
             new { name = "screen-capture", description = "Explicitly capture the current desktop to a PNG file.", syntax = "screen-capture --output <path.png>" },
             new { name = "browser-status", description = "Read bundled clean-room browser runtime status." },
+            new { name = "browser-sensors", description = "List registered typed browser sensors and capability contracts." },
+            new { name = "browser-actuators", description = "List registered typed browser actuators and authority requirements." },
+            new { name = "browser-sensor-observe", description = "Query observation data from a registered browser sensor.", syntax = "browser-sensor-observe [--id <sensor-id>]" },
+            new { name = "browser-actuator-execute", description = "Execute actuation through an authorized lease gate.", syntax = "browser-actuator-execute --id <actuator-id> --lease <lease-id> [--url <url>] [--selector <sel>] [--action <act>]" },
             new { name = "browser-snapshot", description = "Navigate and return an ARIA semantic snapshot.", syntax = "browser-snapshot --url <https-url>" },
             new { name = "browser-click", description = "Explicitly click one element by ARIA role and accessible name.", syntax = "browser-click --confirm --url <https-url> --role <role> --name <accessible-name>" },
             new { name = "browser-fill", description = "Explicitly fill one field by accessible label.", syntax = "browser-fill --confirm --url <https-url> --label <label> --value <text>" },
@@ -263,6 +271,10 @@ internal static class Program
             "screen/status",
             "screen/capture",
             "browser/status",
+            "browser/sensors/list",
+            "browser/actuators/list",
+            "browser/sensor/observe",
+            "browser/actuator/execute",
             "browser/snapshot",
             "browser/start",
             "browser/navigate",
@@ -365,6 +377,81 @@ internal static class Program
     {
         RequireExplicitConfirmation(args, "Browser fill");
         return await BrowserFillOnceAsync(args);
+    }
+
+    private static async Task<object> BrowserSensorObserveAsync(string[] args)
+    {
+        var id = Option(args, "--id") ?? "page-metadata";
+        return await BrowserCapabilityRegistry.Default.ObserveSensorAsync(id);
+    }
+
+    private static async Task<object> BrowserActuatorExecuteAsync(string[] args)
+    {
+        var id = Option(args, "--id");
+        if (string.IsNullOrWhiteSpace(id))
+            throw new MachineException(2, "INVALID_PARAMS", "browser-actuator-execute requires --id <actuator-id>.");
+
+        var lease = Option(args, "--lease");
+        var url = Option(args, "--url");
+        var selector = Option(args, "--selector");
+        var action = Option(args, "--action");
+
+        var parameters = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(url)) parameters["url"] = url;
+        if (!string.IsNullOrWhiteSpace(selector)) parameters["target_selector"] = selector;
+        if (!string.IsNullOrWhiteSpace(action)) parameters["action"] = action;
+
+        var request = new BrowserActuationRequest(
+            RequestId: Guid.NewGuid().ToString("N"),
+            ActuatorId: id,
+            LeaseId: lease,
+            RequestedAt: DateTimeOffset.UtcNow,
+            Parameters: parameters);
+
+        return await BrowserCapabilityRegistry.Default.ExecuteActuatorAsync(request);
+    }
+
+    private static async Task<object> RpcBrowserSensorObserveAsync(JsonElement? parameters)
+    {
+        var id = "page-metadata";
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object && parameters.Value.TryGetProperty("id", out var idProp))
+        {
+            id = idProp.GetString() ?? "page-metadata";
+        }
+        return await BrowserCapabilityRegistry.Default.ObserveSensorAsync(id);
+    }
+
+    private static async Task<object> RpcBrowserActuatorExecuteAsync(JsonElement? parameters)
+    {
+        var p = RequireObject(parameters);
+        var id = RequiredProperty(p, "id");
+        var leaseId = p.TryGetProperty("lease_id", out var l) ? l.GetString() : null;
+        var reqId = p.TryGetProperty("request_id", out var r) ? r.GetString() ?? Guid.NewGuid().ToString("N") : Guid.NewGuid().ToString("N");
+
+        var dict = new Dictionary<string, object?>();
+        if (p.TryGetProperty("parameters", out var paramObj) && paramObj.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in paramObj.EnumerateObject())
+            {
+                dict[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.GetDouble(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => prop.Value.ToString()
+                };
+            }
+        }
+
+        var request = new BrowserActuationRequest(
+            RequestId: reqId,
+            ActuatorId: id,
+            LeaseId: leaseId,
+            RequestedAt: DateTimeOffset.UtcNow,
+            Parameters: dict);
+
+        return await BrowserCapabilityRegistry.Default.ExecuteActuatorAsync(request);
     }
 
     private static async Task<object> AccessibilityPreferencesAsync()
@@ -1132,6 +1219,10 @@ internal static class Program
             "screen/status" => DesktopScreenCapture.Describe(),
             "screen/capture" => await RpcScreenCaptureAsync(parameters),
             "browser/status" => BrowserStatus(),
+            "browser/sensors/list" => BrowserCapabilityRegistry.Default.GetSensors(),
+            "browser/actuators/list" => BrowserCapabilityRegistry.Default.GetActuators(),
+            "browser/sensor/observe" => await RpcBrowserSensorObserveAsync(parameters),
+            "browser/actuator/execute" => await RpcBrowserActuatorExecuteAsync(parameters),
             "browser/snapshot" => await RpcBrowserSnapshotAsync(parameters),
             "browser/start" => await RpcBrowserStartAsync(),
             "browser/navigate" => await RpcBrowserNavigateAsync(parameters),
