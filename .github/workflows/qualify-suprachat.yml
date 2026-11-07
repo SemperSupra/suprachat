@@ -55,7 +55,7 @@ jobs:
       CODEX_VERSION: 0.159.3
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -1744,7 +1744,7 @@ jobs:
 
       - name: Upload SPDX SBOM for inspection (Windows)
         if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.artifact }}-spdx
           path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
@@ -1753,7 +1753,7 @@ jobs:
 
       - name: Upload bundled license texts for review (Windows)
         if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.artifact }}-license-review
           path: |
@@ -1769,7 +1769,7 @@ jobs:
 
       - name: Upload Windows release archive
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.release_artifact }}
           path: ${{ runner.temp }}/SupraChat-v0.0.1-${{ matrix.platform }}.zip
@@ -1844,7 +1844,7 @@ jobs:
 
       - name: Upload SPDX SBOM for inspection (Unix)
         if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.artifact }}-spdx
           path: out/${{ matrix.rid }}/_manifest/spdx_2.2/manifest.spdx.json
@@ -1853,7 +1853,7 @@ jobs:
 
       - name: Upload bundled license texts for review (Unix)
         if: (github.event_name != 'push' || github.ref == 'refs/tags/v0.0.1') && runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.artifact }}-license-review
           path: |
@@ -1869,7 +1869,7 @@ jobs:
 
       - name: Upload Unix release archive
         if: github.ref == 'refs/tags/v0.0.1' && runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.release_artifact }}
           path: ${{ runner.temp }}/SupraChat-v0.0.1-${{ matrix.platform }}.tar.gz
@@ -1878,7 +1878,7 @@ jobs:
 
       - name: Upload self-contained application
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ matrix.artifact }}
           path: out/${{ matrix.rid }}/
@@ -1900,7 +1900,7 @@ jobs:
       WORKFLOW_RUN_ID: ${{ github.run_id }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -1930,7 +1930,7 @@ jobs:
           grep -q '<Version>0.0.1</Version>' Directory.Build.props
 
       - name: Download platform-native release archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: suprachat-release-*
           path: release-stage/archives
@@ -2014,8 +2014,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
         with:
           node-version: '24'
       - name: Recover and decompose official Linux desktop packages
@@ -2023,7 +2023,7 @@ jobs:
         run: bash tools/census_linux_desktop.sh
       - name: Upload Linux clean-room evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: chatgpt-linux-deep-runtime-census
           path: out/desktop-oracle/linux/
@@ -2038,8 +2038,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
         with:
           node-version: '24'
       - name: Recover and decompose official macOS desktop applications
@@ -2047,7 +2047,7 @@ jobs:
         run: bash tools/census_macos_desktop.sh
       - name: Upload macOS clean-room evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: chatgpt-macos-deep-runtime-census
           path: out/desktop-oracle/macos/

@@ -111,7 +111,7 @@
                 <TextBlock TextWrapping="Wrap"
                            Text="Export an encrypted renewable SIWC credential bundle for another trusted runtime, or import one here. Copies share renewable authority and can interfere if multiple hosts rotate the same refresh lineage; use intentionally and protect the bundle and passphrase." />
                 <local:SecurePassphraseTextBox x:Name="CredentialPassphraseBox"
-                         Watermark="Bundle passphrase (12+ characters)"
+                         PlaceholderText="Bundle passphrase (12+ characters)"
                          AutomationProperties.AutomationId="Auth.BundlePassphrase"
                          AutomationProperties.Name="Credential bundle passphrase"
                          AutomationProperties.HelpText="Passphrase used only in memory to encrypt or decrypt the selected portable credential bundle." />
