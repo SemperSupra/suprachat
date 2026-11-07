@@ -90,6 +90,7 @@ internal static class Program
                 "browser-sensor-observe" => WriteSuccess(await BrowserSensorObserveAsync(args[1..])),
                 "browser-actuator-execute" => WriteSuccess(await BrowserActuatorExecuteAsync(args[1..])),
                 "browser-mode-preflight" => WriteSuccess(BrowserModePreflight(args[1..])),
+                "browser-trace-snapshot" => WriteSuccess(BrowserTraceSnapshot(args[1..])),
                 "browser-snapshot" => WriteSuccess(await BrowserSnapshotAsync(args[1..])),
                 "browser-click" => WriteSuccess(await BrowserClickConfirmedAsync(args[1..])),
                 "browser-fill" => WriteSuccess(await BrowserFillConfirmedAsync(args[1..])),
@@ -177,6 +178,7 @@ internal static class Program
             new { name = "browser-sensor-observe", description = "Query observation data from a registered browser sensor.", syntax = "browser-sensor-observe [--id <sensor-id>]" },
             new { name = "browser-actuator-execute", description = "Execute actuation through an authorized lease gate.", syntax = "browser-actuator-execute --id <actuator-id> --lease <lease-id> [--url <url>] [--selector <sel>] [--action <act>]" },
             new { name = "browser-mode-preflight", description = "Evaluate fail-closed Chat vs Work experience mode policy preflight.", syntax = "browser-mode-preflight [--intent <CHAT|WORK>] [--session <id>] [--epoch <num>] [--lease-confirmed] [--audience <human|automation|agent>]" },
+            new { name = "browser-trace-snapshot", description = "Read synthetic-only consented browser trace shape snapshot with HMAC aliases and capture gaps.", syntax = "browser-trace-snapshot [--origin <url>] [--limit <num>]" },
             new { name = "browser-snapshot", description = "Navigate and return an ARIA semantic snapshot.", syntax = "browser-snapshot --url <https-url>" },
             new { name = "browser-click", description = "Explicitly click one element by ARIA role and accessible name.", syntax = "browser-click --confirm --url <https-url> --role <role> --name <accessible-name>" },
             new { name = "browser-fill", description = "Explicitly fill one field by accessible label.", syntax = "browser-fill --confirm --url <https-url> --label <label> --value <text>" },
@@ -278,6 +280,7 @@ internal static class Program
             "browser/sensor/observe",
             "browser/actuator/execute",
             "browser/mode/preflight",
+            "browser/trace/snapshot",
             "browser/snapshot",
             "browser/start",
             "browser/navigate",
@@ -556,6 +559,38 @@ internal static class Program
             Lease: lease));
 
         return BrowserExperienceModePolicy.ForAudience(decision, audience);
+    }
+
+    private static object BrowserTraceSnapshot(string[] args)
+    {
+        var origin = Option(args, "--origin") ?? "https://chatgpt.com";
+        var limitStr = Option(args, "--limit");
+        var limit = int.TryParse(limitStr, out var lim) ? lim : 32;
+
+        var oracle = new SyntheticTraceShapeOracle(origin, limit);
+        var handle = oracle.Session();
+        oracle.Enable(handle, true);
+        return oracle.Snapshot(handle);
+    }
+
+    private static object RpcBrowserTraceSnapshot(JsonElement? parameters)
+    {
+        var origin = "https://chatgpt.com";
+        var limit = 32;
+
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object)
+        {
+            var p = parameters.Value;
+            if (p.TryGetProperty("origin", out var o) && o.ValueKind == JsonValueKind.String)
+                origin = o.GetString() ?? origin;
+            if (p.TryGetProperty("limit", out var l) && l.TryGetInt32(out var lVal))
+                limit = lVal;
+        }
+
+        var oracle = new SyntheticTraceShapeOracle(origin, limit);
+        var handle = oracle.Session();
+        oracle.Enable(handle, true);
+        return oracle.Snapshot(handle);
     }
 
     private static async Task<object> AccessibilityPreferencesAsync()
@@ -1328,6 +1363,7 @@ internal static class Program
             "browser/sensor/observe" => await RpcBrowserSensorObserveAsync(parameters),
             "browser/actuator/execute" => await RpcBrowserActuatorExecuteAsync(parameters),
             "browser/mode/preflight" => RpcBrowserModePreflight(parameters),
+            "browser/trace/snapshot" => RpcBrowserTraceSnapshot(parameters),
             "browser/snapshot" => await RpcBrowserSnapshotAsync(parameters),
             "browser/start" => await RpcBrowserStartAsync(),
             "browser/navigate" => await RpcBrowserNavigateAsync(parameters),
