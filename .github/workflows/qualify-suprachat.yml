@@ -1215,6 +1215,52 @@ jobs:
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
                 $script:uiaTransientRetries = 0
+                # Issue #152: once the default ChatGPT tab's WebView2 document
+                # loads, TreeScope.Descendants searches from the main window
+                # also walk Chromium's web accessibility tree (observed
+                # 1779-2464 raw elements, 2-3 s per FindAll on public runners;
+                # PR #158 dual-view receipt). Lookups became slow and racy
+                # against a live, mutating page and exhausted the 15 s budget
+                # with no Avalonia IDs observed. The semantic contract below
+                # covers SupraChat-owned Avalonia peers only; the native
+                # WebView declarative ID is covered by contract checks. Walk
+                # the control view and do not descend into Chromium-owned
+                # (FrameworkId 'Chrome') subtrees. Assertions are unchanged.
+                function Find-OwnedUiaElements(
+                    [System.Windows.Automation.AutomationElement]$root,
+                    [string]$automationId = $null,
+                    [int]$maxNodes = 4000) {
+                  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                  $found = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
+                  $queue = New-Object System.Collections.Generic.Queue[System.Windows.Automation.AutomationElement]
+                  if ($maxNodes -lt 1 -or $maxNodes -gt 4000) {
+                    throw 'UIA_OWNED_TRAVERSAL_INVALID_BOUND'
+                  }
+                  $queue.Enqueue($root)
+                  $visited = 0
+                  while ($queue.Count -gt 0) {
+                    $node = $queue.Dequeue()
+                    $child = $walker.GetFirstChild($node)
+                    while ($child) {
+                      # The queue guard alone is insufficient: a single node
+                      # can expose more than maxNodes siblings. Reject on the
+                      # inner path *before* dereferencing the next UIA peer.
+                      if ($visited -ge $maxNodes) {
+                        throw 'UIA_OWNED_TRAVERSAL_BUDGET_EXHAUSTED'
+                      }
+                      $visited++
+                      $id = $child.Current.AutomationId
+                      if ($automationId) {
+                        if ($id -eq $automationId) { $found.Add($child); return ,$found }
+                      } elseif (-not [string]::IsNullOrWhiteSpace($id)) {
+                        $found.Add($child)
+                      }
+                      if ($child.Current.FrameworkId -ne 'Chrome') { $queue.Enqueue($child) }
+                      $child = $walker.GetNextSibling($child)
+                    }
+                  }
+                  return ,$found
+                }
                 function Require-SemanticControl([string]$automationId, [int]$timeoutSeconds = 15) {
                 $idCondition = New-Object System.Windows.Automation.PropertyCondition(
                   [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
@@ -1256,8 +1302,7 @@ jobs:
                       }
                     }
                     if ($window) {
-                      $element = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-                        $idCondition)
+                      $element = (Find-OwnedUiaElements $window $automationId) | Select-Object -First 1
                     }
                   }
                   catch [System.Windows.Automation.ElementNotAvailableException] {
@@ -1293,10 +1338,65 @@ jobs:
                     } catch {}
                   }
                   if ($window) {
-                    $visibleIds = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                      [System.Windows.Automation.Condition]::TrueCondition) |
-                      ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                    try {
+                      $visibleIds = @((Find-OwnedUiaElements $window) |
+                        ForEach-Object { $_.Current.AutomationId } | Where-Object { $_ -in $knownIds })
+                    } catch {
+                      Write-Host ('UIA diagnostic traversal failed: ' + $_.Exception.GetType().Name)
+                    }
                   }
+                  # Read-only terminal-failure differential; never emit names,
+                  # document contents, arbitrary IDs or page/profile state.
+                  # RawView vs ControlView immediate children distinguish a
+                  # missing/late Avalonia provider from projection filtering.
+                  if ($window) {
+                    foreach ($view in @('control', 'raw')) {
+                      $sampled = 0
+                      $sameProcess = 0
+                      $chromeFramework = 0
+                      $blankId = 0
+                      $stale = 0
+                      try {
+                        if ($view -eq 'control') {
+                          $sampleWalker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                        } else {
+                          $sampleWalker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+                        }
+                        $sample = $sampleWalker.GetFirstChild($window)
+                        while ($sample -and $sampled -lt 64) {
+                          $sampled++
+                          try {
+                            if ($sample.Current.ProcessId -eq $p.Id) { $sameProcess++ }
+                            if ($sample.Current.FrameworkId -eq 'Chrome') { $chromeFramework++ }
+                            if ([string]::IsNullOrWhiteSpace($sample.Current.AutomationId)) { $blankId++ }
+                          } catch [System.Windows.Automation.ElementNotAvailableException] {
+                            $stale++
+                          }
+                          $sample = $sampleWalker.GetNextSibling($sample)
+                        }
+                        $capped = [bool]$sample
+                        Write-Host ("UIA child-boundary view={0} sampled={1} sameProcess={2} chromeFramework={3} blankId={4} stale={5} capped={6}" -f
+                          $view, $sampled, $sameProcess, $chromeFramework, $blankId, $stale, $capped)
+                      } catch {
+                        Write-Host ('UIA child-boundary probe interrupted view=' + $view +
+                          ' exceptionType=' + $_.Exception.GetType().Name)
+                      }
+                    }
+                  }
+                  # Terminal status must print even when the HWND and process
+                  # tree cannot be reacquired; otherwise child probes are silent.
+                  # Only bounded booleans; never emit process/user/browser values.
+                  $terminalProcessAlive = $false
+                  $terminalHwndNonzero = $false
+                  try {
+                    $p.Refresh()
+                    $terminalProcessAlive = -not $p.HasExited
+                    if ($terminalProcessAlive) {
+                      $terminalHwndNonzero = $p.MainWindowHandle -ne [IntPtr]::Zero
+                    }
+                  } catch {}
+                  Write-Host ("UIA terminal-boundary windowAvailable={0} processAlive={1} mainHwndNonzero={2}" -f
+                    [bool]$window, $terminalProcessAlive, $terminalHwndNonzero)
                   Write-Host ('UIA known declarative IDs at failure: ' + ($visibleIds -join ','))
                   throw "UI Automation element missing despite semantic peers being exposed: $automationId"
                 }
@@ -1376,11 +1476,7 @@ jobs:
                       if ($candidate) {
                         $diagnosticWindow = $candidate
                         $rootAvailable = $true
-                        $tabs = $diagnosticWindow.FindAll(
-                          [System.Windows.Automation.TreeScope]::Descendants,
-                          [System.Windows.Automation.PropertyCondition]::new(
-                            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-                            $area.tab))
+                        $tabs = Find-OwnedUiaElements $diagnosticWindow $area.tab
                         $tabCount = $tabs.Count
                         if ($tabCount -gt 0) { $isEnabled = $tabs[0].Current.IsEnabled }
                         $diagnosticReadSucceeded = $true
