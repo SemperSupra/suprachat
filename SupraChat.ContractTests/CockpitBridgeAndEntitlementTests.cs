@@ -11,7 +11,7 @@ public static class CockpitBridgeAndEntitlementTests
         if (!condition) throw new InvalidOperationException(message);
     }
 
-    public static Task RunAsync()
+    public static async Task RunAsync()
     {
         // ====================================================================
         // 1. Subscription Entitlement Guardrails
@@ -179,6 +179,34 @@ PS C:\Users\Mark\Projects>
         Require(formatted.Contains("Exit Code: `0`"), "Formatted exit code missing");
         Require(formatted.Contains("```terminal-output"), "Terminal output markdown block missing");
 
-        return Task.CompletedTask;
+        // G. Error trace extraction
+        var stackTraceBuffer = @"
+Unhandled exception: System.NullReferenceException: Object reference not set to an instance of an object.
+   at SupraChat.Core.Example.Run() in C:\Projects\Example.cs:line 42
+   at Program.Main(String[] args) in C:\Projects\Program.cs:line 10
+";
+        var extractedTrace = TerminalTransferBridge.ExtractErrorTrace(stackTraceBuffer);
+        Require(extractedTrace.Contains("NullReferenceException"), "Error trace must capture exception line");
+        Require(extractedTrace.Contains("line 42"), "Error trace must capture call stack frame");
+
+        // H. Sensitive token detection
+        Require(TerminalTransferBridge.ContainsSensitiveTokens("bearer sk-123456789012345678901234"), "Must detect OpenAI secret token");
+        Require(!TerminalTransferBridge.ContainsSensitiveTokens("public static void Main()"), "Safe text must not report sensitive tokens");
+
+        // ====================================================================
+        // 3. SessionTerminalHost Execution & State Checks
+        // ====================================================================
+        using var terminalHost = new SessionTerminalHost();
+        Require(!terminalHost.IsRunning, "Terminal host must be initially idle");
+        var exit = await terminalHost.ExecuteCommandAsync("echo test-cockpit-terminal");
+        Require(exit == 0, "Echo command exit code must be 0, got " + exit);
+        Require(terminalHost.LastOutput.Contains("test-cockpit-terminal"), "LastOutput must contain echoed text");
+        Require(terminalHost.LastCommand == "echo test-cockpit-terminal", "LastCommand mismatch");
+        Require(!terminalHost.IsRunning, "Terminal host must return to idle state after completion");
+
+        terminalHost.ClearScrollback();
+        Require(string.IsNullOrEmpty(terminalHost.LastOutput), "LastOutput must be empty after ClearScrollback");
+
+        return;
     }
 }

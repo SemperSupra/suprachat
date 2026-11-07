@@ -3,6 +3,7 @@ using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using SupraChat.Core;
@@ -1368,6 +1369,19 @@ public partial class MainWindow : Window
             environmentId.ValueKind == JsonValueKind.String &&
             !string.IsNullOrWhiteSpace(environmentId.GetString()))
             RemoteEnvironmentBox.Text = environmentId.GetString();
+    }
+
+    private async void CopyPairingCode_Click(object? sender, RoutedEventArgs e)
+    {
+        var text = RemotePairingCodeBox?.Text ?? RemoteManualPairingCodeBox?.Text;
+        if (!string.IsNullOrWhiteSpace(text) && Clipboard != null)
+        {
+            await Clipboard.SetTextAsync(text);
+            if (AuthStatus != null)
+            {
+                AuthStatus.Text = $"Pairing code '{text}' copied to clipboard.";
+            }
+        }
     }
 
     private static string RequireText(string? value, string label) =>

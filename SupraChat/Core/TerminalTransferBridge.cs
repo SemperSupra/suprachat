@@ -198,6 +198,43 @@ public static class TerminalTransferBridge
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Checks whether the text contains sensitive API tokens or passwords.
+    /// </summary>
+    public static bool ContainsSensitiveTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return SecretPattern.IsMatch(text);
+    }
+
+    /// <summary>
+    /// Alias for RedactSecrets.
+    /// </summary>
+    public static string RedactSensitiveTokens(string text) => RedactSecrets(text);
+
+    /// <summary>
+    /// Extracts lines matching error, exception, or traceback signatures.
+    /// </summary>
+    public static string ExtractErrorTrace(string terminalBuffer)
+    {
+        var clean = StripAnsi(terminalBuffer);
+        if (string.IsNullOrWhiteSpace(clean)) return string.Empty;
+
+        var errPattern = new Regex(@"(error|exception|fatal|failed|failure|traceback|at\s+[A-Za-z0-9_.]+\(|CS\d{4}|line\s+\d+)", RegexOptions.IgnoreCase);
+        var lines = clean.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        var matchedLines = lines.Where(l => errPattern.IsMatch(l)).ToList();
+
+        return matchedLines.Count > 0 ? string.Join(Environment.NewLine, matchedLines) : string.Empty;
+    }
+
+    /// <summary>
+    /// Extracts the clean output of the last command from a terminal buffer.
+    /// </summary>
+    public static string ExtractCleanLastCommandOutput(string terminalBuffer)
+    {
+        return ExtractLastCommandOutput(terminalBuffer).Output;
+    }
+
     private static bool DetectErrorPatterns(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;

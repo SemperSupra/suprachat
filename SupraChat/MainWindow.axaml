@@ -26,7 +26,15 @@
         <Button Grid.Column="3" Margin="0,0,6,0" Content="Home" Click="Home_Click"
                  AutomationProperties.AutomationId="Nav.Home"
                  AutomationProperties.HelpText="Navigate the embedded product view to ChatGPT home." />
-        <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="ChatGPT product + Agent Lab" />
+        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+          <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="SupraChat Cockpit" />
+          <Border Background="#2E7D32" CornerRadius="12" Padding="8,3" VerticalAlignment="Center">
+            <TextBlock Text="🟢 LOCAL OPERATOR" Foreground="White" FontSize="11" FontWeight="Bold" />
+          </Border>
+          <Border Background="#0288D1" CornerRadius="12" Padding="8,3" VerticalAlignment="Center">
+            <TextBlock Text="✨ Plan: Subscription (No Work Spend)" Foreground="White" FontSize="11" FontWeight="Bold" />
+          </Border>
+        </StackPanel>
         <Button Grid.Column="5" Content="Open in browser" Click="OpenExternal_Click"
                  AutomationProperties.AutomationId="Nav.OpenExternal"
                  AutomationProperties.HelpText="Open ChatGPT in the system browser." />
@@ -331,57 +339,7 @@
                      AutomationProperties.Name="Browser semantic accessibility snapshot"
                      AutomationProperties.LiveSetting="Polite" />
 
-            <Separator Margin="0,12,0,8" />
-
-            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Codex Remote"
-                       AutomationProperties.ControlTypeOverride="Header"
-                       AutomationProperties.HeadingLevel="2"
-                       AutomationProperties.AutomationId="RemoteControl.Heading" />
-            <TextBlock TextWrapping="Wrap"
-                       Text="Remote status, pairing and clients are exposed as semantic text. Enable, disable, pairing-start and revoke are consequential and require the explicit confirmation checkbox; no action is inferred from merely viewing this section." />
-            <CheckBox x:Name="RemoteConfirmBox"
-                      Content="Confirm the next consequential Remote action"
-                      AutomationProperties.AutomationId="RemoteControl.Confirm"
-                      AutomationProperties.HelpText="Must be checked immediately before enable, disable, pairing start, or client revoke." />
-            <CheckBox x:Name="RemoteManualCodeBox"
-                      Content="Request a manual pairing code"
-                      AutomationProperties.AutomationId="RemoteControl.ManualCode"
-                      AutomationProperties.HelpText="Request a text pairing code in addition to the normal pairing token." />
-            <WrapPanel Orientation="Horizontal">
-              <Button Margin="0,0,8,8" Content="Read status" Click="ReadRemoteStatus_Click"
-                      AutomationProperties.AutomationId="RemoteControl.Status" />
-              <Button Margin="0,0,8,8" Content="Enable Remote" Click="RemoteEnable_Click"
-                      AutomationProperties.AutomationId="RemoteControl.Enable" />
-              <Button Margin="0,0,8,8" Content="Disable Remote" Click="RemoteDisable_Click"
-                      AutomationProperties.AutomationId="RemoteControl.Disable" />
-              <Button Margin="0,0,8,8" Content="Start pairing" Click="RemotePairingStart_Click"
-                      AutomationProperties.AutomationId="RemoteControl.PairingStart" />
-            </WrapPanel>
-            <TextBlock FontWeight="SemiBold" Text="Environment ID" />
-            <TextBox x:Name="RemoteEnvironmentBox"
-                     AutomationProperties.AutomationId="RemoteControl.EnvironmentId"
-                     AutomationProperties.Name="Remote environment ID" />
-            <TextBlock FontWeight="SemiBold" Text="Pairing code" />
-            <TextBox x:Name="RemotePairingCodeBox"
-                     AutomationProperties.AutomationId="RemoteControl.PairingCode"
-                     AutomationProperties.Name="Remote pairing code" />
-            <TextBlock FontWeight="SemiBold" Text="Manual pairing code" />
-            <TextBox x:Name="RemoteManualPairingCodeBox"
-                     AutomationProperties.AutomationId="RemoteControl.ManualPairingCode"
-                     AutomationProperties.Name="Remote manual pairing code" />
-            <WrapPanel Orientation="Horizontal">
-              <Button Margin="0,0,8,8" Content="Check pairing status" Click="RemotePairingStatus_Click"
-                      AutomationProperties.AutomationId="RemoteControl.PairingStatus" />
-              <Button Margin="0,0,8,8" Content="List clients" Click="RemoteClients_Click"
-                      AutomationProperties.AutomationId="RemoteControl.Clients" />
-            </WrapPanel>
-            <TextBlock FontWeight="SemiBold" Text="Client ID to revoke" />
-            <TextBox x:Name="RemoteClientIdBox"
-                     AutomationProperties.AutomationId="RemoteControl.ClientId"
-                     AutomationProperties.Name="Remote client ID to revoke" />
-            <Button HorizontalAlignment="Left" Content="Revoke client" Click="RemoteRevoke_Click"
-                    AutomationProperties.AutomationId="RemoteControl.Revoke"
-                    AutomationProperties.HelpText="Requires the confirmation checkbox and both environment and client IDs." />
+            <!-- Codex Remote moved to dedicated Remote Control tab -->
 
             <Separator Margin="0,12,0,8" />
 
@@ -568,6 +526,102 @@
                        Text="Keyboard: Command+1/2/3/L on macOS; Control+1/2/3/L on Windows/Linux. Standard Tab, Shift+Tab, arrows, Enter and Space remain available. No state is conveyed only by color." />
             <TextBlock TextWrapping="Wrap"
                        Text="Automation: suprachat-cli accessibility. Agent: accessibility/read. These expose the same accessibility contract without screen scraping." />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+            <TabItem Header="Remote Control"
+               AutomationProperties.AutomationId="Tab.RemoteControl"
+               AutomationProperties.AcceleratorKey="Command+4 / Control+4"
+               AutomationProperties.HelpText="Codex Remote reverse tunnel, pairing codes, and connected client management.">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="20" Spacing="16" MaxWidth="900">
+            <!-- Hero Header Card -->
+            <Border Background="#F4F6F9" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="8" Padding="16">
+              <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <TextBlock FontSize="20" FontWeight="SemiBold" Text="Codex Remote Control Hub"
+                             AutomationProperties.ControlTypeOverride="Header"
+                             AutomationProperties.HeadingLevel="2"
+                             AutomationProperties.AutomationId="RemoteControl.Heading" />
+                  <Border Background="#2E7D32" CornerRadius="12" Padding="8,2" VerticalAlignment="Center">
+                    <TextBlock Text="REVERSE TUNNEL" Foreground="White" FontSize="10" FontWeight="Bold" />
+                  </Border>
+                </StackPanel>
+                <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
+                           Text="Secure reverse tunnel enabling a remote ChatGPT session to inspect and pair with your local SupraChat host. All consequential actions require explicit operator confirmation; no background action is taken without your consent." />
+              </StackPanel>
+            </Border>
+
+            <!-- Status & Enablement Card -->
+            <Border Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock FontSize="16" FontWeight="SemiBold" Text="1. Tunnel Readiness &amp; Control" />
+                <CheckBox x:Name="RemoteConfirmBox"
+                          Content="Confirm the next consequential Remote action"
+                          AutomationProperties.AutomationId="RemoteControl.Confirm"
+                          AutomationProperties.HelpText="Must be checked immediately before enable, disable, pairing start, or client revoke." />
+                <WrapPanel Orientation="Horizontal">
+                  <Button Margin="0,0,8,8" Content="Read status" Click="ReadRemoteStatus_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Status" />
+                  <Button Margin="0,0,8,8" Content="Enable Remote" Click="RemoteEnable_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Enable" />
+                  <Button Margin="0,0,8,8" Content="Disable Remote" Click="RemoteDisable_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Disable" />
+                </WrapPanel>
+                <TextBlock FontWeight="SemiBold" Text="Environment ID" />
+                <TextBox x:Name="RemoteEnvironmentBox"
+                         AutomationProperties.AutomationId="RemoteControl.EnvironmentId"
+                         AutomationProperties.Name="Remote environment ID" />
+              </StackPanel>
+            </Border>
+
+            <!-- Pairing Card -->
+            <Border Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock FontSize="16" FontWeight="SemiBold" Text="2. ChatGPT Device Pairing" />
+                <TextBlock TextWrapping="Wrap" Foreground="#4B5563"
+                           Text="Generate an ephemeral one-time pairing code to enter into ChatGPT on the web or mobile to authorize the remote session." />
+                <CheckBox x:Name="RemoteManualCodeBox"
+                          Content="Request a manual pairing code"
+                          AutomationProperties.AutomationId="RemoteControl.ManualCode"
+                          AutomationProperties.HelpText="Request a text pairing code in addition to the normal pairing token." />
+                <WrapPanel Orientation="Horizontal">
+                  <Button Margin="0,0,8,8" Content="Start pairing" Click="RemotePairingStart_Click"
+                          AutomationProperties.AutomationId="RemoteControl.PairingStart" />
+                  <Button Margin="0,0,8,8" Content="Check pairing status" Click="RemotePairingStatus_Click"
+                          AutomationProperties.AutomationId="RemoteControl.PairingStatus" />
+                  <Button Margin="0,0,8,8" Content="Copy code to clipboard" Click="CopyPairingCode_Click"
+                          AutomationProperties.AutomationId="RemoteControl.CopyCode" />
+                </WrapPanel>
+                <TextBlock FontWeight="SemiBold" Text="Pairing code" />
+                <TextBox x:Name="RemotePairingCodeBox" FontSize="16" FontFamily="Consolas, monospace"
+                         AutomationProperties.AutomationId="RemoteControl.PairingCode"
+                         AutomationProperties.Name="Remote pairing code" />
+                <TextBlock FontWeight="SemiBold" Text="Manual pairing code" />
+                <TextBox x:Name="RemoteManualPairingCodeBox" FontSize="16" FontFamily="Consolas, monospace"
+                         AutomationProperties.AutomationId="RemoteControl.ManualPairingCode"
+                         AutomationProperties.Name="Remote manual pairing code" />
+              </StackPanel>
+            </Border>
+
+            <!-- Active Clients & Revocation Card -->
+            <Border Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="8" Padding="16">
+              <StackPanel Spacing="10">
+                <TextBlock FontSize="16" FontWeight="SemiBold" Text="3. Connected Remote Clients &amp; Revocation" />
+                <WrapPanel Orientation="Horizontal">
+                  <Button Margin="0,0,8,8" Content="List clients" Click="RemoteClients_Click"
+                          AutomationProperties.AutomationId="RemoteControl.Clients" />
+                </WrapPanel>
+                <TextBlock FontWeight="SemiBold" Text="Client ID to revoke" />
+                <TextBox x:Name="RemoteClientIdBox"
+                         AutomationProperties.AutomationId="RemoteControl.ClientId"
+                         AutomationProperties.Name="Remote client ID to revoke" />
+                <Button HorizontalAlignment="Left" Content="Revoke client" Click="RemoteRevoke_Click"
+                        AutomationProperties.AutomationId="RemoteControl.Revoke"
+                        AutomationProperties.HelpText="Requires the confirmation checkbox and both environment and client IDs." />
+              </StackPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
       </TabItem>
