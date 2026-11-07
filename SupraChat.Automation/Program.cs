@@ -91,6 +91,7 @@ internal static class Program
                 "browser-actuator-execute" => WriteSuccess(await BrowserActuatorExecuteAsync(args[1..])),
                 "browser-mode-preflight" => WriteSuccess(BrowserModePreflight(args[1..])),
                 "browser-trace-snapshot" => WriteSuccess(BrowserTraceSnapshot(args[1..])),
+                "browser-differential-evaluate" => WriteSuccess(BrowserDifferentialEvaluate(args[1..])),
                 "browser-snapshot" => WriteSuccess(await BrowserSnapshotAsync(args[1..])),
                 "browser-click" => WriteSuccess(await BrowserClickConfirmedAsync(args[1..])),
                 "browser-fill" => WriteSuccess(await BrowserFillConfirmedAsync(args[1..])),
@@ -179,6 +180,7 @@ internal static class Program
             new { name = "browser-actuator-execute", description = "Execute actuation through an authorized lease gate.", syntax = "browser-actuator-execute --id <actuator-id> --lease <lease-id> [--url <url>] [--selector <sel>] [--action <act>]" },
             new { name = "browser-mode-preflight", description = "Evaluate fail-closed Chat vs Work experience mode policy preflight.", syntax = "browser-mode-preflight [--intent <CHAT|WORK>] [--session <id>] [--epoch <num>] [--lease-confirmed] [--audience <human|automation|agent>]" },
             new { name = "browser-trace-snapshot", description = "Read synthetic-only consented browser trace shape snapshot with HMAC aliases and capture gaps.", syntax = "browser-trace-snapshot [--origin <url>] [--limit <num>]" },
+            new { name = "browser-differential-evaluate", description = "Evaluate multi-vantage two-session differential, security invariant, and accessibility acceptance.", syntax = "browser-differential-evaluate [--session-a <id>] [--session-b <id>] [--intent-a <CHAT|WORK>] [--intent-b <CHAT|WORK>] [--lease-b]" },
             new { name = "browser-snapshot", description = "Navigate and return an ARIA semantic snapshot.", syntax = "browser-snapshot --url <https-url>" },
             new { name = "browser-click", description = "Explicitly click one element by ARIA role and accessible name.", syntax = "browser-click --confirm --url <https-url> --role <role> --name <accessible-name>" },
             new { name = "browser-fill", description = "Explicitly fill one field by accessible label.", syntax = "browser-fill --confirm --url <https-url> --label <label> --value <text>" },
@@ -281,6 +283,7 @@ internal static class Program
             "browser/actuator/execute",
             "browser/mode/preflight",
             "browser/trace/snapshot",
+            "browser/differential/evaluate",
             "browser/snapshot",
             "browser/start",
             "browser/navigate",
@@ -591,6 +594,53 @@ internal static class Program
         var handle = oracle.Session();
         oracle.Enable(handle, true);
         return oracle.Snapshot(handle);
+    }
+
+    private static object BrowserDifferentialEvaluate(string[] args)
+    {
+        var sessionA = Option(args, "--session-a") ?? "session-synthetic-alpha";
+        var sessionB = Option(args, "--session-b") ?? "session-synthetic-beta";
+        var intentA = Option(args, "--intent-a") ?? "CHAT";
+        var intentB = Option(args, "--intent-b") ?? "WORK";
+        var leaseB = HasFlag(args, "--lease-b");
+
+        return MultiVantageDifferentialOracle.EvaluateSyntheticBaseline(
+            sessionAId: sessionA,
+            sessionBId: sessionB,
+            intentA: intentA,
+            intentB: intentB,
+            leaseConfirmedB: leaseB);
+    }
+
+    private static object RpcBrowserDifferentialEvaluate(JsonElement? parameters)
+    {
+        var sessionA = "session-synthetic-alpha";
+        var sessionB = "session-synthetic-beta";
+        var intentA = "CHAT";
+        var intentB = "WORK";
+        var leaseB = false;
+
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object)
+        {
+            var p = parameters.Value;
+            if (p.TryGetProperty("session_a", out var sa) && sa.ValueKind == JsonValueKind.String)
+                sessionA = sa.GetString() ?? sessionA;
+            if (p.TryGetProperty("session_b", out var sb) && sb.ValueKind == JsonValueKind.String)
+                sessionB = sb.GetString() ?? sessionB;
+            if (p.TryGetProperty("intent_a", out var ia) && ia.ValueKind == JsonValueKind.String)
+                intentA = ia.GetString() ?? intentA;
+            if (p.TryGetProperty("intent_b", out var ib) && ib.ValueKind == JsonValueKind.String)
+                intentB = ib.GetString() ?? intentB;
+            if (p.TryGetProperty("lease_b", out var lb) && lb.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                leaseB = lb.GetBoolean();
+        }
+
+        return MultiVantageDifferentialOracle.EvaluateSyntheticBaseline(
+            sessionAId: sessionA,
+            sessionBId: sessionB,
+            intentA: intentA,
+            intentB: intentB,
+            leaseConfirmedB: leaseB);
     }
 
     private static async Task<object> AccessibilityPreferencesAsync()
@@ -1364,6 +1414,7 @@ internal static class Program
             "browser/actuator/execute" => await RpcBrowserActuatorExecuteAsync(parameters),
             "browser/mode/preflight" => RpcBrowserModePreflight(parameters),
             "browser/trace/snapshot" => RpcBrowserTraceSnapshot(parameters),
+            "browser/differential/evaluate" => RpcBrowserDifferentialEvaluate(parameters),
             "browser/snapshot" => await RpcBrowserSnapshotAsync(parameters),
             "browser/start" => await RpcBrowserStartAsync(),
             "browser/navigate" => await RpcBrowserNavigateAsync(parameters),
