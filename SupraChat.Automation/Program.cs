@@ -94,6 +94,7 @@ internal static class Program
                 "browser-differential-evaluate" => WriteSuccess(BrowserDifferentialEvaluate(args[1..])),
                 "userscript-status" => WriteSuccess(UserscriptStatus(args[1..])),
                 "userscript-verify" => WriteSuccess(UserscriptVerify(args[1..])),
+                "codex-egress-status" => WriteSuccess(CodexEgressStatus(args[1..])),
                 "browser-snapshot" => WriteSuccess(await BrowserSnapshotAsync(args[1..])),
                 "browser-click" => WriteSuccess(await BrowserClickConfirmedAsync(args[1..])),
                 "browser-fill" => WriteSuccess(await BrowserFillConfirmedAsync(args[1..])),
@@ -185,6 +186,7 @@ internal static class Program
             new { name = "browser-differential-evaluate", description = "Evaluate multi-vantage two-session differential, security invariant, and accessibility acceptance.", syntax = "browser-differential-evaluate [--session-a <id>] [--session-b <id>] [--intent-a <CHAT|WORK>] [--intent-b <CHAT|WORK>] [--lease-b]" },
             new { name = "userscript-status", description = "Read managed userscript registry and promo UI status.", syntax = "userscript-status [--id <id>]" },
             new { name = "userscript-verify", description = "Fail-closed registration until independently qualified source and approval are present.", syntax = "userscript-verify --id <id> [--script <text>]" },
+            new { name = "codex-egress-status", description = "Evaluate Codex CLI/OTEL posture, host/WSL/Hyper-V egress flow correlation, and Playwright sidecar decoupling.", syntax = "codex-egress-status [--seed <session-seed>]" },
             new { name = "browser-snapshot", description = "Navigate and return an ARIA semantic snapshot.", syntax = "browser-snapshot --url <https-url>" },
             new { name = "browser-click", description = "Explicitly click one element by ARIA role and accessible name.", syntax = "browser-click --confirm --url <https-url> --role <role> --name <accessible-name>" },
             new { name = "browser-fill", description = "Explicitly fill one field by accessible label.", syntax = "browser-fill --confirm --url <https-url> --label <label> --value <text>" },
@@ -291,6 +293,7 @@ internal static class Program
             "userscript/list",
             "userscript/status",
             "userscript/verify",
+            "codex/egress/status",
             "browser/snapshot",
             "browser/start",
             "browser/navigate",
@@ -688,6 +691,23 @@ internal static class Program
         _ = RequireObject(parameters);
         // An asserted SHA of caller-supplied script text is not source qualification.
         return new UserscriptVerificationResult(false, "REFUSED_SOURCE_AUTHORITY_MISSING");
+    }
+
+    private static object CodexEgressStatus(string[] args)
+    {
+        var seed = Option(args, "--seed");
+        return CodexEgressFlowOracle.Evaluate(seed);
+    }
+
+    private static object RpcCodexEgressStatus(JsonElement? parameters)
+    {
+        string? seed = null;
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object &&
+            parameters.Value.TryGetProperty("seed", out var seedElem) && seedElem.ValueKind == JsonValueKind.String)
+        {
+            seed = seedElem.GetString();
+        }
+        return CodexEgressFlowOracle.Evaluate(seed);
     }
 
     private static async Task<object> AccessibilityPreferencesAsync()
@@ -1465,6 +1485,7 @@ internal static class Program
             "userscript/list" => ManagedUserscriptManager.Default.ListManifests(),
             "userscript/status" => RpcUserscriptStatus(parameters),
             "userscript/verify" => RpcUserscriptVerify(parameters),
+            "codex/egress/status" => RpcCodexEgressStatus(parameters),
             "browser/snapshot" => await RpcBrowserSnapshotAsync(parameters),
             "browser/start" => await RpcBrowserStartAsync(),
             "browser/navigate" => await RpcBrowserNavigateAsync(parameters),
