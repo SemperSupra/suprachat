@@ -1273,6 +1273,15 @@ jobs:
                     # tab selection. Reacquire the current, declared main HWND
                     # on every attempt; fall back to root process search if HWND is zero.
                     $p.Refresh()
+                    # The real app process can terminate after exposing its
+                    # initial HWND. Refuse immediately instead of misreporting
+                    # this lifetime failure as a missing Avalonia tab.
+                    if ($p.HasExited) {
+                      $observedExitCode = 'unavailable'
+                      try { $observedExitCode = [string][int]$p.ExitCode } catch {}
+                      Write-Host ('UIA host lifetime: processAlive=False exitCode=' + $observedExitCode)
+                      throw 'UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS'
+                    }
                     $window = $null
                     if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
                       try {
