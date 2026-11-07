@@ -580,6 +580,8 @@ foreach (var marker in new[]
     "\"userscript-status\"",
     "\"userscript-verify\"",
     "\"codex-egress-status\"",
+    "\"first-party-hil-evaluate\"",
+    "\"parity-drift-evaluate\"",
     "\"browser/status\"",
     "\"browser/snapshot\"",
     "\"browser/trace/snapshot\"",
@@ -588,6 +590,8 @@ foreach (var marker in new[]
     "\"userscript/status\"",
     "\"userscript/verify\"",
     "\"codex/egress/status\"",
+    "\"browser/hil/evaluate\"",
+    "\"browser/parity/drift\"",
     "\"browser/start\"",
     "\"browser/navigate\"",
     "\"browser/read\"",
@@ -716,4 +720,5 @@ await SupraChat.ContractTests.BrowserTraceShapeOracleTests.RunAsync();
 await SupraChat.ContractTests.MultiVantageDifferentialTests.RunAsync();
 await SupraChat.ContractTests.ManagedUserscriptLifecycleTests.RunAsync();
 await SupraChat.ContractTests.CodexEgressFlowOracleTests.RunAsync();
+await SupraChat.ContractTests.FirstPartyHilAndParityDriftTests.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");

@@ -95,6 +95,8 @@ internal static class Program
                 "userscript-status" => WriteSuccess(UserscriptStatus(args[1..])),
                 "userscript-verify" => WriteSuccess(UserscriptVerify(args[1..])),
                 "codex-egress-status" => WriteSuccess(CodexEgressStatus(args[1..])),
+                "first-party-hil-evaluate" => WriteSuccess(FirstPartyHilEvaluate(args[1..])),
+                "parity-drift-evaluate" => WriteSuccess(ParityDriftEvaluate(args[1..])),
                 "browser-snapshot" => WriteSuccess(await BrowserSnapshotAsync(args[1..])),
                 "browser-click" => WriteSuccess(await BrowserClickConfirmedAsync(args[1..])),
                 "browser-fill" => WriteSuccess(await BrowserFillConfirmedAsync(args[1..])),
@@ -187,6 +189,8 @@ internal static class Program
             new { name = "userscript-status", description = "Read managed userscript registry and promo UI status.", syntax = "userscript-status [--id <id>]" },
             new { name = "userscript-verify", description = "Cryptographically verify and register candidate userscript against its SHA-256 hash.", syntax = "userscript-verify --id <id> [--script <text>]" },
             new { name = "codex-egress-status", description = "Evaluate Codex CLI/OTEL posture, host/WSL/Hyper-V egress flow correlation, and Playwright sidecar decoupling.", syntax = "codex-egress-status [--seed <session-seed>]" },
+            new { name = "first-party-hil-evaluate", description = "Evaluate first-party Chat-only HIL readback and physical/auth fallback (P8: T13, T16).", syntax = "first-party-hil-evaluate [--seed <session-seed>] [--intent <CHAT|WORK>] [--consented]" },
+            new { name = "parity-drift-evaluate", description = "Evaluate cross-platform capability parity, provenance, and browser/locale drift revalidation (P9: T16, T17, T18).", syntax = "parity-drift-evaluate [--engine <version>] [--locale <lang>] [--ab-perturbation]" },
             new { name = "browser-snapshot", description = "Navigate and return an ARIA semantic snapshot.", syntax = "browser-snapshot --url <https-url>" },
             new { name = "browser-click", description = "Explicitly click one element by ARIA role and accessible name.", syntax = "browser-click --confirm --url <https-url> --role <role> --name <accessible-name>" },
             new { name = "browser-fill", description = "Explicitly fill one field by accessible label.", syntax = "browser-fill --confirm --url <https-url> --label <label> --value <text>" },
@@ -294,6 +298,8 @@ internal static class Program
             "userscript/status",
             "userscript/verify",
             "codex/egress/status",
+            "browser/hil/evaluate",
+            "browser/parity/drift",
             "browser/snapshot",
             "browser/start",
             "browser/navigate",
@@ -727,6 +733,52 @@ internal static class Program
             seed = seedElem.GetString();
         }
         return CodexEgressFlowOracle.Evaluate(seed);
+    }
+
+    private static object FirstPartyHilEvaluate(string[] args)
+    {
+        var seed = Option(args, "--seed") ?? "session-chat-hil-001";
+        var intent = Option(args, "--intent") ?? "CHAT";
+        var consented = HasFlag(args, "--consented");
+        return FirstPartyChatHilOracle.Evaluate(seed, intent, consented);
+    }
+
+    private static object RpcFirstPartyHilEvaluate(JsonElement? parameters)
+    {
+        var seed = "session-chat-hil-001";
+        var intent = "CHAT";
+        var consented = false;
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object)
+        {
+            var p = parameters.Value;
+            if (p.TryGetProperty("seed", out var s) && s.ValueKind == JsonValueKind.String) seed = s.GetString() ?? seed;
+            if (p.TryGetProperty("intent", out var i) && i.ValueKind == JsonValueKind.String) intent = i.GetString() ?? intent;
+            if (p.TryGetProperty("consented", out var c) && c.ValueKind is JsonValueKind.True or JsonValueKind.False) consented = c.GetBoolean();
+        }
+        return FirstPartyChatHilOracle.Evaluate(seed, intent, consented);
+    }
+
+    private static object ParityDriftEvaluate(string[] args)
+    {
+        var engine = Option(args, "--engine");
+        var locale = Option(args, "--locale");
+        var ab = HasFlag(args, "--ab-perturbation");
+        return CrossPlatformParityAndDriftOracle.Evaluate(engine, locale, ab);
+    }
+
+    private static object RpcParityDriftEvaluate(JsonElement? parameters)
+    {
+        string? engine = null;
+        string? locale = null;
+        var ab = false;
+        if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Object)
+        {
+            var p = parameters.Value;
+            if (p.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.String) engine = e.GetString();
+            if (p.TryGetProperty("locale", out var l) && l.ValueKind == JsonValueKind.String) locale = l.GetString();
+            if (p.TryGetProperty("ab_perturbation", out var a) && a.ValueKind is JsonValueKind.True or JsonValueKind.False) ab = a.GetBoolean();
+        }
+        return CrossPlatformParityAndDriftOracle.Evaluate(engine, locale, ab);
     }
 
     private static async Task<object> AccessibilityPreferencesAsync()
@@ -1505,6 +1557,8 @@ internal static class Program
             "userscript/status" => RpcUserscriptStatus(parameters),
             "userscript/verify" => RpcUserscriptVerify(parameters),
             "codex/egress/status" => RpcCodexEgressStatus(parameters),
+            "browser/hil/evaluate" => RpcFirstPartyHilEvaluate(parameters),
+            "browser/parity/drift" => RpcParityDriftEvaluate(parameters),
             "browser/snapshot" => await RpcBrowserSnapshotAsync(parameters),
             "browser/start" => await RpcBrowserStartAsync(),
             "browser/navigate" => await RpcBrowserNavigateAsync(parameters),
