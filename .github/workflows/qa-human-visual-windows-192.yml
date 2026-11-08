@@ -86,12 +86,17 @@ jobs:
           } finally {
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
           }
+      - name: Exercise native Sessions create execute and review journey
+        shell: pwsh
+        run: ./tools/visual-qa/Invoke-NativeWindowsJourney.ps1
       - name: Upload Windows screenshots
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: suprachat-192-windows-native-visual
-          path: qa-evidence/visual/192-20261108/windows/
+          path: |
+            qa-evidence/visual/192-20261108/windows/
+            qa-evidence/visual/192-20261108/windows-journey/
           retention-days: 7
           if-no-files-found: warn
       - name: Preserve safe evidence on isolated branch
@@ -100,7 +105,7 @@ jobs:
         run: |
           git config user.name 'suprachat-visual-qa[bot]'
           git config user.email 'suprachat-visual-qa[bot]@users.noreply.github.com'
-          git add qa-evidence/visual/192-20261108/windows/
+          git add qa-evidence/visual/192-20261108/windows/ qa-evidence/visual/192-20261108/windows-journey/
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 0) { exit 0 }
           git commit -m 'test(visual-qa): retain native Windows desktop evidence [skip ci]'
