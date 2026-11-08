@@ -1,0 +1,60 @@
+name: QA human visual walkthrough - public ephemeral Linux
+
+on:
+  push:
+    branches:
+      - qa/192-human-visual-walkthrough-20261108
+    paths:
+      - .github/workflows/qa-human-visual-192.yml
+      - tools/visual-qa/Run-CockpitVisualQa.sh
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: suprachat-192-visual-qa
+  cancel-in-progress: true
+
+jobs:
+  visual-walkthrough:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: true
+
+      - name: Verify original PR head ancestor
+        shell: bash
+        run: git merge-base --is-ancestor bedfb07c2847f0ade4cd4dc39ed956f59ad30c26 HEAD
+
+      - name: Acquire pinned .NET toolchain channel
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Launch actual desktop on disposable Xvfb and capture journeys
+        shell: bash
+        run: bash tools/visual-qa/Run-CockpitVisualQa.sh
+
+      - name: Upload exact screenshots and manifest
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: suprachat-192-visual-qa-actual-ui
+          path: qa-evidence/visual/192-20261108/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Check in public-safe screenshots for inspection
+        if: success()
+        shell: bash
+        run: |
+          git config user.name 'suprachat-visual-qa[bot]'
+          git config user.email 'suprachat-visual-qa[bot]@users.noreply.github.com'
+          git add qa-evidence/visual/192-20261108/
+          git diff --cached --quiet && exit 0
+          git commit -m 'test(visual-qa): retain actual disposable desktop screenshots [skip ci]'
+          git push origin HEAD:refs/heads/qa/192-human-visual-walkthrough-20261108
