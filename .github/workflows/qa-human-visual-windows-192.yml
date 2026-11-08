@@ -1,0 +1,109 @@
+name: QA human visual - public Windows desktop
+
+on:
+  push:
+    branches:
+      - qa/192-human-visual-walkthrough-20261108
+    paths:
+      - .github/workflows/qa-human-visual-windows-192.yml
+
+permissions:
+  contents: write
+
+jobs:
+  visual-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Build actual Avalonia app
+        shell: pwsh
+        run: dotnet build SupraChat/SupraChat.csproj -c Release --nologo
+      - name: Launch and capture native window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $PWD 'qa-evidence/visual/192-20261108/windows'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $manifest = Join-Path $out 'manifest.txt'
+          'source=PR192-bedfb07c2847f0ade4cd4dc39ed956f59ad30c26' | Set-Content $manifest
+          $app = Join-Path $PWD 'SupraChat/bin/Release/net10.0'
+          $env:SUPRACHAT_STARTUP_LOG = Join-Path $env:RUNNER_TEMP 'suprachat-visual-startup.log'
+          $p = Start-Process -FilePath 'dotnet' -ArgumentList 'SupraChat.dll' -WorkingDirectory $app -PassThru
+          try {
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $handle = [IntPtr]::Zero
+            foreach ($i in 1..30) {
+              Start-Sleep -Seconds 1
+              $p.Refresh()
+              $handle = $p.MainWindowHandle
+              if ($handle -ne [IntPtr]::Zero) { break }
+              if ($p.HasExited) { break }
+            }
+            'process_alive=' + (-not $p.HasExited) | Add-Content $manifest
+            'main_window_handle_nonzero=' + ($handle -ne [IntPtr]::Zero) | Add-Content $manifest
+            if ($p.HasExited) { 'exit_code=' + $p.ExitCode | Add-Content $manifest }
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            'desktop_bounds=' + $bounds.ToString() | Add-Content $manifest
+            $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+            $graphics.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+            $graphics.Dispose()
+            $bmp.Save((Join-Path $out '01-native-desktop.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Dispose()
+            if ($handle -ne [IntPtr]::Zero -and -not $p.HasExited) {
+              Add-Type -AssemblyName UIAutomationClient
+              Add-Type -AssemblyName UIAutomationTypes
+              $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+              'uia_root=' + $root.Current.Name | Add-Content $manifest
+              foreach ($tabId in @('Tab.AgentLab','Tab.AutomationAgents','Tab.RemoteControl','Tab.Sessions')) {
+                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$tabId)
+                $tab = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+                if ($null -eq $tab) {
+                  "$tabId=NOT_FOUND" | Add-Content $manifest
+                  continue
+                }
+                "$tabId=FOUND" | Add-Content $manifest
+                try {
+                  $selection = $tab.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+                  $selection.Select()
+                  Start-Sleep -Seconds 2
+                  $screen = New-Object System.Drawing.Bitmap($bounds.Width,$bounds.Height)
+                  $g = [System.Drawing.Graphics]::FromImage($screen)
+                  $g.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+                  $g.Dispose()
+                  $screen.Save((Join-Path $out ($tabId.Replace('.','-')+'.png')),[System.Drawing.Imaging.ImageFormat]::Png)
+                  $screen.Dispose()
+                } catch {
+                  "$tabId=SELECTION_FAILED" | Add-Content $manifest
+                }
+              }
+            }
+          } finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Upload Windows screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: suprachat-192-windows-native-visual
+          path: qa-evidence/visual/192-20261108/windows/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Preserve safe evidence on isolated branch
+        if: success()
+        shell: pwsh
+        run: |
+          git config user.name 'suprachat-visual-qa[bot]'
+          git config user.email 'suprachat-visual-qa[bot]@users.noreply.github.com'
+          git add qa-evidence/visual/192-20261108/windows/
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m 'test(visual-qa): retain native Windows desktop evidence [skip ci]'
+          git fetch origin qa/192-human-visual-walkthrough-20261108
+          git rebase origin/qa/192-human-visual-walkthrough-20261108
+          git push origin HEAD:refs/heads/qa/192-human-visual-walkthrough-20261108
