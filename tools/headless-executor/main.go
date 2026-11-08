@@ -117,18 +117,21 @@ func evaluate(r Request, rpcID string, lines [][]byte, processErr error) Receipt
  for _,raw:=range lines {
   var line RPCLine
   if err:=json.Unmarshal(raw,&line);err!=nil||line.JSONRPC!="2.0"{
-   out.ErrorCode="MALFORMED_RPC"
-   return out
+   bad:=emptyReceipt(r)
+   bad.ErrorCode="MALFORMED_RPC"
+   return bad
   }
   if line.Method!=""&&len(line.ID)==0 {continue} // allowed JSON-RPC notification
   var id string
   if err:=json.Unmarshal(line.ID,&id);err!=nil||id!=rpcID {
-   out.ErrorCode="CORRELATION_MISMATCH"
-   return out
+   bad:=emptyReceipt(r)
+   bad.ErrorCode="CORRELATION_MISMATCH"
+   return bad
   }
   if found {
-   out.ErrorCode="DUPLICATE_REPLY"
-   return out
+   bad:=emptyReceipt(r)
+   bad.ErrorCode="DUPLICATE_REPLY"
+   return bad
   }
   found=true
   if line.Error!=nil {
