@@ -6,6 +6,7 @@ on:
       - qa/192-human-visual-walkthrough-20261108
     paths:
       - .github/workflows/qa-human-visual-windows-192.yml
+      - tools/visual-qa/Invoke-NativeWindowsJourney.ps1
 
 permissions:
   contents: write
