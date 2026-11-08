@@ -1,0 +1,9 @@
+source=PR192-bedfb07c2847f0ade4cd4dc39ed956f59ad30c26
+process_alive=True
+main_window_handle_nonzero=True
+desktop_bounds={X=0,Y=0,Width=1024,Height=768}
+uia_root=SupraChat
+Tab.AgentLab=FOUND
+Tab.AutomationAgents=FOUND
+Tab.RemoteControl=FOUND
+Tab.Sessions=FOUND
