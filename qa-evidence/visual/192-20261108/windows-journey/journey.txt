@@ -1,0 +1,5 @@
+source=bedfb07c2847f0ade4cd4dc39ed956f59ad30c26
+capture=01-sessions-900x650-before-selection
+journey=INCOMPLETE
+failed_step_type=RuntimeException
+failed_step_message=UI control unavailable: Terminal.CommandInput
