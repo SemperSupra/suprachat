@@ -14,7 +14,7 @@ import (
 const rev="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 func syntheticRequest() Request {
  return Request{Schema:requestSchema,OperationID:"op-12345678",AssignmentID:"assignment-12345",
- AuthorityRevision:rev,Model:"synthetic-model",Prompt:"Synthetic prompt: return only JSON."}
+ AuthorityRevision:rev,ProviderBinding:"supported_responses",Model:"synthetic-model",Prompt:"Synthetic prompt: return only JSON."}
 }
 // TestMain provides a credential-free subprocess speaking the exact public
 // SupraChat.Automation JSON-RPC response shape. It is NOT a model call.
@@ -144,3 +144,12 @@ func TestPromptAndCredentialNotEmittedOnRefusal(t *testing.T) {
  if strings.Contains(string(b),"SECRET_FIXTURE_DO_NOT_LOG"){t.Fatalf("private prompt leaked into failed receipt")}
 }
 
+
+func TestChatGPTWebUISessionNotSilentlySubstituted(t *testing.T) {
+ req:=syntheticRequest()
+ req.ProviderBinding="chatgpt_webui"
+ r:=runOnce(context.Background(),req,"/no/such/suprachat-command")
+ if r.Status!="REFUSED"||r.ErrorCode!="INVALID_REQUEST"||r.OwnerEffectAccepted {
+  t.Fatalf("unsupported ChatGPT web product binding incorrectly admitted: %+v",r)
+ }
+}
