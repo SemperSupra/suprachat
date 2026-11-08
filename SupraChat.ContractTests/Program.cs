@@ -721,4 +721,5 @@ await SupraChat.ContractTests.MultiVantageDifferentialTests.RunAsync();
 await SupraChat.ContractTests.ManagedUserscriptLifecycleTests.RunAsync();
 await SupraChat.ContractTests.CodexEgressFlowOracleTests.RunAsync();
 await SupraChat.ContractTests.FirstPartyHilAndParityDriftTests.RunAsync();
+await SupraChat.ContractTests.CockpitBridgeAndEntitlementTests.RunAsync();
 Console.WriteLine("SupraChat contract checks PASS");

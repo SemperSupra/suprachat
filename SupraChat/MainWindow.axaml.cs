@@ -3,6 +3,7 @@ using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using SupraChat.Core;
@@ -413,6 +414,56 @@ public partial class MainWindow : Window
             gtk.EphemeralDataManager = false;
             gtk.BaseDataDirectory = Path.Combine(webRoot, "linux", "data");
             gtk.BaseCacheDirectory = Path.Combine(webRoot, "linux", "cache");
+        }
+    }
+
+    private void ChatView_NavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
+    {
+        UpdatePlanIndicatorFromUri(ChatView.Source);
+    }
+
+    private bool _isExplicitWorkPlanSelected;
+
+    private void UpdatePlanIndicatorFromUri(Uri? uri)
+    {
+        if (uri is null) return;
+        var uriStr = uri.ToString().ToLowerInvariant();
+
+        // Check if the current ChatGPT web session is operating under a Work/Team workspace
+        var isWork = uriStr.Contains("workspace") ||
+                     uriStr.Contains("/team") ||
+                     uriStr.Contains("/biz") ||
+                     uriStr.Contains("account=work");
+
+        if (isWork)
+        {
+            UpdatePlanIndicator(isWorkPlan: true, "Work Workspace (Approval Required)");
+        }
+        else if (!_isExplicitWorkPlanSelected)
+        {
+            UpdatePlanIndicator(isWorkPlan: false, "Personal Subscription (Zero Work Spend)");
+        }
+    }
+
+    private void UpdatePlanIndicator(bool isWorkPlan, string label)
+    {
+        EntitlementPillText.Text = label;
+        if (this.FindResource(isWorkPlan ? "IconWarning" : "IconCheck") is Avalonia.Media.Geometry geom)
+        {
+            EntitlementIcon.Data = geom;
+        }
+    }
+
+    private void EntitlementPill_Click(object? sender, RoutedEventArgs e)
+    {
+        _isExplicitWorkPlanSelected = !_isExplicitWorkPlanSelected;
+        if (_isExplicitWorkPlanSelected)
+        {
+            UpdatePlanIndicator(isWorkPlan: true, "Work Plan (Operator Confirmed)");
+        }
+        else
+        {
+            UpdatePlanIndicator(isWorkPlan: false, "Personal Subscription (Zero Work Spend)");
         }
     }
 
@@ -1368,6 +1419,19 @@ public partial class MainWindow : Window
             environmentId.ValueKind == JsonValueKind.String &&
             !string.IsNullOrWhiteSpace(environmentId.GetString()))
             RemoteEnvironmentBox.Text = environmentId.GetString();
+    }
+
+    private async void CopyPairingCode_Click(object? sender, RoutedEventArgs e)
+    {
+        var text = RemotePairingCodeBox?.Text ?? RemoteManualPairingCodeBox?.Text;
+        if (!string.IsNullOrWhiteSpace(text) && Clipboard != null)
+        {
+            await Clipboard.SetTextAsync(text);
+            if (AuthStatus != null)
+            {
+                AuthStatus.Text = $"Pairing code '{text}' copied to clipboard.";
+            }
+        }
     }
 
     private static string RequireText(string? value, string label) =>
