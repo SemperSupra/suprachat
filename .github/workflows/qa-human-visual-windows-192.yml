@@ -117,6 +117,7 @@ jobs:
         if: success()
         shell: pwsh
         run: |
+          git restore --worktree -- qa-evidence/visual/192-20261108/windows-journey/
           git config user.name 'suprachat-visual-qa[bot]'
           git config user.email 'suprachat-visual-qa[bot]@users.noreply.github.com'
           git add qa-evidence/visual/192-20261108/windows/ qa-evidence/visual/192-20261108/receipts/windows-${{ github.run_id }}/
