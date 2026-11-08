@@ -39,6 +39,7 @@ type Request struct {
  OperationID string `json:"operation_id"`
  AssignmentID string `json:"assignment_id"`
  AuthorityRevision string `json:"authority_revision"`
+ ProviderBinding string `json:"provider_binding"`
  Model string `json:"model"`
  Prompt string `json:"prompt"`
  RequireJSONObject bool `json:"require_json_object,omitempty"`
@@ -87,7 +88,7 @@ func decodeOne(raw []byte, into any) error {
 func validate(req Request) error {
  if req.Schema!=requestSchema||!idPattern.MatchString(req.OperationID)||
     !idPattern.MatchString(req.AssignmentID)||!revisionPattern.MatchString(req.AuthorityRevision)||
-    !modelPattern.MatchString(req.Model)||strings.TrimSpace(req.Prompt)==""||
+    req.ProviderBinding!="supported_responses"||!modelPattern.MatchString(req.Model)||strings.TrimSpace(req.Prompt)==""||
     len(req.Prompt)>65536{return errors.New("invalid or unsupported request")}
  return nil
 }
