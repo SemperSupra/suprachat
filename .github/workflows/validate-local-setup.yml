@@ -16,12 +16,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: suprachat-local-setup-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   metadata-summary-contract:
     name: Synthetic metadata summary contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Validate aggregate schema and fail-closed live-test guard without a desktop
         shell: pwsh
         run: |
@@ -42,7 +46,7 @@ jobs:
           if (!$refused) { throw 'LIVE_HIL_OPT_IN_GUARD_FAILED' }
 
   compatibility:
-    uses: SupraShellScripts/github-ops-lab/.github/workflows/powershell-compatibility.yml@main
+    uses: SupraShellScripts/github-ops-lab/.github/workflows/powershell-compatibility.yml@00bfd8af76604842422a025a95abdc1cf488af23
     with:
       repository: SemperSupra/suprachat
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -52,7 +56,7 @@ jobs:
     name: SelfTest - Windows PowerShell 5.1
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Execute non-mutating self-test
         shell: powershell
         run: |
@@ -69,7 +73,7 @@ jobs:
     name: SelfTest - PowerShell 7 Windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Execute non-mutating self-test
         shell: pwsh
         run: |
@@ -84,7 +88,7 @@ jobs:
     name: SelfTest - PowerShell 7 Linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Execute non-mutating self-test
         shell: pwsh
         run: |
@@ -99,7 +103,7 @@ jobs:
     name: SelfTest - PowerShell 7 macOS
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Execute non-mutating self-test
         shell: pwsh
         run: |
@@ -114,7 +118,7 @@ jobs:
     name: Apply simulation - Windows PowerShell 5.1
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Exercise Apply with isolated command shims
         shell: powershell
         run: |
@@ -224,7 +228,7 @@ jobs:
     name: Apply simulation - PowerShell 7 Windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Exercise Apply with isolated command shims
         shell: pwsh
         run: |
