@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update -qq
-sudo apt-get install -y -qq --no-install-recommends xvfb xdotool scrot openbox imagemagick libgtk-3-0 libnss3 libgbm1 >/dev/null
+sudo apt-get install -y -qq --no-install-recommends xvfb xdotool scrot openbox imagemagick libgtk-3-0 libnss3 libgbm1 dbus-x11 at-spi2-core libwebkit2gtk-4.1-0 >/dev/null
 OUT="$PWD/qa-evidence/visual/192-20261108"
 mkdir -p "$OUT"
 export HOME="$RUNNER_TEMP/suprachat-visual-qa-home"
@@ -11,6 +11,10 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache"
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+export XDG_RUNTIME_DIR="$RUNNER_TEMP/visual-qa-xdg-runtime"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+export GDK_BACKEND=x11
 export DISPLAY=:99
 Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp -ac >"$RUNNER_TEMP/xvfb.log" 2>&1 &
 XVFB_PID=$!
@@ -22,7 +26,7 @@ dotnet build SupraChat/SupraChat.csproj -c Release --nologo > "$RUNNER_TEMP/buil
 echo "build=PASS" > "$OUT/manifest.txt"
 export SUPRACHAT_STARTUP_LOG="$RUNNER_TEMP/suprachat-startup.log"
 APP_DIR="$PWD/SupraChat/bin/Release/net10.0"
-(cd "$APP_DIR" && dotnet SupraChat.dll) >"$RUNNER_TEMP/app-stdout.log" 2>&1 &
+(cd "$APP_DIR" && dbus-run-session -- dotnet SupraChat.dll) >"$RUNNER_TEMP/app-stdout.log" 2>&1 &
 APP_PID=$!
 echo "app_pid=$APP_PID" >>"$OUT/manifest.txt"
 WINDOW=""
@@ -34,6 +38,11 @@ for i in $(seq 1 35); do
 done
 if [ -z "$WINDOW" ]; then
   echo "launch=NO_VISIBLE_WINDOW" >>"$OUT/manifest.txt"
+  if kill -0 "$APP_PID" 2>/dev/null; then echo 'process_alive_on_timeout=true' >>"$OUT/manifest.txt"; else echo 'process_alive_on_timeout=false' >>"$OUT/manifest.txt"; fi
+  xwininfo -root -tree 2>/dev/null | head -n 50 >"$OUT/x11-window-tree.txt" || true
+  if [ -f "$SUPRACHAT_STARTUP_LOG" ]; then
+    grep -E 'managed-main-entered|fatal-startup-exception|desktop-lifetime-returned' "$SUPRACHAT_STARTUP_LOG" >"$OUT/startup-classes.txt" || true
+  fi
   import -display "$DISPLAY" -window root "$OUT/00-launch-failure.png" || true
   tail -n 30 "$RUNNER_TEMP/app-stdout.log" | sed -E 's/(Bearer|sk-)[^ ]+/[redacted]/g' >"$OUT/sanitized-launch-diagnostic.txt"
 else
