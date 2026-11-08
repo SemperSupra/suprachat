@@ -113,3 +113,16 @@ jobs:
           git fetch origin qa/192-human-visual-walkthrough-20261108
           git rebase origin/qa/192-human-visual-walkthrough-20261108
           git push origin HEAD:refs/heads/qa/192-human-visual-walkthrough-20261108
+      - name: Enforce human-journey acceptance after evidence custody
+        shell: pwsh
+        run: |
+          $manifest = 'qa-evidence/visual/192-20261108/windows-journey/journey.txt'
+          if (-not (Test-Path $manifest)) { throw 'VISUAL_QA_RECEIPT_MISSING' }
+          $raw = Get-Content -Raw -LiteralPath $manifest
+          if ($raw -notmatch 'journey=COMPLETE_NATIVE_UIA') { throw 'VISUAL_QA_JOURNEY_INCOMPLETE' }
+          if ($raw -match 'pre_session_command_executed=True') {
+            throw 'P0_UNBOUND_EXECUTION: terminal ran before a selected session existed'
+          }
+          if ($raw -match 'actual_chat_submission_attempted=False') {
+            throw 'P1_CHAT_TRANSFER_INCOMPLETE: local staged draft is not a verified ChatGPT submission'
+          }
