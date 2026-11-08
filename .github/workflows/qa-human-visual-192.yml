@@ -40,6 +40,15 @@ jobs:
         shell: bash
         run: bash tools/visual-qa/Run-CockpitVisualQa.sh
 
+      - name: Expose bounded launch failure classifier
+        if: always()
+        shell: bash
+        run: |
+          if [ -f qa-evidence/visual/192-20261108/sanitized-launch-diagnostic.txt ]; then
+            echo 'Native Linux launch did not produce a visible window; bounded stderr tail:'
+            cat qa-evidence/visual/192-20261108/sanitized-launch-diagnostic.txt
+          fi
+
       - name: Upload exact screenshots and manifest
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -58,4 +67,9 @@ jobs:
           git add qa-evidence/visual/192-20261108/
           git diff --cached --quiet && exit 0
           git commit -m 'test(visual-qa): retain actual disposable desktop screenshots [skip ci]'
-          git push origin HEAD:refs/heads/qa/192-human-visual-walkthrough-20261108
+          for retry in 1 2 3; do
+            git fetch origin qa/192-human-visual-walkthrough-20261108
+            git rebase origin/qa/192-human-visual-walkthrough-20261108
+            if git push origin HEAD:refs/heads/qa/192-human-visual-walkthrough-20261108; then exit 0; fi
+          done
+          exit 1
