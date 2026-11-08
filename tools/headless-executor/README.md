@@ -16,13 +16,14 @@ Public SupraChat `SupraChat.Automation stdio` exposes `responses/create`. The im
   "operation_id": "workcell-01234567",
   "assignment_id": "assignment-01234567",
   "authority_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "provider_binding": "supported_responses",
   "model": "approved-model",
   "prompt": "Return a JSON object with decision and evidence fields.",
   "require_json_object": true
 }
 ```
 
-The required assignment and authority fields are **correlation claims only**. Their presence does not validate GitHub authority or confer a grant. **Agent Dispatch must independently bind the existing assignment and approved revision before invoking.** A future admitted runtime may bind these fields to its current assignment/readback but must never accept a fresh arbitrary assignment as authority.
+The explicit `provider_binding` must be `supported_responses` for this candidate. A request for `chatgpt_webui` is refused: the current headless Responses binding is not the authenticated first-party ChatGPT web/product session, and no silent substitution is allowed. The required assignment and authority fields are **correlation claims only**. Their presence does not validate GitHub authority or confer a grant. **Agent Dispatch must independently bind the existing assignment and approved revision before invoking.** A future admitted runtime may bind these fields to its current assignment/readback but must never accept a fresh arbitrary assignment as authority.
 
 Build with `GO111MODULE=off go build -o suprachat-headless-executor ./tools/headless-executor`. Use one trusted, locally installed, published `SupraChat.Automation` apphost. The runtime starts the apphost with fixed argument `stdio`; model and prompt are sent over stdin, never argv. For a .NET DLL deployment, publish a platform-specific apphost rather than granting arbitrary command execution to an untrusted task payload.
 
