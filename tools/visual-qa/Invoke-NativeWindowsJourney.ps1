@@ -18,7 +18,7 @@ using System;
 using System.Runtime.InteropServices;
 public static class VisualQaWindow {
  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int width, int height, uint flags);
- [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);\n [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);\n [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
 }
 '@
   $handle=[IntPtr]::Zero
@@ -34,7 +34,7 @@ public static class VisualQaWindow {
     exit 0
   }
   [VisualQaWindow]::ShowWindow($handle,9) | Out-Null
-  [VisualQaWindow]::SetWindowPos($handle,[IntPtr]::Zero,12,12,900,650,0x0040) | Out-Null
+  [VisualQaWindow]::SetWindowPos($handle,[IntPtr]::new(-1),8,8,1024,720,0x0040) | Out-Null\n  [VisualQaWindow]::BringWindowToTop($handle) | Out-Null\n  [VisualQaWindow]::SetForegroundWindow($handle) | Out-Null
   Start-Sleep -Seconds 1
   $root=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
   function FindUi([string] $id) {
