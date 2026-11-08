@@ -1,0 +1,44 @@
+name: SupraChat model-free headless stdio protocol qualification
+
+on:
+  pull_request:
+    paths:
+      - "tools/rdte/headless_stdio_model_free.py"
+      - ".github/workflows/headless-stdio-model-free-rdte.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: suprachat-headless-stdio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  headless:
+    name: Native headless SupraChat CLI and JSON-RPC, no login
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile current public headless automation source
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release --nologo
+      - name: Exercise read-only and invalid JSON-RPC through real stdio subprocess
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/rdte/headless_stdio_model_free.py
+      - name: Upload sanitized, non-provider receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: suprachat-headless-stdio-model-free-rdte
+          path: evidence/headless-stdio-model-free.json
+          retention-days: 7
+          if-no-files-found: warn
