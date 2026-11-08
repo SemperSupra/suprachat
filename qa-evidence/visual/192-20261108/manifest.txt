@@ -1,4 +1,14 @@
 build=PASS
-app_pid=3375
-launch=NO_VISIBLE_WINDOW
+app_pid=4128
+launch=VISIBLE_WINDOW
+window_id=4194319
+01-start-chatgpt-1280.png 1280x900
+02-2-shortcut-1280.png 1280x900
+03-3-shortcut-1280.png 1280x900
+04-4-shortcut-1280.png 1280x900
+05-sessions-target-1280.png 1280x900
+06-target-900x650.png 900x650
+07-target-1600x1000.png 1600x1000
+08-initial-tab-sessions-1280.png 1280x900
+sessions_env_launch=VISIBLE_WINDOW
 complete=YES
