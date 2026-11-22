@@ -42,6 +42,7 @@ def main():
         fn(v)
         return v
     cases=[
+       (lambda x:x["tasks"][1].update(source_branch=x["tasks"][0]["source_branch"]), "SHARED_BRANCH_COLLISION"),
        (lambda x:x["tasks"][1].update(write_paths=["tools/qualification"]), "WRITE_PATH_COLLISION"),
        (lambda x:x["tasks"][1].update(write_paths=["tools"]), "WRITE_PATH_COLLISION"),
        (lambda x:x["tasks"][1].update(depends_on=["actor-contract-critic"]), "DEPENDENT_TASK_SCHEDULED_TOO_EARLY"),
