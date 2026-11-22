@@ -153,6 +153,8 @@ def validate(doc: object) -> dict:
             "CONCURRENT_CAPACITY_EXCEEDED")
     for i, a in enumerate(runnable):
         for b in runnable[i+1:]:
+            require(a["repo"] != b["repo"] or a["source_branch"] != b["source_branch"],
+                    "SHARED_BRANCH_COLLISION")
             require(independent(a, b), "WRITE_PATH_COLLISION")
             require(a["id"] not in b["depends_on"] and
                     b["id"] not in a["depends_on"], "ACTIVE_DEPENDENCY_CONFLICT")
