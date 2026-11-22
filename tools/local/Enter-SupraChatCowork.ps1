@@ -243,6 +243,7 @@ function Get-BatchBaton {
         'Reconcile live #195, #19/#38/#39, PR heads, Actions receipts, and existing dirty worktrees before actions.',
         'Select 2-4 independent READY batches (disjoint write paths, per-task branch and oracle); never serialize by habit. max-parallel=2 per public GHA workflow.',
         'For each weaker actor, assign one bounded file-path allowlist, objective, fixture, one negative case, and exact PASS oracle. No scope expansion or recursion.',
+        'Locally emit small task cards with: python tools/qualification/validate_parallel_workset.py ../suprachat-private/worksets/parallel-batches-r48.json --cards (read-only; no worker starts).',
         'Preserve one session across human/automation/agent, accessible UX, and verified human-owner highest-priority intervention; a UI/voice event is not an auth token.',
         'Dependencies are sequential: W8 owner identity -> W9 durable control/epoch -> real tool fence/cancel HIL -> independent review -> owner-controlled merge/release.',
         'Do not spend, run private GHA, copy credentials, reset dirty trees, or merge/release without workset approval.',
