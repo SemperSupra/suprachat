@@ -36,7 +36,12 @@
         "automation",
         "agent"
       ],
-      "blocker": null
+      "blocker": null,
+      "issue_ref": "SemperSupra/suprachat#195",
+      "source_branch": "agent/r48-batch-plan-critic",
+      "base_sha": "fe72b688b6256c553f3f0a4809490f42cc46f08d",
+      "oracle_command": "python -m tools.qualification.test_parallel_workset",
+      "negative_case": "Reject simultaneous overlapping write-path roots"
     },
     {
       "id": "actor-bootstrap-baton",
@@ -57,7 +62,12 @@
         "automation",
         "agent"
       ],
-      "blocker": null
+      "blocker": null,
+      "issue_ref": "SemperSupra/suprachat#195",
+      "source_branch": "agent/r48-local-actor-bootstrap",
+      "base_sha": "fe72b688b6256c553f3f0a4809490f42cc46f08d",
+      "oracle_command": "powershell -NoProfile -File tools/local/Enter-SupraChatCowork.ps1 -Mode SelfTest",
+      "negative_case": "Reject baton lacking human-owner and batch rules"
     },
     {
       "id": "protected-hil-fence",
@@ -81,7 +91,12 @@
         "automation",
         "agent"
       ],
-      "blocker": "Requires authenticated local host, W8 identity and W9 durable admission"
+      "blocker": "Requires authenticated local host, W8 identity and W9 durable admission",
+      "issue_ref": "SemperSupra/suprachat#195",
+      "source_branch": null,
+      "base_sha": "fe72b688b6256c553f3f0a4809490f42cc46f08d",
+      "oracle_command": null,
+      "negative_case": "Reject unauthenticated owner and stale epoch tool execution"
     }
   ],
   "integration_gates": [
