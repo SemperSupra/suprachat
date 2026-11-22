@@ -19,7 +19,7 @@ func mkTask(id,state,executor,branch string,paths ...string)Task{
    BaseSHA:strings.Repeat("a",40),
    NegativeCase:"Reject a stale or conflicting local work packet",
  }
- if state=="READY"||state=="RUNNING" {t.SourceBranch=pointer(branch);t.OracleCommand=pointer("go test ./... -count=1")}
+ if state=="READY"||state=="RUNNING" {t.SourceBranch=pointer(branch);t.OracleCommand=pointer("go test ./... -count 1")}
  if state=="HELD"||state=="BLOCKED"{t.Blocker=pointer("External verified host identity is not available")}
  return t
 }
