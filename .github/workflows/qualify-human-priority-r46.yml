@@ -1,0 +1,27 @@
+name: R46 Human Intent Priority and Preemption Contract
+on:
+  pull_request:
+    paths:
+      - 'SupraChat/Core/HumanInterventionPolicy.cs'
+      - 'SupraChat.HumanPriorityContractTests/**'
+      - '.github/workflows/qualify-human-priority-r46.yml'
+permissions:
+  contents: read
+jobs:
+  source-only-human-priority:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Native source/build and synthetic three-audience preemption negatives
+        run: dotnet run --project SupraChat.HumanPriorityContractTests/SupraChat.HumanPriorityContractTests.csproj -c Release
