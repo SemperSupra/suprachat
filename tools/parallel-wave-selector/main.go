@@ -168,18 +168,26 @@ func validate(m Manifest)error{
 func selectWave(m Manifest,publicSlots,localSlots int)(Result,error){
  if err:=validate(m);err!=nil{return Result{},err}
  if publicSlots<0||publicSlots>m.Budget.MaxPublicGHAJobs||localSlots<0||localSlots>m.Budget.MaxConcurrent{return Result{},errors.New("unadmitted-worker-capacity")}
- ready,held:=[]Task{},[]string{}
+ ready,running,held:=[]Task{},[]Task{},[]string{}
  for _,t:=range m.Tasks{
   if t.State=="READY"{ready=append(ready,t)}
+  if t.State=="RUNNING"{running=append(running,t)}
   if t.State=="HELD"||t.State=="BLOCKED"{held=append(held,t.ID)}
  }
+ if len(running)>m.Budget.MaxConcurrent{return Result{},errors.New("running-capacity-exceeded")}
+ for i,a:=range running{
+   for _,b:=range running[i+1:]{
+     if clash(a,b){return Result{},errors.New("existing-running-lanes-conflict")}
+   }
+ }
+ maxNew:=m.Budget.MaxConcurrent-len(running)
  sort.Slice(ready,func(i,j int)bool{return ready[i].ID<ready[j].ID})
  sort.Strings(held)
  best:=[]Task{}
  var walk func(int,[]Task,int,int)
  walk=func(i int,sel []Task,pub,loc int){
   if len(sel)>len(best){best=append([]Task{},sel...)}
-  if i==len(ready)||len(sel)==m.Budget.MaxConcurrent{return}
+  if i==len(ready)||len(sel)==maxNew{return}
   if len(sel)+(len(ready)-i)<=len(best){return}
   t:=ready[i]
   resourceOK:=false
@@ -187,6 +195,7 @@ func selectWave(m Manifest,publicSlots,localSlots int)(Result,error){
   if t.Executor=="local-qualified"{resourceOK=loc<localSlots}
   noClash:=true
   for _,x:=range sel{if clash(x,t){noClash=false;break}}
+  for _,x:=range running{if clash(x,t){noClash=false;break}}
   if resourceOK&&noClash{
     next:=append(append([]Task{},sel...),t)
     np,nl:=pub,loc
@@ -207,6 +216,7 @@ func selectWave(m Manifest,publicSlots,localSlots int)(Result,error){
  }
  reason:="maximal-disjoint-wave-within-admitted-capacity"
  if len(best)==0{reason="no-admitted-executor-capacity-or-path-disjointness"}
+ if maxNew==0{reason="all-concurrent-capacity-occupied-by-running-work"}
  if len(best)==1{reason="only-one-independent-capacity-admitted-task"}
  return Result{"suprachat-parallel-wave-selection/v1",m.WorksetID,cards,allReady,deferred,held,len(cards),publicSlots,localSlots,reason,false,false},nil
 }
