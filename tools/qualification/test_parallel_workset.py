@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from tools.qualification.validate_parallel_workset import validate
+from tools.qualification.validate_parallel_workset import validate, bounded_actor_cards
 
 FIXTURE=Path(__file__).parent/"fixtures"/"parallel_workset_synthetic.json"
 
@@ -24,6 +24,18 @@ def main():
     assert outcome["blocked"]==["protected-hil-fence"]
     assert outcome["private_source_in_public_ci"] is False
     assert outcome["tool_authority_granted"] is False
+    cards=bounded_actor_cards(base)
+    assert cards["parallel_count"]==2
+    assert len(cards["cards"])==2
+    assert cards["grants_execution_authority"] is False
+    assert cards["no_private_github_actions"] is True
+    for card in cards["cards"]:
+        assert len(card["base_sha"])==40
+        assert card["branch"].startswith("agent/")
+        assert card["oracle_command"]
+        assert card["negative_case"]
+        assert "secret" not in json.dumps(card).lower()
+
 
     def change(fn):
         v=copy.deepcopy(base)
@@ -34,6 +46,10 @@ def main():
        (lambda x:x["tasks"][1].update(write_paths=["tools"]), "WRITE_PATH_COLLISION"),
        (lambda x:x["tasks"][1].update(depends_on=["actor-contract-critic"]), "DEPENDENT_TASK_SCHEDULED_TOO_EARLY"),
        (lambda x:x["tasks"][2].update(state="READY",blocker=None), "DEPENDENT_TASK_SCHEDULED_TOO_EARLY"),
+       (lambda x:x["tasks"][0].update(source_branch="evil:escape"), "SOURCE_BRANCH_REQUIRED"),
+       (lambda x:x["tasks"][0].update(base_sha="unpinned"), "TASK_PIN"),
+       (lambda x:x["tasks"][0].update(oracle_command="rm -rf /; echo pass"), "UNSAFE_ORACLE_COMMAND"),
+       (lambda x:x["tasks"][0].update(negative_case="none"), "NEGATIVE_CASE_MISSING"),
        (lambda x:x["tasks"][0].update(state="DONE"), "SERIAL_ONLY_ANTI_PATTERN"),
        (lambda x:x["tasks"][0].update(state="HELD",blocker="Lack of qualified actor capacity"), "SERIAL_ONLY_ANTI_PATTERN"),
        (lambda x:x["tasks"][0].update(acceptance_oracle="okay"), "MISSING_ORACLE"),
