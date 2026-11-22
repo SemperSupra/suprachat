@@ -17,7 +17,106 @@ import (
 
 const schema = "suprachat-parallel-workset/v1"
 var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-var sha=regexp.MustCompile(`^[0-9a-f]{40}$`)
+var sha=regexp.MustCompile(`^[0-9a-f]{40}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
+// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
+// Requires the matching R48 Python critic as an independent validation gate.
+package main
+
+import (
+ "encoding/json"
+ "errors"
+ "flag"
+ "fmt"
+ "io"
+ "os"
+ "regexp"
+ "sort"
+ "strings"
+)
+
+const schema = "suprachat-parallel-workset/v1"
+var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
+)
+var sourceBranch=regexp.MustCompile(`^(agent|impl)/[A-Za-z0-9._/-]{3,128}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
+// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
+// Requires the matching R48 Python critic as an independent validation gate.
+package main
+
+import (
+ "encoding/json"
+ "errors"
+ "flag"
+ "fmt"
+ "io"
+ "os"
+ "regexp"
+ "sort"
+ "strings"
+)
+
+const schema = "suprachat-parallel-workset/v1"
+var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
+)
+var safeFile=regexp.MustCompile(`^[A-Za-z0-9._/-]{1,160}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
+// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
+// Requires the matching R48 Python critic as an independent validation gate.
+package main
+
+import (
+ "encoding/json"
+ "errors"
+ "flag"
+ "fmt"
+ "io"
+ "os"
+ "regexp"
+ "sort"
+ "strings"
+)
+
+const schema = "suprachat-parallel-workset/v1"
+var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
+)
+var issueRef=regexp.MustCompile(`^SemperSupra/[A-Za-z0-9._-]+#[1-9][0-9]*// R49: deterministic read-only antichain selector for bounded DLE actor cards.
+// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
+// Requires the matching R48 Python critic as an independent validation gate.
+package main
+
+import (
+ "encoding/json"
+ "errors"
+ "flag"
+ "fmt"
+ "io"
+ "os"
+ "regexp"
+ "sort"
+ "strings"
+)
+
+const schema = "suprachat-parallel-workset/v1"
+var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
+)
+var oracle=regexp.MustCompile(`^[A-Za-z0-9._ /:-]{12,220}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
+// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
+// Requires the matching R48 Python critic as an independent validation gate.
+package main
+
+import (
+ "encoding/json"
+ "errors"
+ "flag"
+ "fmt"
+ "io"
+ "os"
+ "regexp"
+ "sort"
+ "strings"
+)
+
+const schema = "suprachat-parallel-workset/v1"
+var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
+)
 
 type Authority struct {
  PublicRepo string `json:"public_repo"`
@@ -100,7 +199,7 @@ func readManifest(r io.Reader)(Manifest,error){
  return m,validate(m)
 }
 func pathSafe(p string)bool{
- if p==""||strings.HasPrefix(p,"/")||strings.HasSuffix(p,"/")||
+ if !safeFile.MatchString(p)||strings.HasPrefix(p,"/")||strings.HasSuffix(p,"/")||
     strings.IndexByte(p,92)>=0||strings.IndexByte(p,0)>=0||
     strings.IndexByte(p,13)>=0||strings.IndexByte(p,10)>=0{return false}
  for _,part:=range strings.Split(p,"/"){if part==""||part=="."||part==".."{return false}}
@@ -136,14 +235,19 @@ func validate(m Manifest)error{
   aud:=map[string]bool{};for _,x:=range t.Audiences{aud[x]=true}
   for _,x:=range []string{"human","accessible-human","automation","agent"}{if !aud[x]{return errors.New("audience-parity")}}
   if t.Executor!="public-gha"&&t.Executor!="local-qualified"&&t.Executor!="private-governed" {return errors.New("executor-invalid")}
+  switch t.Repo {
+   case "SemperSupra/suprachat","SemperSupra/suprachat-private",
+    "SemperSupra/android-publishing-foundry","SemperSupra/model-spelunker":
+   default:return errors.New("unapproved-repository")
+  }
   if strings.HasSuffix(t.Repo,"-private")&&t.Executor=="public-gha"{return errors.New("private-in-public-runner")}
-  if !sha.MatchString(t.BaseSHA)||!strings.HasPrefix(t.IssueRef,"SemperSupra/")||len(t.NegativeCase)<12||len(t.EvidenceReceipt)<5||len(t.AcceptanceOracle)<12{return errors.New("task-card-unpinned")}
+  if !sha.MatchString(t.BaseSHA)||!issueRef.MatchString(t.IssueRef)||len(t.NegativeCase)<12||len(t.EvidenceReceipt)<5||len(t.AcceptanceOracle)<12{return errors.New("task-card-unpinned")}
   if len(t.WritePaths)==0{return errors.New("unowned-task")}
   for _,x:=range t.WritePaths{if !pathSafe(x){return errors.New("unsafe-path")}}
   if t.State!="READY"&&t.State!="RUNNING"&&t.State!="DONE"&&t.State!="BLOCKED"&&t.State!="HELD"{return errors.New("state-invalid")}
   if t.State=="READY"||t.State=="RUNNING"{
-    if t.SourceBranch==nil||!strings.HasPrefix(*t.SourceBranch,"agent/")||!pathSafe(*t.SourceBranch)||
-       t.OracleCommand==nil||len(*t.OracleCommand)<12||t.Blocker!=nil{return errors.New("unsafe-ready-card")}
+    if t.SourceBranch==nil||!sourceBranch.MatchString(*t.SourceBranch)||!pathSafe(*t.SourceBranch)||
+       t.OracleCommand==nil||!oracle.MatchString(*t.OracleCommand)||t.Blocker!=nil{return errors.New("unsafe-ready-card")}
     if t.Executor=="private-governed"{return errors.New("private-worker-not-admitted")}
   }else if (t.State=="BLOCKED"||t.State=="HELD")&&(t.Blocker==nil||len(*t.Blocker)<10){return errors.New("missing-held-reason")}
  }
