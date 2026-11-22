@@ -16,6 +16,9 @@ STATES = {"READY", "RUNNING", "HELD", "BLOCKED", "DONE"}
 EXECUTORS = {"public-gha", "local-qualified", "private-governed"}
 AUDIENCES = {"human", "automation", "agent", "accessible-human"}
 ID = re.compile(r"^[a-z][a-z0-9-]{2,45}$")
+SHA = re.compile(r"^[0-9a-f]{40}$")
+ISSUE = re.compile(r"^SemperSupra/[A-Za-z0-9._-]+#[1-9][0-9]*$")
+COMMAND = re.compile(r"^[A-Za-z0-9._ /\\:-]{12,220}$")
 PATH = re.compile(r"^[A-Za-z0-9._/-]{1,160}$")
 
 def require(ok: bool, code: str) -> None:
@@ -68,7 +71,8 @@ def validate(doc: object) -> dict:
         require(isinstance(t, dict) and set(t) == {
             "id","repo","lane","state","executor","depends_on","write_paths",
             "acceptance_oracle","evidence_receipt","human_override_response",
-            "audiences","blocker"}, "TASK_SCHEMA")
+            "audiences","blocker","issue_ref","source_branch","base_sha",
+            "oracle_command","negative_case"}, "TASK_SCHEMA")
         tid = t["id"]
         require(isinstance(tid, str) and ID.fullmatch(tid) is not None and
                 tid not in lookup, "TASK_ID")
@@ -80,6 +84,27 @@ def validate(doc: object) -> dict:
                 isinstance(t["lane"], str) and ID.fullmatch(t["lane"]) is not None,
                 "TASK_OWNER")
         require(t["state"] in STATES and t["executor"] in EXECUTORS, "TASK_STATE")
+        require(isinstance(t["issue_ref"], str) and
+                ISSUE.fullmatch(t["issue_ref"]) is not None and
+                isinstance(t["base_sha"], str) and
+                SHA.fullmatch(t["base_sha"]) is not None, "TASK_PIN")
+        if t["state"] in ("READY", "RUNNING"):
+            require(safe_path(t["source_branch"]) and
+                    t["source_branch"].startswith(("agent/","impl/")),
+                    "SOURCE_BRANCH_REQUIRED")
+            require(isinstance(t["oracle_command"],str) and
+                    COMMAND.fullmatch(t["oracle_command"]) is not None,
+                    "UNSAFE_ORACLE_COMMAND")
+        else:
+            require(t["source_branch"] is None or
+                    safe_path(t["source_branch"]), "BLOCKED_BRANCH_INVALID")
+            require(t["oracle_command"] is None or
+                    (isinstance(t["oracle_command"],str) and
+                     COMMAND.fullmatch(t["oracle_command"]) is not None),
+                    "BLOCKED_ORACLE_COMMAND")
+        require(isinstance(t["negative_case"],str) and
+                12 <= len(t["negative_case"]) <= 240,
+                "NEGATIVE_CASE_MISSING")
         require(isinstance(t["depends_on"], list) and
                 len(t["depends_on"]) == len(set(t["depends_on"])) and
                 all(isinstance(d, str) and ID.fullmatch(d) for d in t["depends_on"]),
@@ -150,12 +175,38 @@ def validate(doc: object) -> dict:
         "work_executed": False,
     }
 
+def bounded_actor_cards(doc: dict) -> dict:
+    # Caller must validate before exposing the task cards to a local actor.
+    verdict=validate(doc)
+    runnable=set(verdict["runnable"])
+    cards=[]
+    for t in doc["tasks"]:
+        if t["id"] not in runnable:
+            continue
+        cards.append({
+            "task_id":t["id"],"issue_ref":t["issue_ref"],
+            "repo":t["repo"],"branch":t["source_branch"],
+            "base_sha":t["base_sha"],"allowed_paths":t["write_paths"],
+            "executor":t["executor"],"objective":t["acceptance_oracle"],
+            "oracle_command":t["oracle_command"],"negative_case":t["negative_case"],
+            "expected_receipt":t["evidence_receipt"],
+            "preemption":"FENCE_AND_RECONCILE",
+            "authority":"SOURCE_AND_TEST_ONLY_NO_MERGE_OR_SECRET",
+        })
+    return {"schema":"suprachat-bounded-actor-cards/v1",
+            "parallel_count":len(cards),"cards":cards,
+            "no_private_github_actions":True,
+            "grants_execution_authority":False}
+
 def main() -> None:
     import argparse
     p=argparse.ArgumentParser()
     p.add_argument("manifest", type=Path)
+    p.add_argument("--cards", action="store_true",
+                   help="emit bounded JSON task cards for qualified local actor")
     args=p.parse_args()
-    result=validate(json.loads(args.manifest.read_text(encoding="utf-8")))
+    doc=json.loads(args.manifest.read_text(encoding="utf-8"))
+    result=bounded_actor_cards(doc) if args.cards else validate(doc)
     print(json.dumps(result,sort_keys=True))
 if __name__ == "__main__":
     main()
