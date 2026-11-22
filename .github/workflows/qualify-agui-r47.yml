@@ -1,0 +1,26 @@
+name: R47 AG-UI 1.0.1 .NET Source Interop Qualification
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.AGUIInteropTests/**'
+      - '.github/workflows/qualify-agui-r47.yml'
+permissions:
+  contents: read
+jobs:
+  pinned-agui-candidate:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and exercise actual AGUI.Abstractions NuGet 1.0.1
+        run: dotnet run --project SupraChat.AGUIInteropTests/SupraChat.AGUIInteropTests.csproj -c Release
