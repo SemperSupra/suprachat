@@ -231,6 +231,219 @@ function Get-RepoSnapshot {
     }
 }
 
+function Resolve-ParallelWorksetRelative {
+    param([string]$PrivateRoot)
+    $pointer = Join-Path $PrivateRoot 'worksets/active-parallel-workset.json'
+    if (-not (Test-Path -LiteralPath $pointer)) {
+        # The latest issue #2 may point to an unmerged proposal branch.
+        # Preserve the historical fallback without inventing accepted state.
+        return 'worksets/parallel-batches-r48.json'
+    }
+    $candidate = Get-Content -LiteralPath $pointer -Raw | ConvertFrom-Json
+    if ($candidate.schema -ne 'suprachat-active-parallel-workset/v1' -or
+        $candidate.owner_issue -ne 'SemperSupra/suprachat-private#2' -or
+        ([string]$candidate.workset_path) -notmatch '^worksets/parallel-batches-r[0-9]+[.]json
+    param([System.Collections.IDictionary]$Plan)
+
+    # Deliberately small-model-friendly; all task detail lives in durable DLE.
+    $relative = Resolve-ParallelWorksetRelative -PrivateRoot $Plan.PrivatePath
+    $activeWorkset = Join-Path $Plan.PrivatePath $relative
+    return (@(
+        'Resume SupraChat from GitHub DLE, not this conversation.',
+        ('Public: ' + $Plan.PublicPath),
+        ('Private: ' + $Plan.PrivatePath),
+        'Read both AGENTS.md, public docs/PARALLEL_WORKING.md, private issue #2, and private worksets/active-parallel-workset.json (or its linked proposal branch).',
+        ('Selected private workset file: ' + $activeWorkset),
+        'Reconcile live #195, #19/#38/#39, PR heads, Actions receipts, and existing dirty worktrees before actions.',
+        'Select 2-4 independent READY batches (disjoint write paths, per-task branch and oracle); never serialize by habit. max-parallel=2 per public GHA workflow.',
+        'For each weaker actor, assign one bounded file-path allowlist, objective, fixture, one negative case, and exact PASS oracle. No scope expansion or recursion.',
+        ('Locally emit bounded task cards, after current DLE reconciliation: python tools/qualification/validate_parallel_workset.py "' + $activeWorkset + '" --cards (read-only; no worker starts).'),
+        'Preserve one session across human/automation/agent, accessible UX, and verified human-owner highest-priority intervention; a UI/voice event is not an auth token.',
+        'Dependencies are sequential: W8 owner identity -> W9 durable control/epoch -> real tool fence/cancel HIL -> independent review -> owner-controlled merge/release.',
+        'Do not spend, run private GHA, copy credentials, reset dirty trees, or merge/release without workset approval.',
+        'Reconcile every independent lane with PR/head/CI/evidence and write next batons to private issue #2. Do not ask the human to relay text.'
+    ) -join [Environment]::NewLine)
+}
+
+function Write-CoworkFiles {
+    param(
+        [System.Collections.IDictionary]$Plan,
+        [System.Collections.IDictionary]$Public,
+        [System.Collections.IDictionary]$Private
+    )
+
+    $manifest = @(
+        '# SupraChat local coworking workspace',
+        '',
+        ('Generated UTC: ' + [DateTime]::UtcNow.ToString('o')),
+        '',
+        '## Authority',
+        '',
+        '- Public product/source/CI: SemperSupra/suprachat',
+        '- Private DLE/oracle/evidence: SemperSupra/suprachat-private',
+        '- Execution/orchestration substrate: Agent Dispatch',
+        '',
+        '## Public working tree',
+        '',
+        $Plan.PublicPath,
+        ('Branch: ' + $Public.Branch),
+        ('HEAD: ' + $Public.Head),
+        ('Dirty: ' + $Public.Dirty),
+        '',
+        '## Private DLE working tree',
+        '',
+        $Plan.PrivatePath,
+        ('Branch: ' + $Private.Branch),
+        ('HEAD: ' + $Private.Head),
+        ('Dirty: ' + $Private.Dirty),
+        '',
+        '## Durable context',
+        '',
+        $Plan.ContextPath,
+        '',
+        'Public architecture umbrella: #7; concurrent human control #195; bounded #19/#38/#39/#51. Read live acceptance gates.',
+        'Active private execution/DLE authority: SemperSupra/suprachat-private#2.',
+        'A local actor must read both AGENTS.md files, docs/PARALLEL_WORKING.md, private active-parallel-workset.json and live issue context.',
+        'Reconcile live GitHub state before acting. Do not reconstruct chat history.',
+        'Choose the maximal safe set of independent READY batches; preserve human/automation/agent parity,',
+        'and write exact PR/head/CI receipts for each independent lane plus the next baton to the private DLE.',
+        '',
+        'Human SIWC/OAuth authorization remains a human boundary. Never copy credential material into DLE state.'
+    ) -join [Environment]::NewLine
+
+    $prompt = Get-BatchBaton -Plan $Plan
+
+    $manifest | Set-Content -LiteralPath $Plan.ManifestPath -Encoding UTF8
+    $prompt | Set-Content -LiteralPath $Plan.PromptPath -Encoding UTF8
+}
+
+function Invoke-SelfTest {
+    $root = Get-WorkspaceRoot -RequestedRoot (Join-Path ([IO.Path]::GetTempPath()) 'SupraChat Cowork Root With Spaces')
+    $plan = Get-WorkspacePlan -WorkspaceRoot $root
+    $failures = New-Object System.Collections.Generic.List[string]
+
+    if ((Split-Path -Leaf $plan.PublicPath) -ne 'suprachat') { $failures.Add('Public path wrong.') }
+    if ((Split-Path -Leaf $plan.PrivatePath) -ne 'suprachat-private') { $failures.Add('Private path wrong.') }
+    if ($plan.PublicSsh -ne 'git@github.com:SemperSupra/suprachat.git') { $failures.Add('Public remote wrong.') }
+    if ($plan.PrivateSsh -ne 'git@github.com:SemperSupra/suprachat-private.git') { $failures.Add('Private remote wrong.') }
+    if (-not [IO.Path]::IsPathRooted($plan.Root)) { $failures.Add('Root is not absolute.') }
+
+    $defaultRoot = Get-WorkspaceRoot -RequestedRoot $null
+    $expectedSuffix = [IO.Path]::Combine('Projects','SemperSupra','SupraChat')
+    if (-not $defaultRoot.EndsWith($expectedSuffix, [StringComparison]::OrdinalIgnoreCase)) {
+        $failures.Add("Default root must end in '$expectedSuffix'; got '$defaultRoot'.")
+    }
+
+    $baton = Get-BatchBaton -Plan $plan
+    if ($baton -notmatch 'independent READY batches') { $failures.Add('Batch mandate absent from local actor baton.') }
+    if ($baton -notmatch 'active-parallel-workset.json') { $failures.Add('Private active-workset pointer absent.') }
+    if ($baton -notmatch 'max-parallel=2') { $failures.Add('Public CI concurrency limit absent.') }
+    if ($baton -notmatch 'human-owner highest-priority') { $failures.Add('Owner-preemption rule absent.') }
+    if ($baton -notmatch 'per-task branch and oracle') { $failures.Add('Task isolation rule absent.') }
+
+    if ($failures.Count -gt 0) {
+        throw ('SelfTest failed: ' + ($failures -join ' '))
+    }
+
+    [ordered]@{
+        schema = 'suprachat-local-cowork-selftest/v1'
+        powershell = $PSVersionTable.PSVersion.ToString()
+        root = $plan.Root
+        public = $plan.PublicPath
+        private = $plan.PrivatePath
+        status = 'PASS'
+    } | ConvertTo-Json -Depth 4
+}
+
+$workspaceRoot = Get-WorkspaceRoot -RequestedRoot $Root
+$plan = Get-WorkspacePlan -WorkspaceRoot $workspaceRoot
+
+# On case-insensitive filesystems, a legacy sibling checkout named "suprachat"
+# aliases the intended container directory "SupraChat". Refuse to nest the
+# canonical public/private repositories inside an existing repository root.
+$rootGitMarker = Join-Path $plan.Root '.git'
+if (Test-Path -LiteralPath $rootGitMarker) {
+    throw ("Workspace root '{0}' resolves to an existing Git repository. " +
+           "On Windows this can happen when a legacy sibling checkout named 'suprachat' " +
+           "collides case-insensitively with the intended container 'SupraChat'. " +
+           "Rename or relocate the legacy checkout first; this script will not nest " +
+           "canonical repositories inside another repository.") -f $plan.Root
+}
+
+if ($Mode -eq 'SelfTest') {
+    Invoke-SelfTest
+    exit 0
+}
+
+Write-Host ''
+Write-Host '==> SupraChat post-migration coworking plan'
+Write-Host ('Root:       ' + $plan.Root)
+Write-Host ('Public:     ' + $plan.PublicPath)
+Write-Host ('Private:    ' + $plan.PrivatePath)
+Write-Host ('Context:    ' + $plan.ContextPath)
+Write-Host ('Manifest:   ' + $plan.ManifestPath)
+Write-Host ('Actor baton:' + ' ' + $plan.PromptPath)
+
+$gitPath = Get-CommandPath -Name 'git'
+$sshPath = Get-CommandPath -Name 'ssh'
+$ghPath = Get-CommandPath -Name 'gh' -Optional
+$codexPath = Get-CommandPath -Name 'codex' -Optional
+
+Write-Host ''
+Write-Host '==> Prerequisites'
+Write-Host ('git:   ' + $gitPath)
+Write-Host ('ssh:   ' + $sshPath)
+Write-Host ('gh:    ' + $(if ($ghPath) { $ghPath } else { 'NOT FOUND (issue export unavailable)' }))
+Write-Host ('codex: ' + $(if ($codexPath) { $codexPath } else { 'NOT FOUND (workspace still usable)' }))
+
+if ($Mode -eq 'Plan') {
+    Write-Host ''
+    Write-Host 'Plan complete. No repository, file, remote, or authentication state was changed.'
+    exit 0
+}
+
+Test-GitHubSsh -SshPath $sshPath
+
+if (-not (Test-Path -LiteralPath $plan.Root)) {
+    New-Item -ItemType Directory -Path $plan.Root -Force | Out-Null
+}
+if (-not (Test-Path -LiteralPath $plan.ContextPath)) {
+    New-Item -ItemType Directory -Path $plan.ContextPath -Force | Out-Null
+}
+
+Write-Host ''
+Write-Host '==> Canonical public repository'
+Ensure-Repository -GitPath $gitPath -RepositoryPath $plan.PublicPath -SshUrl $plan.PublicSsh
+
+Write-Host ''
+Write-Host '==> Private DLE repository'
+Ensure-Repository -GitPath $gitPath -RepositoryPath $plan.PrivatePath -SshUrl $plan.PrivateSsh
+
+if (-not $SkipIssueExport -and $ghPath) {
+    Write-Host ''
+    Write-Host '==> Durable issue context'
+    foreach ($publicIssue in @(7, 9, 14, 19, 38, 39, 51, 195)) {
+        Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue $publicIssue -Destination (Join-Path $plan.ContextPath "active-public-issue-$publicIssue.json")
+    }
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue 4 -Destination (Join-Path $plan.ContextPath 'provenance-public-dogfood-issue-4.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat-private' -Issue 2 -Destination (Join-Path $plan.ContextPath 'active-private-execution-issue-2.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue 1 -Destination (Join-Path $plan.ContextPath 'provenance-public-migration-issue-1.json')
+    Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat-private' -Issue 1 -Destination (Join-Path $plan.ContextPath 'provenance-private-migration-issue-1.json')
+}
+
+$publicSnapshot = Get-RepoSnapshot -GitPath $gitPath -RepositoryPath $plan.PublicPath
+$privateSnapshot = Get-RepoSnapshot -GitPath $gitPath -RepositoryPath $plan.PrivatePath
+Write-CoworkFiles -Plan $plan -Public $publicSnapshot -Private $privateSnapshot
+
+Write-Host ''
+Write-Host 'PASS: SupraChat local coworking workspace is reconciled without modifying existing worktrees.'
+Write-Host ('Actor baton: ' + $plan.PromptPath)
+) {
+        throw 'UNTRUSTED_DLE_WORKSET_POINTER'
+    }
+    return [string]$candidate.workset_path
+}
+
 function Get-BatchBaton {
     param([System.Collections.IDictionary]$Plan)
 
