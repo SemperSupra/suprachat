@@ -17,106 +17,11 @@ import (
 
 const schema = "suprachat-parallel-workset/v1"
 var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-var sha=regexp.MustCompile(`^[0-9a-f]{40}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
-// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
-// Requires the matching R48 Python critic as an independent validation gate.
-package main
-
-import (
- "encoding/json"
- "errors"
- "flag"
- "fmt"
- "io"
- "os"
- "regexp"
- "sort"
- "strings"
-)
-
-const schema = "suprachat-parallel-workset/v1"
-var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-)
-var sourceBranch=regexp.MustCompile(`^(agent|impl)/[A-Za-z0-9._/-]{3,128}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
-// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
-// Requires the matching R48 Python critic as an independent validation gate.
-package main
-
-import (
- "encoding/json"
- "errors"
- "flag"
- "fmt"
- "io"
- "os"
- "regexp"
- "sort"
- "strings"
-)
-
-const schema = "suprachat-parallel-workset/v1"
-var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-)
-var safeFile=regexp.MustCompile(`^[A-Za-z0-9._/-]{1,160}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
-// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
-// Requires the matching R48 Python critic as an independent validation gate.
-package main
-
-import (
- "encoding/json"
- "errors"
- "flag"
- "fmt"
- "io"
- "os"
- "regexp"
- "sort"
- "strings"
-)
-
-const schema = "suprachat-parallel-workset/v1"
-var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-)
-var issueRef=regexp.MustCompile(`^SemperSupra/[A-Za-z0-9._-]+#[1-9][0-9]*// R49: deterministic read-only antichain selector for bounded DLE actor cards.
-// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
-// Requires the matching R48 Python critic as an independent validation gate.
-package main
-
-import (
- "encoding/json"
- "errors"
- "flag"
- "fmt"
- "io"
- "os"
- "regexp"
- "sort"
- "strings"
-)
-
-const schema = "suprachat-parallel-workset/v1"
-var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-)
-var oracle=regexp.MustCompile(`^[A-Za-z0-9._ /:-]{12,220}// R49: deterministic read-only antichain selector for bounded DLE actor cards.
-// A selector is NOT an executor, workflow scheduler, GitHub writer, or authority issuer.
-// Requires the matching R48 Python critic as an independent validation gate.
-package main
-
-import (
- "encoding/json"
- "errors"
- "flag"
- "fmt"
- "io"
- "os"
- "regexp"
- "sort"
- "strings"
-)
-
-const schema = "suprachat-parallel-workset/v1"
-var ident=regexp.MustCompile(`^[a-z][a-z0-9-]{2,45}$`)
-)
+var sha=regexp.MustCompile(`^[0-9a-f]{40}$`)
+var sourceBranch=regexp.MustCompile(`^(agent|impl)/[A-Za-z0-9._/-]{3,128}$`)
+var safeFile=regexp.MustCompile(`^[A-Za-z0-9._/-]{1,160}$`)
+var issueRef=regexp.MustCompile(`^SemperSupra/[A-Za-z0-9._-]+#[1-9][0-9]*$`)
+var oracle=regexp.MustCompile(`^[A-Za-z0-9._ /:-]{12,220}$`)
 
 type Authority struct {
  PublicRepo string `json:"public_repo"`
