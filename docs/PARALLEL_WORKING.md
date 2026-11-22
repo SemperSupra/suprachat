@@ -1,6 +1,6 @@
 # R48 — Parallel execution way of working (human, automation, agent)
 
-**Status:** durable engineering policy proposal. Public product/source/qualification: `SemperSupra/suprachat`. Private DLE/assignment authority: `SemperSupra/suprachat-private#2` and `worksets/parallel-batches-r48.json` (until its private PR is integrated, follow the exact linked branch/issue receipt). Current bounded mission: `SemperSupra/suprachat#195`; predecessor #19/#38/#39 and architecture #7. Actor Dispatch provides authorized execution, not a duplicate source of truth or session state.
+**Status:** durable engineering policy proposal. Public product/source/qualification: `SemperSupra/suprachat`. Private DLE/assignment authority: `SemperSupra/suprachat-private#2` and `worksets/active-parallel-workset.json` pointing to the latest bounded manifest (until its private PR is integrated, follow the exact linked branch/issue receipt). Current bounded mission: `SemperSupra/suprachat#195`; predecessor #19/#38/#39 and architecture #7. Actor Dispatch provides authorized execution, not a duplicate source of truth or session state.
 
 ## Default scheduling behavior
 
