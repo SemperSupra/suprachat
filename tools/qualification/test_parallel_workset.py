@@ -46,7 +46,7 @@ def main():
        (lambda x:x["tasks"][1].update(write_paths=["tools/qualification"]), "WRITE_PATH_COLLISION"),
        (lambda x:x["tasks"][1].update(write_paths=["tools"]), "WRITE_PATH_COLLISION"),
        (lambda x:x["tasks"][1].update(depends_on=["actor-contract-critic"]), "DEPENDENT_TASK_SCHEDULED_TOO_EARLY"),
-       (lambda x:x["tasks"][2].update(state="READY",blocker=None), "DEPENDENT_TASK_SCHEDULED_TOO_EARLY"),
+       (lambda x:x["tasks"][2].update(state="READY",blocker=None,source_branch="agent/r48-held-tool",oracle_command="python -m tools.qualification.test_parallel_workset"), "DEPENDENT_TASK_SCHEDULED_TOO_EARLY"),
        (lambda x:x["tasks"][0].update(source_branch="evil:escape"), "SOURCE_BRANCH_REQUIRED"),
        (lambda x:x["tasks"][0].update(base_sha="unpinned"), "TASK_PIN"),
        (lambda x:x["tasks"][0].update(oracle_command="rm -rf /; echo pass"), "UNSAFE_ORACLE_COMMAND"),
