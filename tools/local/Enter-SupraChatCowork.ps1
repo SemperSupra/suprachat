@@ -231,6 +231,25 @@ function Get-RepoSnapshot {
     }
 }
 
+function Get-BatchBaton {
+    param([System.Collections.IDictionary]$Plan)
+
+    # Deliberately small-model-friendly; all task detail lives in durable DLE.
+    return (@(
+        'Resume SupraChat from GitHub DLE, not this conversation.',
+        ('Public: ' + $Plan.PublicPath),
+        ('Private: ' + $Plan.PrivatePath),
+        'Read both AGENTS.md, public docs/PARALLEL_WORKING.md, private issue #2, and the current private worksets/parallel-batches-r48.json (or linked pending PR).',
+        'Reconcile live #195, #19/#38/#39, PR heads, Actions receipts, and existing dirty worktrees before actions.',
+        'Select 2-4 independent READY batches (disjoint write paths, per-task branch and oracle); never serialize by habit. max-parallel=2 per public GHA workflow.',
+        'For each weaker actor, assign one bounded file-path allowlist, objective, fixture, one negative case, and exact PASS oracle. No scope expansion or recursion.',
+        'Preserve one session across human/automation/agent, accessible UX, and verified human-owner highest-priority intervention; a UI/voice event is not an auth token.',
+        'Dependencies are sequential: W8 owner identity -> W9 durable control/epoch -> real tool fence/cancel HIL -> independent review -> owner-controlled merge/release.',
+        'Do not spend, run private GHA, copy credentials, reset dirty trees, or merge/release without workset approval.',
+        'Reconcile every independent lane with PR/head/CI/evidence and write next batons to private issue #2. Do not ask the human to relay text.'
+    ) -join [Environment]::NewLine)
+}
+
 function Write-CoworkFiles {
     param(
         [System.Collections.IDictionary]$Plan,
@@ -267,29 +286,17 @@ function Write-CoworkFiles {
         '',
         $Plan.ContextPath,
         '',
-        'Public architecture umbrella: SemperSupra/suprachat#7; bounded workstreams: #19, #38, #39, #51. Read current issue acceptance gates.',
+        'Public architecture umbrella: #7; concurrent human control #195; bounded #19/#38/#39/#51. Read live acceptance gates.',
         'Active private execution/DLE authority: SemperSupra/suprachat-private#2.',
-        'A local actor should read public AGENTS.md, private AGENTS.md, the project-native private workset, and the exported issue context.',
+        'A local actor must read both AGENTS.md files, docs/PARALLEL_WORKING.md, private parallel-batches-r48.json and live issue context.',
         'Reconcile live GitHub state before acting. Do not reconstruct chat history.',
-        'Choose the highest READY bounded action, preserve human/automation/agent parity,',
-        'and write material evidence plus the next baton back to the private DLE.',
+        'Choose the maximal safe set of independent READY batches; preserve human/automation/agent parity,',
+        'and write exact PR/head/CI receipts for each independent lane plus the next baton to the private DLE.',
         '',
         'Human SIWC/OAuth authorization remains a human boundary. Never copy credential material into DLE state.'
     ) -join [Environment]::NewLine
 
-    $prompt = @(
-        'Resume SupraChat from durable repository state.',
-        ('Public working tree: ' + $Plan.PublicPath),
-        ('Private DLE working tree: ' + $Plan.PrivatePath),
-        ('Context directory: ' + $Plan.ContextPath),
-        '',
-        'Read both AGENTS.md files, private worksets/local-cowork.json, and the exported issue context first.',
-        'Use public #7 as the architecture umbrella and #19/#38/#39/#51 for their bounded workstreams; closed public #4 is provenance. SemperSupra/suprachat-private#2 is the private execution/evidence authority.',
-        'Reconcile live GitHub state before acting.',
-        'Continue the highest READY bounded action under the repository Way of Working.',
-        'Preserve human UI/UX, automation DX, agent DX, accessibility, credential boundaries, and public/free GHA qualification.',
-        'Do not use the human as a routine message relay; write material evidence and the next baton to the private DLE.'
-    ) -join [Environment]::NewLine
+    $prompt = Get-BatchBaton -Plan $Plan
 
     $manifest | Set-Content -LiteralPath $Plan.ManifestPath -Encoding UTF8
     $prompt | Set-Content -LiteralPath $Plan.PromptPath -Encoding UTF8
@@ -311,6 +318,13 @@ function Invoke-SelfTest {
     if (-not $defaultRoot.EndsWith($expectedSuffix, [StringComparison]::OrdinalIgnoreCase)) {
         $failures.Add("Default root must end in '$expectedSuffix'; got '$defaultRoot'.")
     }
+
+    $baton = Get-BatchBaton -Plan $plan
+    if ($baton -notmatch 'independent READY batches') { $failures.Add('Batch mandate absent from local actor baton.') }
+    if ($baton -notmatch 'parallel-batches-r48.json') { $failures.Add('Private workset pointer absent.') }
+    if ($baton -notmatch 'max-parallel=2') { $failures.Add('Public CI concurrency limit absent.') }
+    if ($baton -notmatch 'human-owner highest-priority') { $failures.Add('Owner-preemption rule absent.') }
+    if ($baton -notmatch 'per-task branch and oracle') { $failures.Add('Task isolation rule absent.') }
 
     if ($failures.Count -gt 0) {
         throw ('SelfTest failed: ' + ($failures -join ' '))
@@ -393,7 +407,7 @@ Ensure-Repository -GitPath $gitPath -RepositoryPath $plan.PrivatePath -SshUrl $p
 if (-not $SkipIssueExport -and $ghPath) {
     Write-Host ''
     Write-Host '==> Durable issue context'
-    foreach ($publicIssue in @(7, 19, 38, 39, 51)) {
+    foreach ($publicIssue in @(7, 9, 14, 19, 38, 39, 51, 195)) {
         Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue $publicIssue -Destination (Join-Path $plan.ContextPath "active-public-issue-$publicIssue.json")
     }
     Save-IssueContext -GhPath $ghPath -Repository 'SemperSupra/suprachat' -Issue 4 -Destination (Join-Path $plan.ContextPath 'provenance-public-dogfood-issue-4.json')
