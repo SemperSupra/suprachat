@@ -23,11 +23,12 @@ static class Test
         var grant=Guid.NewGuid().ToString("N");
         var trustedHuman=new SessionLedgerAdmission(true,"verified-human","human",session,grant,true);
         var unverifiedHuman=trustedHuman with {HumanBootstrapVerified=false};
+        var otherHuman=trustedHuman with {ActorId="authenticated-guest"};
         var bogusAgent=trustedHuman with {Audience="agent",HumanBootstrapVerified=false};
         var worker=new SessionLedgerAdmission(true,"worker-1","agent",session,
                                               Guid.NewGuid().ToString("N"));
         var automation=worker with {ActorId="automation-1",Audience="automation"};
-        var s=HumanInterventionPolicy.Initial(session);
+        var s=HumanInterventionPolicy.Initial(session,"verified-human");
         Check(s.Epoch==0 && s.Phase==HumanControlPhase.Running,"initial");
         Check(HumanInterventionPolicy.CheckProposal(s,0,worker).ProposalMayContinue,
               "agent_policy_proposal");
@@ -40,6 +41,8 @@ static class Test
             "synthetic human intent not transported in control receipt"))).ToLowerInvariant();
         var req=new HumanControlRequest(session,0,"human-guidance-op-000001","guide",guidance);
         var unauthorized=HumanInterventionPolicy.Apply(s,req,unverifiedHuman);
+        Check(HumanInterventionPolicy.Apply(s,req,otherHuman).Status==
+              "AUTHENTICATED_HUMAN_REQUIRED","nonowner_cannot_preempt");
         Check(unauthorized.Status=="AUTHENTICATED_HUMAN_REQUIRED" && unauthorized.State==s,
               "unverified_ui_not_human_authority");
         Check(HumanInterventionPolicy.Apply(s,req,bogusAgent).Status==
@@ -95,11 +98,16 @@ static class Test
               !HumanInterventionPolicy.CheckProposal(resume.State,2,worker).ToolAuthorityGranted,
               "new_worker_proposal_still_no_tool_scope");
 
-        var second=HumanInterventionPolicy.Initial(other);
+        var second=HumanInterventionPolicy.Initial(other,"other-owner");
         Check(second.Epoch==0 && second.Phase==HumanControlPhase.Running,
               "independent_sessions_no_global_stop");
 
-        Refuse(()=>HumanInterventionPolicy.Initial("guest-session"),"invalid_session");
+        Refuse(()=>HumanInterventionPolicy.Initial("guest-session","owner"),"invalid_session");
+        Refuse(()=>HumanInterventionPolicy.Initial(session,""),"missing_owner");
+        Refuse(()=>HumanInterventionPolicy.Initial(session,"attacker:forged"),"invalid_owner");
+        Refuse(()=>HumanInterventionPolicy.Apply(
+              s with {OwnerActorId="attacker:forged"}, req, trustedHuman),
+              "forged_state_owner");
         Refuse(()=>HumanInterventionPolicy.Apply(s,
               new(session,0,"short","pause"),trustedHuman),"invalid_op_id");
         Refuse(()=>HumanInterventionPolicy.Apply(s,
@@ -111,7 +119,7 @@ static class Test
         // Concurrency proof is strictly a synthetic single-writer fixture;
         // the source policy DOES NOT replace the actual W9 transaction lock.
         var gate=new object();
-        var race=HumanInterventionPolicy.Initial(session);
+        var race=HumanInterventionPolicy.Initial(session,"verified-human");
         int acceptedCount=0;
         Parallel.For(0,40,i=>{
             lock(gate)
