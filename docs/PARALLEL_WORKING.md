@@ -46,10 +46,21 @@ The public offline critic `tools/qualification/validate_parallel_workset.py` val
 
 The existing PS5.1-safe `tools/local/Enter-SupraChatCowork.ps1 -Mode Apply` refreshes the sibling repositories and emits `SUPRACHAT-LOCAL-ACTOR.txt`; it does not reset dirty worktrees, copy secrets or grant new authority. The human's cold-start message can be simply: **"Resume SupraChat from the DLE; run independent READY batches under AGENTS.md."** All detailed instructions belong in this policy, the workset, and the issue receipts.
 
-For the local actor in the public checkout, after both repositories are current and the workset branch is available:
+For the local actor in the public checkout, after both repositories are current and the pointer's review branch is available (until the owner integrates it):
 
 ```powershell
-python tools/qualification/validate_parallel_workset.py ../suprachat-private/worksets/parallel-batches-r48.json --cards
+$pointer = Get-Content ../suprachat-private/worksets/active-parallel-workset.json -Raw | ConvertFrom-Json
+if ($pointer.schema -ne 'suprachat-active-parallel-workset/v1' -or
+    $pointer.owner_issue -ne 'SemperSupra/suprachat-private#2' -or
+    $pointer.workset_path -notmatch '^worksets/parallel-batches-r[0-9]+[.]json
+```
+
+The output contains one small bounded JSON card per runnable lane with pinned base SHA, branch, allowlisted write paths, deterministic oracle command, adversarial case and expected evidence. Read that card rather than recreating a long user prompt. The command is **read-only** and does not dispatch a worker or authorize any action. If the private branch has not been integrated, fetch the exact branch linked in private DLE #2 into an isolated worktree; never overwrite a dirty checkout.
+) {
+    throw 'UNTRUSTED_DLE_WORKSET_POINTER'
+}
+$workset = Join-Path ../suprachat-private $pointer.workset_path
+python tools/qualification/validate_parallel_workset.py $workset --cards
 ```
 
 The output contains one small bounded JSON card per runnable lane with pinned base SHA, branch, allowlisted write paths, deterministic oracle command, adversarial case and expected evidence. Read that card rather than recreating a long user prompt. The command is **read-only** and does not dispatch a worker or authorize any action. If the private branch has not been integrated, fetch the exact branch linked in private DLE #2 into an isolated worktree; never overwrite a dirty checkout.
