@@ -81,6 +81,30 @@ func TestConflictingBranchesAndPathsCannotCoRun(t *testing.T){
    }}
  }}
 }
+func TestRunningWorkReservesCapacityAndFencesOverlaps(t *testing.T){
+ m:=fixture()
+ // A verified RUNNING lane consumes one of the bounded concurrency slots,
+ // even if the receiving controller reports that local worker slots are zero.
+ m.Tasks[3].State="RUNNING"
+ result,err:=selectWave(m,2,0)
+ if err!=nil{t.Fatal(err)}
+ if result.Width!=2{t.Fatalf("running lane ignored in capacity calculation: %#v",result)}
+ // Only one new lane may be admitted when two are already running.
+ m.Tasks[0].State="RUNNING"
+ one,err:=selectWave(m,2,0)
+ if err!=nil{t.Fatal(err)}
+ if one.Width!=1{t.Fatalf("overcommitted already-running lanes: %#v",one)}
+ // If the active local worker owns tools/alpha, overlapping READY source
+ // must be deferred, even if public free slots exist for another lane.
+ m=fixture()
+ m.Tasks[3].State="RUNNING"
+ m.Tasks[3].WritePaths=[]string{"tools/alpha/sub"}
+ overlapping,err:=selectWave(m,2,0)
+ if err!=nil{t.Fatal(err)}
+ for _,c:=range overlapping.Selected{
+  if c.TaskID=="ready-one"{t.Fatal("dispatched task overlapping live write ownership")}
+ }
+}
 func TestFailClosedAuthorityAndDependencies(t *testing.T){
  cases:=[]struct{
   name string
