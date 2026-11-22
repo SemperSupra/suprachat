@@ -1,0 +1,109 @@
+{
+  "schema": "suprachat-parallel-workset/v1",
+  "workset_id": "r48-synthetic-concurrency",
+  "authority": {
+    "public_repo": "SemperSupra/suprachat",
+    "private_dle": "SemperSupra/suprachat-private#2",
+    "owner_issue": "SemperSupra/suprachat#195",
+    "human_can_preempt": true,
+    "single_session_authority": true,
+    "owner_controls_merge": true
+  },
+  "budget": {
+    "max_concurrent": 2,
+    "max_public_gha_jobs": 2,
+    "private_gha_minutes": 0,
+    "paid_usd": 0,
+    "recursive_delegation": false
+  },
+  "tasks": [
+    {
+      "id": "actor-contract-critic",
+      "repo": "SemperSupra/suprachat",
+      "lane": "batch-oracle",
+      "state": "READY",
+      "executor": "public-gha",
+      "depends_on": [],
+      "write_paths": [
+        "tools/qualification"
+      ],
+      "acceptance_oracle": "Contract passes all negative mutation fixtures in public CI",
+      "evidence_receipt": "Public GHA run linked by exact source SHA",
+      "human_override_response": "FENCE_AND_RECONCILE",
+      "audiences": [
+        "human",
+        "accessible-human",
+        "automation",
+        "agent"
+      ],
+      "blocker": null,
+      "issue_ref": "SemperSupra/suprachat#195",
+      "source_branch": "agent/r48-batch-plan-critic",
+      "base_sha": "fe72b688b6256c553f3f0a4809490f42cc46f08d",
+      "oracle_command": "python -m tools.qualification.test_parallel_workset",
+      "negative_case": "Reject simultaneous overlapping write-path roots"
+    },
+    {
+      "id": "actor-bootstrap-baton",
+      "repo": "SemperSupra/suprachat",
+      "lane": "local-bootstrap",
+      "state": "READY",
+      "executor": "public-gha",
+      "depends_on": [],
+      "write_paths": [
+        "tools/local"
+      ],
+      "acceptance_oracle": "PS5.1 self-test checks generated baton and authority references",
+      "evidence_receipt": "Independent public Windows GHA source and test receipt",
+      "human_override_response": "FENCE_AND_RECONCILE",
+      "audiences": [
+        "human",
+        "accessible-human",
+        "automation",
+        "agent"
+      ],
+      "blocker": null,
+      "issue_ref": "SemperSupra/suprachat#195",
+      "source_branch": "agent/r48-local-actor-bootstrap",
+      "base_sha": "fe72b688b6256c553f3f0a4809490f42cc46f08d",
+      "oracle_command": "powershell -NoProfile -File tools/local/Enter-SupraChatCowork.ps1 -Mode SelfTest",
+      "negative_case": "Reject baton lacking human-owner and batch rules"
+    },
+    {
+      "id": "protected-hil-fence",
+      "repo": "SemperSupra/suprachat",
+      "lane": "tool-execution",
+      "state": "BLOCKED",
+      "executor": "local-qualified",
+      "depends_on": [
+        "actor-contract-critic",
+        "actor-bootstrap-baton"
+      ],
+      "write_paths": [
+        "SupraChat/Core/SharedSessionLedger.cs"
+      ],
+      "acceptance_oracle": "Authenticated owner HIL verifies epoch fence at every real tool dispatch",
+      "evidence_receipt": "Held for independent local HIL and private DLE acceptance",
+      "human_override_response": "FENCE_AND_RECONCILE",
+      "audiences": [
+        "human",
+        "accessible-human",
+        "automation",
+        "agent"
+      ],
+      "blocker": "Requires authenticated local host, W8 identity and W9 durable admission",
+      "issue_ref": "SemperSupra/suprachat#195",
+      "source_branch": null,
+      "base_sha": "fe72b688b6256c553f3f0a4809490f42cc46f08d",
+      "oracle_command": null,
+      "negative_case": "Reject unauthenticated owner and stale epoch tool execution"
+    }
+  ],
+  "integration_gates": [
+    "independent-source-and-oracle",
+    "exact-head-public-ci",
+    "cross-lane-peer-review",
+    "owner-approved-merge",
+    "durable-dle-reconciliation"
+  ]
+}
