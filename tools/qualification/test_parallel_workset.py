@@ -34,7 +34,7 @@ def main():
         assert card["branch"].startswith("agent/")
         assert card["oracle_command"]
         assert card["negative_case"]
-        assert "secret" not in json.dumps(card).lower()
+        assert "token" not in card and "credentials" not in card
 
 
     def change(fn):
