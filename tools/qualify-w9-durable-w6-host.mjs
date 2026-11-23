@@ -15,7 +15,8 @@ const dll=path.join(root,'SupraChat.Automation','bin','Release','net10.0','Supra
 const token=randomBytes(32).toString('base64url');
 const temp=await mkdtemp(path.join(os.tmpdir(),'suprachat-w9-'));
 const store=path.join(temp,'w9.sqlite');
-const envBase={...process.env,SUPRACHAT_LEDGER_TOKEN:token,SUPRACHAT_LEDGER_STORE:store};
+const envBase={...process.env,SUPRACHAT_W6_DISPOSABLE_ONLY:'yes',
+  SUPRACHAT_LEDGER_TOKEN:token,SUPRACHAT_LEDGER_STORE:store};
 const stages=[];
 let host=null,port;
 const record=(name)=>stages.push({name,status:'PASS'});
