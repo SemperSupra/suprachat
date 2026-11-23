@@ -1767,6 +1767,19 @@ jobs:
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
           }
 
+      - name: R50 redacted Windows UIA startup symptom receipt after failure
+        if: ${{ failure() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          # Never disclose startup exception strings, raw logs, users, paths or event bodies.
+          # Original failed GUI/UIA step remains FAILED; this is evidence only.
+          $eventLog = Join-Path $env:LOCALAPPDATA 'SemperSupra/SupraChat/diagnostics/events.jsonl'
+          & ./tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 `
+            -StartupLog (Join-Path $env:RUNNER_TEMP 'suprachat-startup.log') `
+            -StdoutLog (Join-Path $env:RUNNER_TEMP 'suprachat-stdout.log') `
+            -StderrLog (Join-Path $env:RUNNER_TEMP 'suprachat-stderr.log') `
+            -EventLog $eventLog
+
       - name: Qualify synthetic secret UIA boundary for v0.0.1
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
         shell: pwsh
