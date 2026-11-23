@@ -168,7 +168,13 @@ try{
   await stop();
   await launch();
   let inventory=(await request('/v1/sessions')).body;
-  assert.equal(inventory.durableAcrossProcessRestart,true);
+  // The *pure W6 ledger inventory* intentionally advertises no inherent
+  // process durability. The separately admitted W9 host owns that guarantee
+  // through /v1/health and externally observed SQLite restart/replay.
+  assert.equal(inventory.durableAcrossProcessRestart,false);
+  const healthAfterRestart=await request('/v1/health');
+  assert.equal(healthAfterRestart.status,200);
+  assert.equal(healthAfterRestart.body.durable_recovery_available,true);
   assert.equal(inventory.authenticatedAudiences,false);
   assert.equal(inventory.sessions.length,2);
   assert.equal(inventory.sessions.find(s=>s.id===sidA).version,1);
