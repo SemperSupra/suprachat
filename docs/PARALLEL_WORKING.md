@@ -64,3 +64,7 @@ python tools/qualification/validate_parallel_workset.py $workset --cards
 ```
 
 The output contains one small bounded JSON card per runnable lane with pinned base SHA, branch, allowlisted write paths, deterministic oracle command, adversarial case and expected evidence. Read that card rather than recreating a long user prompt. The command is **read-only** and does not dispatch a worker or authorize any action. If the private branch has not been integrated, fetch the exact branch linked in private DLE #2 into an isolated worktree; never overwrite a dirty checkout.
+
+### Fail-closed current-workset selection
+
+The local bootstrap reads `worksets/active-parallel-workset.json` from the checked-out **private** DLE. If the pointer is missing, malformed, or points to a workset not yet fetched from the exact branch in private issue #2, the baton MUST state `UNRESOLVED_FROM_PRIVATE_DLE` and no READY task can start. Never fall back silently to the historically valid R48 workset: it can contain superseded assignments and already completed tasks. First reconcile the latest branch/owner decision and only then run the read-only task-card critic. Historical R48/R49 manifests remain evidence; only the verified pointer selects the current wave.
