@@ -233,19 +233,27 @@ function Get-RepoSnapshot {
 
 function Resolve-ParallelWorksetRelative {
     param([string]$PrivateRoot)
+
     $pointer = Join-Path $PrivateRoot 'worksets/active-parallel-workset.json'
     if (-not (Test-Path -LiteralPath $pointer)) {
-        # The latest issue #2 may point to an unmerged proposal branch.
-        # Preserve the historical fallback without inventing accepted state.
+        # The active pointer may still be on a proposal branch.
+        # Keep the historical workset path as a non-authoritative fallback.
         return 'worksets/parallel-batches-r48.json'
     }
     $candidate = Get-Content -LiteralPath $pointer -Raw | ConvertFrom-Json
     if ($candidate.schema -ne 'suprachat-active-parallel-workset/v1' -or
         $candidate.owner_issue -ne 'SemperSupra/suprachat-private#2' -or
-        ([string]$candidate.workset_path) -notmatch '^worksets/parallel-batches-r[0-9]+[.]json
+        $candidate.workset_repository -ne 'SemperSupra/suprachat-private' -or
+        ([string]$candidate.workset_path) -notmatch '^worksets/parallel-batches-r[0-9]+[.]json$') {
+        throw 'INVALID_PRIVATE_PARALLEL_WORKSET_POINTER'
+    }
+    return [string]$candidate.workset_path
+}
+
+function Get-BatchBaton {
     param([System.Collections.IDictionary]$Plan)
 
-    # Deliberately small-model-friendly; all task detail lives in durable DLE.
+    # The baton is a pointer, never a substitute for the private DLE.
     $relative = Resolve-ParallelWorksetRelative -PrivateRoot $Plan.PrivatePath
     $activeWorkset = Join-Path $Plan.PrivatePath $relative
     return (@(
