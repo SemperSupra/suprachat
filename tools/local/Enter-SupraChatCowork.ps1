@@ -236,9 +236,9 @@ function Resolve-ParallelWorksetRelative {
 
     $pointer = Join-Path $PrivateRoot 'worksets/active-parallel-workset.json'
     if (-not (Test-Path -LiteralPath $pointer)) {
-        # The active pointer may still be on a proposal branch.
-        # Keep the historical workset path as a non-authoritative fallback.
-        return 'worksets/parallel-batches-r48.json'
+        # The accepted pointer may still be in a DLE-linked proposal branch.
+        # Never silently select a stale historical workset in its absence.
+        return $null
     }
     $candidate = Get-Content -LiteralPath $pointer -Raw | ConvertFrom-Json
     if ($candidate.schema -ne 'suprachat-active-parallel-workset/v1' -or
@@ -255,7 +255,14 @@ function Get-BatchBaton {
 
     # The baton is a pointer, never a substitute for the private DLE.
     $relative = Resolve-ParallelWorksetRelative -PrivateRoot $Plan.PrivatePath
-    $activeWorkset = Join-Path $Plan.PrivatePath $relative
+    if ($relative) {
+        $activeWorkset = Join-Path $Plan.PrivatePath $relative
+        $cardInstruction = 'After DLE reconciliation, emit bounded cards: python tools/qualification/validate_parallel_workset.py "' + $activeWorkset + '" --cards'
+    }
+    else {
+        $activeWorkset = 'UNRESOLVED_FROM_PRIVATE_DLE'
+        $cardInstruction = 'Do not emit or execute READY cards before fetching the exact private branch linked by issue #2 and validating its active-parallel-workset.json.'
+    }
     return (@(
         'Resume SupraChat from GitHub DLE, not this conversation.',
         ('Public: ' + $Plan.PublicPath),
@@ -265,7 +272,8 @@ function Get-BatchBaton {
         'Reconcile live #195, #19/#38/#39, PR heads, Actions receipts, and existing dirty worktrees before actions.',
         'Select 2-4 independent READY batches (disjoint write paths, per-task branch and oracle); never serialize by habit. max-parallel=2 per public GHA workflow.',
         'For each weaker actor, assign one bounded file-path allowlist, objective, fixture, one negative case, and exact PASS oracle. No scope expansion or recursion.',
-        ('Locally emit bounded task cards, after current DLE reconciliation: python tools/qualification/validate_parallel_workset.py "' + $activeWorkset + '" --cards (read-only; no worker starts).'),
+        $cardInstruction,
+        'No READY action may start while the private active-workset pointer is missing or unverified.',
         'Preserve one session across human/automation/agent, accessible UX, and verified human-owner highest-priority intervention; a UI/voice event is not an auth token.',
         'Dependencies are sequential: W8 owner identity -> W9 durable control/epoch -> real tool fence/cancel HIL -> independent review -> owner-controlled merge/release.',
         'Do not spend, run private GHA, copy credentials, reset dirty trees, or merge/release without workset approval.',
@@ -345,6 +353,7 @@ function Invoke-SelfTest {
     $baton = Get-BatchBaton -Plan $plan
     if ($baton -notmatch 'independent READY batches') { $failures.Add('Batch mandate absent from local actor baton.') }
     if ($baton -notmatch 'active-parallel-workset.json') { $failures.Add('Private active-workset pointer absent.') }
+    if ($baton -notmatch 'No READY action may start') { $failures.Add('Fail-closed stale-workset rule absent.') }
     if ($baton -notmatch 'max-parallel=2') { $failures.Add('Public CI concurrency limit absent.') }
     if ($baton -notmatch 'human-owner highest-priority') { $failures.Add('Owner-preemption rule absent.') }
     if ($baton -notmatch 'per-task branch and oracle') { $failures.Add('Task isolation rule absent.') }
