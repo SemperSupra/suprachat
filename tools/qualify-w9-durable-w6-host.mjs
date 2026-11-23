@@ -209,6 +209,69 @@ try{
   assert.equal(after.body.session.version,2);
   record('lost-ack-replays-durable-first-outcome-not-second-change');
 
+  // R50: three audiences concurrently contest ONE session's immutable
+  // version, through HTTP and a separate agent JSON-RPC process. This
+  // explicitly does NOT prove independently authenticated human identity
+  // or higher-priority human preemption; W8/W9 epoch integration is HOLD.
+  const aBefore=(await request('/v1/sessions')).body.sessions.find(s=>s.id===sidA);
+  assert.equal(aBefore.version,1);
+  const humanRace=change('w50-human-same-session-0001','human',
+                         sidA,1,'synthetic-human-race');
+  const autoRace=change('w50-auto-same-session-00001','automation',
+                        sidA,1,'synthetic-automation-race');
+  const agentRace=change('w50-agent-same-session-0001','agent',
+                         sidA,1,'synthetic-agent-race');
+  const [humanR,autoR,agentR]=await Promise.all([
+    request('/v1/sessions/change','POST',humanRace),
+    request('/v1/sessions/change','POST',autoRace),
+    agentRpc('session/ledger/change',agentRace)
+  ]);
+  const contestants=[
+    {kind:'human',status:humanR.status,body:humanR.body,req:humanRace},
+    {kind:'automation',status:autoR.status,body:autoR.body,req:autoRace},
+    {kind:'agent',status:agentR.http_status,body:agentR.payload,req:agentRace}
+  ];
+  assert.equal(contestants.filter(x=>x.status===200&&x.body.applied).length,1);
+  assert.equal(contestants.filter(x=>x.status===409&&
+                                    x.body.status==='VERSION_CONFLICT').length,2);
+  assert.equal((await request('/v1/sessions')).body.sessions
+              .find(s=>s.id===sidA).version,2);
+  for(const loser of contestants.filter(x=>x.status===409)){
+    const replay=await request('/v1/sessions/change','POST',loser.req);
+    assert.equal(replay.status,409);
+    assert.equal(replay.body.isReplay,true);
+  }
+  record('three-audiences-same-session-single-writer-cas');
+  // A later synthetic human request is accepted at the NEW revision, while
+  // stale automation/agent proposals remain refused. This is NOT human
+  // priority, real guidance capture, or physical-tool fencing.
+  const humanFollow=change('w50-human-followup-00001','human',
+                           sidA,2,'synthetic-human-updated-intent');
+  const follow=await request('/v1/sessions/change','POST',humanFollow);
+  assert.equal(follow.status,200);
+  assert.equal(follow.body.applied,true);
+  assert.equal(follow.body.session.version,3);
+  const staleAuto=change('w50-stale-auto-00000001','automation',
+                         sidA,2,'unadmitted-stale-work');
+  const stale=await request('/v1/sessions/change','POST',staleAuto);
+  assert.equal(stale.status,409);
+  assert.equal(stale.body.status,'VERSION_CONFLICT');
+  record('revision-bound-human-followup-and-stale-automation-refusal');
+
+  await stop();
+  await launch();
+  inventory=(await request('/v1/sessions')).body;
+  assert.equal(inventory.sessions.find(s=>s.id===sidA).version,3);
+  const followReplay=await request('/v1/sessions/change','POST',humanFollow);
+  assert.equal(followReplay.status,200);
+  assert.equal(followReplay.body.isReplay,true);
+  const staleReplay=await request('/v1/sessions/change','POST',staleAuto);
+  assert.equal(staleReplay.status,409);
+  assert.equal(staleReplay.body.isReplay,true);
+  assert.equal(inventory.authenticatedAudiences,false);
+  record('three-audience-shared-session-recovered-after-restart');
+
+
   await stop();
   // Corrupt metadata store in a separate disposable location, not the gold DB.
   const corruptPath=path.join(temp,'corrupt.sqlite');
@@ -228,6 +291,10 @@ try{
     independent_client_processes:true,
     recovered_applied_and_rejected_receipts:true,
     host_restart_and_lost_ack:true,
+    concurrent_human_automation_agent_same_session:true,
+    three_audience_cas_recovered_after_restart:true,
+    independently_authenticated_human_priority:false,
+    durable_preemption_epoch_enforced:false,
     durable_provider_prompt_receipts:false,
     authenticated_audience_identity:false,
     chatgpt_prompt_sent:false,terminal_command_executed:false,
