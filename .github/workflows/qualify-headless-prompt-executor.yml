@@ -1,0 +1,91 @@
+name: Qualify headless SupraChat prompt executor
+
+on:
+  pull_request:
+    paths:
+      - "tools/headless-executor/**"
+      - ".github/workflows/qualify-headless-prompt-executor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: headless-prompt-executor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stdio-consumer:
+    name: Go executor receipt and uncertainty qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.x"
+      - name: Verify model-free prompt -> structured receipt + no-retry classifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          GO111MODULE=off GOPROXY=off GOSUMDB=off go test -race -count=1 -v ./tools/headless-executor | tee evidence/headless-executor-go-test.txt
+          CGO_ENABLED=0 GO111MODULE=off GOPROXY=off go build -trimpath -o /tmp/suprachat-headless-executor ./tools/headless-executor
+      - name: Preserve public-safe test receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: suprachat-headless-executor-synthetic-go
+          path: evidence/headless-executor-go-test.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+  suprachat-stdio-native:
+    name: Real credential-free SupraChat stdio contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build actual SupraChat.Automation project
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build SupraChat.Automation/SupraChat.Automation.csproj -c Release --nologo
+      - name: Independently verify real JSON-RPC framing without auth or provider use
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 - <<'PY' | tee evidence/suprachat-native-stdio-synthetic.json
+          import json, subprocess
+          dll="SupraChat.Automation/bin/Release/net10.0/SupraChat.Automation.dll"
+          requests=[
+            {"jsonrpc":"2.0","id":"synthetic-read","method":"capabilities/read","params":{}},
+            {"jsonrpc":"2.0","id":"synthetic-invalid-prompt","method":"responses/create","params":{"input":"synthetic: missing required model"}}
+          ]
+          p=subprocess.run(["dotnet",dll,"stdio"],input="".join(json.dumps(q)+"\n" for q in requests),text=True,
+                            stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=90,check=False)
+          frames=[json.loads(s) for s in p.stdout.splitlines() if s.strip()]
+          by_id={f.get("id"):f for f in frames if "id" in f}
+          assert p.returncode==0, "headless process lifecycle failed"
+          assert len(by_id)==2, "RPC identity framing mismatch"
+          assert "result" in by_id["synthetic-read"], "no native read surface"
+          assert "error" in by_id["synthetic-invalid-prompt"], "invalid prompt parameters not refused"
+          assert not any("access_token" in str(f).lower() for f in frames), "token-shaped field appeared"
+          receipt={"status":"PASS","schema":"suprachat-headless-native-stdio-rdte/v1",
+                   "native_stdio_read":True, "invalid_prompt_refused":True,
+                   "authenticated_provider_call":False,"chatgpt_webui_call":False,
+                   "owner_effect_accepted":False}
+          print(json.dumps(receipt,sort_keys=True))
+          PY
+      - name: Upload no-credential smoke receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: suprachat-headless-native-stdio-smoke
+          path: evidence/suprachat-native-stdio-synthetic.json
+          retention-days: 7
+          if-no-files-found: warn
