@@ -59,7 +59,7 @@ public partial class InteractiveTerminalView : UserControl
             Dispatcher.UIThread.Post(() =>
             {
                 if (!_closing)
-                    TerminalView.NavigateToString(TerminalDocument.Value);
+                    LoadTerminalDocument();
             });
         TerminalView.AdapterDestroyed += (_, _) =>
         {
@@ -69,15 +69,30 @@ public partial class InteractiveTerminalView : UserControl
             StartShell.IsEnabled = false;
             _renderTimer.Stop();
         };
-        TerminalView.NavigationCompleted += async (_, args) =>
+        TerminalView.NavigationCompleted += (_, args) =>
         {
-            if (!args.IsSuccess || _closing)
-                return;
-            _documentToken = Guid.NewGuid().ToString("N");
-            await SendToViewAsync($"window.initializeTerminal?.({JsonSerializer.Serialize(_documentToken)})");
+            if (!args.IsSuccess && !_closing && !_ready)
+                InteractiveStatus.Text = "Terminal view failed to load. Select Retry terminal view.";
         };
         TerminalView.WebMessageReceived += (_, args) => ReceiveMessage(args.Body);
     }
+
+    private async void LoadTerminalDocument()
+    {
+        _ready = false;
+        _selectionRequested = false;
+        StartShell.IsEnabled = false;
+        _renderTimer.Stop();
+        InteractiveStatus.Text = "Loading interactive terminal…";
+        var token = Guid.NewGuid().ToString("N");
+        _documentToken = token;
+        TerminalView.NavigateToString(TerminalDocument.Value.Replace("TERMINAL_DOCUMENT_TOKEN", token, StringComparison.Ordinal));
+        await Task.Delay(TimeSpan.FromSeconds(8));
+        if (!_closing && !_ready && _documentToken == token)
+            InteractiveStatus.Text = "Terminal view did not connect. Select Retry terminal view.";
+    }
+
+    private void RetryView_Click(object? sender, RoutedEventArgs e) => LoadTerminalDocument();
 
     internal void CloseShell()
     {
@@ -89,7 +104,7 @@ public partial class InteractiveTerminalView : UserControl
     internal void FocusInput()
     {
         TerminalView.Focus();
-        _ = SendToViewAsync("window.focusTerminal?.()");
+        _ = SendToViewAsync(_documentToken, "focus");
     }
 
     private void ReceiveMessage(string? message)
@@ -182,7 +197,7 @@ public partial class InteractiveTerminalView : UserControl
                 _history.Clear();
                 _pending.Clear();
             }
-            await SendToViewAsync("window.resetTerminal?.()");
+            await SendToViewAsync(_documentToken, "reset");
             var (columns, rows) = (_columns, _rows);
             var shell = await Task.Run(() => new WindowsInteractiveTerminal(executable, arguments,
                 directory, variables, columns, rows, AppendOutput));
@@ -254,7 +269,8 @@ public partial class InteractiveTerminalView : UserControl
         if (!_ready)
             return;
         _selectionRequested = true;
-        await SendToViewAsync("window.stageTerminalSelection?.()");
+        if (!await SendToViewAsync(_documentToken, "selection"))
+            _selectionRequested = false;
     }
 
     private void AppendOutput(string text)
@@ -289,9 +305,18 @@ public partial class InteractiveTerminalView : UserControl
             _pending.Remove(0, count);
         }
         _rendering = true;
+        var token = _documentToken;
         try
         {
-            await SendToViewAsync($"window.writeTerminal?.({JsonSerializer.Serialize(chunk)})");
+            if (!await SendToViewAsync(token, "write", chunk) && _documentToken == token)
+            {
+                lock (_outputGate)
+                {
+                    _pending.Insert(0, chunk);
+                    if (_pending.Length > BufferLimit)
+                        _pending.Remove(0, _pending.Length - BufferLimit);
+                }
+            }
         }
         finally
         {
@@ -299,15 +324,17 @@ public partial class InteractiveTerminalView : UserControl
         }
     }
 
-    private async Task SendToViewAsync(string script)
+    private async Task<bool> SendToViewAsync(string token, string action, string? text = null)
     {
         try
         {
-            await TerminalView.InvokeScript(script);
+            await TerminalView.InvokeScript(
+                $"window.terminalAction?.({JsonSerializer.Serialize(token)}, {JsonSerializer.Serialize(action)}, {JsonSerializer.Serialize(text)})");
+            return true;
         }
         catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
-            // The native view can be detached when changing workspace tabs.
+            return false;
         }
     }
 

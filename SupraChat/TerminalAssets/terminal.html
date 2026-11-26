@@ -17,8 +17,15 @@ html, body { height: 100%; margin: 0; background: #171717; overflow: hidden; }
 <script>/* FIT_JS */</script>
 <script>
 "use strict";
-window.initializeTerminal = (token) => {
-    const send = (kind, fields = {}) => invokeCSharpAction(JSON.stringify({ token, kind, ...fields }));
+document.addEventListener("DOMContentLoaded", () => {
+    const token = "TERMINAL_DOCUMENT_TOKEN";
+    const send = (kind, fields = {}) => {
+        const message = JSON.stringify({ token, kind, ...fields });
+        if (typeof window.invokeCSharpAction === "function")
+            window.invokeCSharpAction(message);
+        else
+            window.chrome.webview.postMessage(message);
+    };
     const element = document.getElementById("terminal");
     const terminal = new Terminal({
         cursorBlink: true,
@@ -38,12 +45,17 @@ window.initializeTerminal = (token) => {
     terminal.onResize(({ cols, rows }) => send("resize", { cols, rows }));
     new ResizeObserver(() => fit.fit()).observe(element);
     fit.fit();
-    window.writeTerminal = (text) => terminal.write(text);
-    window.resetTerminal = () => terminal.reset();
-    window.focusTerminal = () => terminal.focus();
-    window.stageTerminalSelection = () => send("selection", { text: terminal.getSelection().slice(0, 16385) });
+    window.terminalAction = (expected, action, text) => {
+        if (expected !== token) return;
+        switch (action) {
+            case "write": terminal.write(text); break;
+            case "reset": terminal.reset(); break;
+            case "focus": terminal.focus(); break;
+            case "selection": send("selection", { text: terminal.getSelection().slice(0, 16385) }); break;
+        }
+    };
     send("ready", { cols: terminal.cols, rows: terminal.rows });
-};
+}, { once: true });
 </script>
 </body>
 </html>

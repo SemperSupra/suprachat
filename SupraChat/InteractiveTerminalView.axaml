@@ -14,6 +14,9 @@
               AutomationProperties.AutomationId="Terminal.StartShell" />
       <Button x:Name="StopShell" Content="Stop shell" Click="StopShell_Click" IsEnabled="False"
               AutomationProperties.AutomationId="Terminal.StopShell" />
+      <Button Content="Retry terminal view" Click="RetryView_Click"
+              AutomationProperties.AutomationId="Terminal.RetryView"
+              AutomationProperties.HelpText="Reconnect the terminal view without stopping the shell." />
       <Button Content="Stage selection for chat" Click="StageSelection_Click"
               AutomationProperties.AutomationId="Terminal.InteractiveStageSelection"
               AutomationProperties.HelpText="Review selected terminal text before staging it for chat." />
