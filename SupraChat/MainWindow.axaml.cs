@@ -131,6 +131,20 @@ public partial class MainWindow : Window
         UpdateChatTerminalDock(captureBeforeChanging: false);
     }
 
+    private void MoreChatSpace_Click(object? sender, RoutedEventArgs e) => AdjustPaneShare(0.08);
+    private void MoreTerminalSpace_Click(object? sender, RoutedEventArgs e) => AdjustPaneShare(-0.08);
+
+    private void AdjustPaneShare(double change)
+    {
+        if (_activeChatSession is not { } session || !ChatTerminalHost.IsVisible)
+            return;
+        CaptureWorkspaceLayout(session);
+        session.Settings = session.Settings.StackPanes
+            ? session.Settings with { StackedChatFraction = Math.Clamp(session.Settings.StackedChatFraction + change, 0.1, 0.9) }
+            : session.Settings with { ChatFraction = Math.Clamp(session.Settings.ChatFraction + change, 0.1, 0.9) };
+        UpdateChatTerminalDock(captureBeforeChanging: false);
+    }
+
     private PairedWorkspaceSettings NewWorkspaceSettings() =>
         new(Guid.NewGuid(), $"Workspace {_pairedChatSessions.Count + 1}");
 
@@ -414,8 +428,8 @@ public partial class MainWindow : Window
         var rows = ChatTerminalGrid.RowDefinitions;
         columns[0].MinWidth = show && !stacked ? 620 : 0;
         columns[2].MinWidth = show && !stacked ? 260 : 0;
-        rows[0].MinHeight = show && stacked ? 200 : 0;
-        rows[2].MinHeight = show && stacked ? 150 : 0;
+        rows[0].MinHeight = show && stacked ? 150 : 0;
+        rows[2].MinHeight = show && stacked ? 140 : 0;
         columns[0].Width = new GridLength(show && !stacked ? fraction : 1, GridUnitType.Star);
         columns[1].Width = new GridLength(show && !stacked ? 8 : 0);
         columns[2].Width = show && !stacked ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
@@ -434,6 +448,8 @@ public partial class MainWindow : Window
         session.TerminalDock.IsVisible = show;
         ChatTerminalHost.IsVisible = show;
         ChatTerminalDivider.IsVisible = show;
+        MoreChatSpaceButton.IsVisible = show;
+        MoreTerminalSpaceButton.IsVisible = show;
         ChatTerminalToggle.Content = ChatTerminalToggle.IsChecked == true ? "Hide terminal" : "Show terminal";
         SplitOrientationButton.Content = stacked ? "Side by side" : "Stack panes";
     }
@@ -825,7 +841,7 @@ public partial class MainWindow : Window
         }
         else if (!_isExplicitWorkPlanSelected)
         {
-            UpdatePlanIndicator(isWorkPlan: false, "Personal Subscription (Zero Work Spend)");
+            UpdatePlanIndicator(isWorkPlan: false, "Personal mode · subscription unverified");
         }
     }
 
@@ -847,7 +863,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            UpdatePlanIndicator(isWorkPlan: false, "Personal Subscription (Zero Work Spend)");
+            UpdatePlanIndicator(isWorkPlan: false, "Personal mode · subscription unverified");
         }
     }
 

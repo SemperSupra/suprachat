@@ -56,3 +56,27 @@ internal sealed record PairedWorkspaceLayout(Guid? Active, List<PairedWorkspaceS
         System.Text.RegularExpressions.Regex.IsMatch(url.AbsolutePath, @"^/g/g-p-[a-zA-Z0-9-]+/project/?$")
             ? url : null;
 }
+
+public static class SavedWorkspaceInventory
+{
+    public static object Read()
+    {
+        var layout = PairedWorkspaceLayout.Load();
+        return new
+        {
+            schema = "suprachat-saved-workspaces/v1",
+            scope = "saved-local-configuration",
+            active_id = layout.Workspaces.Any(workspace => workspace.Id == layout.Active) ? layout.Active : null,
+            workspaces = layout.Workspaces.Select(workspace => new
+            {
+                id = workspace.Id,
+                name = workspace.Name,
+                layout = workspace.StackPanes ? "stacked" : "side-by-side",
+                show_terminal = workspace.ShowTerminal,
+                project_pinned = PairedWorkspaceLayout.ProjectAddress(workspace.ProjectUrl) is not null,
+                startup_directory_configured = !string.IsNullOrEmpty(workspace.StartupDirectory),
+                environment_overrides_configured = workspace.EnvironmentOverrides is { Count: > 0 }
+            }).ToArray()
+        };
+    }
+}

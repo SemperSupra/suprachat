@@ -22,6 +22,7 @@ public partial class InteractiveTerminalView : UserControl
     private readonly DispatcherTimer _renderTimer;
     private WindowsInteractiveTerminal? _shell;
     private string _documentToken = string.Empty;
+    private Uri? _documentAddress;
     private bool _ready;
     private bool _rendering;
     private bool _resizing;
@@ -51,23 +52,21 @@ public partial class InteractiveTerminalView : UserControl
         };
         TerminalView.NavigationStarted += (_, args) =>
         {
-            if (args.Request != new Uri("about:blank"))
+            if (args.Request != _documentAddress && args.Request != new Uri("about:blank"))
                 args.Cancel = true;
         };
         TerminalView.NewWindowRequested += (_, args) => args.Handled = true;
-        TerminalView.AdapterCreated += (_, _) =>
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (!_closing)
-                    LoadTerminalDocument();
-            });
         TerminalView.AdapterDestroyed += (_, _) =>
         {
-            _documentToken = string.Empty;
             _ready = false;
             _selectionRequested = false;
             StartShell.IsEnabled = false;
             _renderTimer.Stop();
+        };
+        TerminalView.Loaded += (_, _) =>
+        {
+            if (!_closing && !_ready)
+                LoadTerminalDocument();
         };
         TerminalView.NavigationCompleted += (_, args) =>
         {
@@ -85,8 +84,23 @@ public partial class InteractiveTerminalView : UserControl
         _renderTimer.Stop();
         InteractiveStatus.Text = "Loading interactive terminal…";
         var token = Guid.NewGuid().ToString("N");
-        _documentToken = token;
-        TerminalView.NavigateToString(TerminalDocument.Value.Replace("TERMINAL_DOCUMENT_TOKEN", token, StringComparison.Ordinal));
+        var previous = _documentAddress;
+        try
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "SupraChat-Terminal");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, token + ".html");
+            File.WriteAllText(path, TerminalDocument.Value.Replace("TERMINAL_DOCUMENT_TOKEN", token, StringComparison.Ordinal));
+            _documentAddress = new Uri(path);
+            _documentToken = token;
+            TerminalView.Source = _documentAddress;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            InteractiveStatus.Text = "Could not create the local terminal view.";
+            return;
+        }
+        DeleteTerminalDocument(previous);
         await Task.Delay(TimeSpan.FromSeconds(8));
         if (!_closing && !_ready && _documentToken == token)
             InteractiveStatus.Text = "Terminal view did not connect. Select Retry terminal view.";
@@ -99,6 +113,21 @@ public partial class InteractiveTerminalView : UserControl
         _closing = true;
         _renderTimer.Stop();
         _shell?.Stop();
+        DeleteTerminalDocument(_documentAddress);
+    }
+
+    private static void DeleteTerminalDocument(Uri? document)
+    {
+        if (document is null)
+            return;
+        try
+        {
+            File.Delete(document.LocalPath);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // A renderer that is closing can still hold the file open.
+        }
     }
 
     internal void FocusInput()
@@ -106,6 +135,8 @@ public partial class InteractiveTerminalView : UserControl
         TerminalView.Focus();
         _ = SendToViewAsync(_documentToken, "focus");
     }
+
+    private void FocusTerminal_Click(object? sender, RoutedEventArgs e) => FocusInput();
 
     private void ReceiveMessage(string? message)
     {
