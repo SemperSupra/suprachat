@@ -78,7 +78,7 @@
                AutomationProperties.AcceleratorKey="Command+1 / Control+1"
                AutomationProperties.HelpText="Official ChatGPT product surface. Keyboard shortcut Command+1 on macOS or Control+1 on Windows/Linux.">
         <Grid RowDefinitions="Auto,Auto,*">
-          <Grid ColumnDefinitions="*,Auto" Margin="8,4">
+          <Grid ColumnDefinitions="*,Auto,Auto" Margin="8,4">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
               <TabStrip x:Name="ChatSessionTabs"
                         AutomationProperties.AutomationId="ChatGPT.SessionTabs"
@@ -87,6 +87,10 @@
             <Button Grid.Column="1" Content="New workspace" Click="NewChatSession_Click"
                     AutomationProperties.AutomationId="ChatGPT.NewSession"
                     AutomationProperties.HelpText="Open a workspace with its own ChatGPT view and terminal session." />
+            <Button Grid.Column="2" x:Name="CloseWorkspaceButton" Content="Close workspace"
+                    Click="CloseWorkspace_Click" Margin="6,0,0,0"
+                    AutomationProperties.AutomationId="ChatGPT.CloseWorkspace"
+                    AutomationProperties.HelpText="Close the selected workspace and stop its terminal after confirmation." />
           </Grid>
           <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemSpacing="8" Margin="8,4">
             <ToggleButton x:Name="ChatTerminalToggle" Content="Show terminal" IsChecked="True" Click="ChatTerminalToggle_Click"
@@ -100,6 +104,8 @@
                     IsVisible="False" AutomationProperties.AutomationId="ChatGPT.OpenPinnedProject" />
             <TextBlock x:Name="WorkspaceStatus" VerticalAlignment="Center"
                        AutomationProperties.AutomationId="ChatGPT.WorkspaceStatus" />
+            <TextBlock x:Name="WorkspaceShortcutHint" VerticalAlignment="Center"
+                       AutomationProperties.AutomationId="ChatGPT.WorkspaceShortcuts" />
           </WrapPanel>
           <Grid Grid.Row="2" x:Name="ChatTerminalGrid" ColumnDefinitions="*,0,0">
             <Grid x:Name="ChatWebViews">

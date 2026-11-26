@@ -6,6 +6,8 @@
   <Grid RowDefinitions="Auto,*" Margin="16" x:Name="RootWorkbenchGrid">
     <!-- Header / Overview -->
     <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,12">
+      <TextBlock x:Name="DraftWorkspaceName" FontWeight="SemiBold"
+                 AutomationProperties.AutomationId="Sessions.WorkspaceIdentity" />
       <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
         <TextBlock Text="Local Session Workbench &amp; Paired Terminal" FontSize="20" FontWeight="SemiBold"
                    AutomationProperties.ControlTypeOverride="Header"

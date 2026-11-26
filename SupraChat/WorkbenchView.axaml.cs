@@ -67,6 +67,7 @@ public partial class WorkbenchView : UserControl
 
     internal void ApplyTerminalSettings(PairedWorkspaceSettings settings)
     {
+        DraftWorkspaceName.Text = $"Drafts for workspace: {settings.Name}";
         _terminalHost.StartupDirectory = settings.StartupDirectory;
         _terminalHost.EnvironmentOverrides = settings.EnvironmentOverrides;
         UpdateTerminalDirectory();
@@ -150,8 +151,17 @@ public partial class WorkbenchView : UserControl
                 TerminalConsoleOutput.Text = string.Empty;
                 return;
             }
+            var selectionStart = TerminalConsoleOutput.SelectionStart;
+            var selectionEnd = TerminalConsoleOutput.SelectionEnd;
+            var preserveSelection = selectionStart != selectionEnd;
             TerminalConsoleOutput.Text += line + Environment.NewLine;
-            TerminalConsoleOutput.CaretIndex = TerminalConsoleOutput.Text?.Length ?? 0;
+            if (preserveSelection)
+            {
+                TerminalConsoleOutput.SelectionStart = selectionStart;
+                TerminalConsoleOutput.SelectionEnd = selectionEnd;
+            }
+            else
+                TerminalConsoleOutput.CaretIndex = TerminalConsoleOutput.Text?.Length ?? 0;
         });
     }
 

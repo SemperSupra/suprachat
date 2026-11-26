@@ -60,11 +60,13 @@ public partial class MainWindow : Window
         _responses = new ResponsesClient(_trace.Binding, _trace.Controls);
         _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
+        var shortcutModifier = OperatingSystem.IsMacOS() ? "Command+Option" : "Ctrl+Alt";
+        WorkspaceShortcutHint.Text = $"{shortcutModifier}+1 Chat · +2 Terminal · +3 Draft review";
         ChatSessionTabs.SelectionChanged += (_, args) =>
         {
             if (ReferenceEquals(args.Source, ChatSessionTabs) &&
-                ChatSessionTabs.SelectedIndex is var index && index >= 0 && index < _pairedChatSessions.Count)
-                SelectChatSession(_pairedChatSessions[index]);
+                _pairedChatSessions.FirstOrDefault(session => ReferenceEquals(session.Tab, ChatSessionTabs.SelectedItem)) is { } selectedSession)
+                SelectChatSession(selectedSession);
         };
         var layout = PairedWorkspaceLayout.Load();
         var saved = layout.Workspaces.Count > 0 ? layout.Workspaces : new() { NewWorkspaceSettings() };
@@ -126,6 +128,57 @@ public partial class MainWindow : Window
         SaveWorkspaceLayout();
     }
 
+    private async void CloseWorkspace_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_activeChatSession is not { } closing || _pairedChatSessions.Count < 2)
+            return;
+
+        var confirm = new Button { Content = "Close workspace" };
+        var cancel = new Button { Content = "Cancel", IsDefault = true, IsCancel = true };
+        var dialog = new Window
+        {
+            Title = $"Close {closing.Settings.Name}?",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20), Spacing = 12,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "The terminal will stop and local drafts and scrollback for this workspace will be cleared. Your ChatGPT conversations will stay in ChatGPT.",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+                        Children = { cancel, confirm }
+                    }
+                }
+            }
+        };
+        cancel.Click += (_, _) => dialog.Close(false);
+        confirm.Click += (_, _) => dialog.Close(true);
+        if (!await dialog.ShowDialog<bool>(this))
+            return;
+
+        var index = _pairedChatSessions.IndexOf(closing);
+        var next = _pairedChatSessions[index == _pairedChatSessions.Count - 1 ? index - 1 : index + 1];
+        ChatSessionTabs.SelectedItem = next.Tab;
+        SelectChatSession(next);
+        closing.Workbench.DraftReviewRequested -= OpenDraftReview;
+        closing.Workbench.CloseTerminal();
+        closing.WebView.NavigationCompleted -= ChatView_NavigationCompleted;
+        closing.WebView.EnvironmentRequested -= ChatView_EnvironmentRequested;
+        ChatWebViews.Children.Remove(closing.WebView);
+        _pairedChatSessions.Remove(closing);
+        ChatSessionTabs.Items.Remove(closing.Tab);
+        CloseWorkspaceButton.IsEnabled = _pairedChatSessions.Count > 1;
+        SaveWorkspaceLayout();
+    }
+
     private NativeWebView CreateWorkspaceWebView()
     {
         var webView = new NativeWebView { IsVisible = false };
@@ -145,9 +198,9 @@ public partial class MainWindow : Window
         workbench.DraftReviewRequested += OpenDraftReview;
         var session = new PairedChatSession(webView, workbench, tab, settings);
         _pairedChatSessions.Add(session);
-        var index = _pairedChatSessions.Count;
-        AutomationProperties.SetAutomationId(tab, $"ChatGPT.Session.{index}");
+        AutomationProperties.SetAutomationId(tab, $"ChatGPT.Session.{settings.Id:N}");
         ChatSessionTabs.Items.Add(tab);
+        CloseWorkspaceButton.IsEnabled = _pairedChatSessions.Count > 1;
         webView.Source = PairedWorkspaceLayout.ProjectAddress(settings.ProjectUrl) ?? new Uri("https://chatgpt.com/");
         return session;
     }
