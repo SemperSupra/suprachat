@@ -1,0 +1,42 @@
+name: Qualify OEC Native Aggregate Prior-Art Compatibility
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-observation-contract/**'
+      - '.github/workflows/qualify-oec-native-aggregate-prior-art.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-native-prior-art-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-validator-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run existing owner-native metadata summary validator self-test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = & './tools/local/Test-NativeMetadataSummary.ps1' -SelfTest
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'NATIVE_PRIOR_ART_VALIDATOR_EXEC_FAILED' }
+          $result = ($output | Out-String).Trim() | ConvertFrom-Json
+          if ($result.evidence -ne 'SYNTHETIC_VALIDATOR_SELF_TEST' -or
+              $result.passed -ne $true -or $result.live_capture -ne $false -or
+              $result.cases -lt 20) { throw 'NATIVE_PRIOR_ART_SELFTEST_FAILED' }
+          Write-Host ('QUALIFIED_NATIVE_SUMMARY_PRIOR_ART cases=' + $result.cases)
+      - name: Qualify new fail-closed aggregate projection independently
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m unittest discover -s tools/oec-observation-contract -p 'test_*.py' -q
+          echo "QUALIFIED_OEC_AGGREGATE_PROJECTION synthetic_only=true raw_content_exported=false"
