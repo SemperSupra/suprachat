@@ -266,7 +266,9 @@
       </ScrollViewer>
 
       <!-- ================= RIGHT PANE: PAIRED TERMINAL HOST ================= -->
-      <Border Grid.Column="1"
+      <ContentControl x:Name="SessionTerminalDock" Grid.Column="1"
+                      HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+        <Border x:Name="SessionTerminalPane"
               Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
               BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
               BorderThickness="1" CornerRadius="8" Padding="12" Margin="8,0,0,0">
@@ -374,6 +376,10 @@
                     <TextBlock Text="Send Error Trace to Chat Draft" />
                   </StackPanel>
                 </Button>
+                <Button Content="Copy staged chat draft" Click="TerminalCopyChatDraft_Click"
+                        Margin="0,0,6,4" FontSize="11"
+                        AutomationProperties.AutomationId="Terminal.CopyChatDraft"
+                        AutomationProperties.HelpText="Copy the reviewed, staged chat draft for manual paste into ChatGPT." />
               </WrapPanel>
               <TextBlock Text="Transfers strip terminal ANSI codes and apply secret redaction before staging."
                          FontSize="10"
@@ -382,7 +388,8 @@
           </Border>
 
         </Grid>
-      </Border>
+        </Border>
+      </ContentControl>
 
     </Grid>
   </Grid>

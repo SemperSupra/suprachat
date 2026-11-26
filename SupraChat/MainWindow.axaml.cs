@@ -36,12 +36,19 @@ public partial class MainWindow : Window
     private NativeReviewOwnerLifetime? _nativeMetadataOwnerLifetime;
     private SharedSessionLedger? _nativeMetadataLedger;
     private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
+    private GridLength _chatSplitWidth = new(3, GridUnitType.Star);
+    private GridLength _terminalSplitWidth = new(2, GridUnitType.Star);
 
     public MainWindow()
     {
         _responses = new ResponsesClient(_trace.Binding, _trace.Controls);
         _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
+        RootTabs.SelectionChanged += (_, args) =>
+        {
+            if (ReferenceEquals(args.Source, RootTabs))
+                UpdateChatTerminalDock();
+        };
         if (OperatingSystem.IsWindows())
             _nativeMetadataOwnerLifetime = NativeReviewOwnerLifetime.Attach(this, () => _nativeMetadataWindow as NativeMetadataReviewWindow);
         ShowTrace("status");
@@ -73,6 +80,48 @@ public partial class MainWindow : Window
         };
         ScalingChanged += (_, _) => RefreshAccessibilityStatus();
         _ = InitializeAgentLabAsync();
+    }
+
+    private void ChatTerminalToggle_Click(object? sender, RoutedEventArgs e) => UpdateChatTerminalDock();
+
+    private void ChatDraftReview_Click(object? sender, RoutedEventArgs e)
+    {
+        RootTabs.SelectedItem = SessionsTab;
+        Dispatcher.UIThread.Post(SessionWorkbench.FocusDraftInput);
+    }
+
+    private void UpdateChatTerminalDock()
+    {
+        var show = RootTabs.SelectedIndex == 0 && ChatTerminalToggle.IsChecked == true;
+        if (ChatTerminalHost.IsVisible == show)
+            return;
+
+        var columns = ChatTerminalGrid.ColumnDefinitions;
+        if (show)
+        {
+            SessionWorkbench.MoveTerminalTo(ChatTerminalHost);
+            columns[0].MinWidth = 300;
+            columns[0].Width = _chatSplitWidth;
+            columns[1].Width = new GridLength(8);
+            columns[2].MinWidth = 340;
+            columns[2].Width = _terminalSplitWidth;
+        }
+        else
+        {
+            _chatSplitWidth = columns[0].Width;
+            _terminalSplitWidth = columns[2].Width;
+            ChatTerminalHost.Content = null;
+            SessionWorkbench.MoveTerminalTo(null);
+            columns[0].MinWidth = 0;
+            columns[0].Width = new GridLength(1, GridUnitType.Star);
+            columns[1].Width = new GridLength(0);
+            columns[2].MinWidth = 0;
+            columns[2].Width = new GridLength(0);
+        }
+
+        ChatTerminalHost.IsVisible = show;
+        ChatTerminalDivider.IsVisible = show;
+        ChatTerminalToggle.Content = show ? "Hide terminal" : "Show terminal";
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)

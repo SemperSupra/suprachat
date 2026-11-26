@@ -54,6 +54,38 @@ public partial class WorkbenchView : UserControl
         _ = RefreshAsync();
     }
 
+    internal void MoveTerminalTo(ContentControl? destination)
+    {
+        SessionTerminalDock.Content = null;
+        (destination ?? SessionTerminalDock).Content = SessionTerminalPane;
+    }
+
+    internal void FocusDraftInput() => W2DraftInput.Focus();
+
+    private async void TerminalCopyChatDraft_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var chatDraft = _drafts.ReadSelected().ChatInput;
+            if (string.IsNullOrWhiteSpace(chatDraft))
+            {
+                TerminalStatusText.Text = "Review and stage a chat draft first.";
+                return;
+            }
+            if (TopLevel.GetTopLevel(SessionTerminalPane)?.Clipboard is not { } clipboard)
+            {
+                TerminalStatusText.Text = "Clipboard unavailable.";
+                return;
+            }
+            await clipboard.SetTextAsync(chatDraft);
+            TerminalStatusText.Text = "Copied draft. Paste into ChatGPT to review and send.";
+        }
+        catch (InvalidOperationException)
+        {
+            TerminalStatusText.Text = "No current session draft to copy.";
+        }
+    }
+
     private void OnTerminalOutputReceived(string line)
     {
         Dispatcher.UIThread.Post(() =>
