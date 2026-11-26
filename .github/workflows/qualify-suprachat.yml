@@ -1146,6 +1146,7 @@ jobs:
           "SupraChat remained alive through an 8-second self-contained Windows launch smoke."
 
       - name: Windows live UI Automation accessibility smoke
+        id: windows_live_uia
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -1154,6 +1155,7 @@ jobs:
           Add-Type -AssemblyName UIAutomationTypes
 
           $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
+          $env:SUPRACHAT_STARTUP_LOG = Join-Path $env:RUNNER_TEMP 'suprachat-live-uia-startup.log'
           $p = Start-Process -FilePath $exe -PassThru
           try {
             $deadline = (Get-Date).AddSeconds(20)
@@ -1768,17 +1770,17 @@ jobs:
           }
 
       - name: R50 redacted Windows UIA startup symptom receipt after failure
-        if: ${{ failure() && runner.os == 'Windows' }}
+        if: ${{ failure() && runner.os == 'Windows' && steps.windows_live_uia.outcome == 'failure' }}
         shell: pwsh
         run: |
           # Never disclose startup exception strings, raw logs, users, paths or event bodies.
-          # Original failed GUI/UIA step remains FAILED; this is evidence only.
-          $eventLog = Join-Path $env:LOCALAPPDATA 'SemperSupra/SupraChat/diagnostics/events.jsonl'
           & ./tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 `
-            -StartupLog (Join-Path $env:RUNNER_TEMP 'suprachat-startup.log') `
-            -StdoutLog (Join-Path $env:RUNNER_TEMP 'suprachat-stdout.log') `
-            -StderrLog (Join-Path $env:RUNNER_TEMP 'suprachat-stderr.log') `
-            -EventLog $eventLog
+            -StartupLog (Join-Path $env:RUNNER_TEMP 'suprachat-live-uia-startup.log')
+
+      - name: Remove live UIA startup log
+        if: ${{ always() && runner.os == 'Windows' && steps.windows_live_uia.outcome != 'skipped' }}
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'suprachat-live-uia-startup.log') -ErrorAction SilentlyContinue
 
       - name: Qualify synthetic secret UIA boundary for v0.0.1
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
