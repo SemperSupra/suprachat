@@ -9,11 +9,12 @@ try {
     $stdout = Join-Path $temp 'stdout.txt'
     $stderr = Join-Path $temp 'stderr.txt'
     $events = Join-Path $temp 'events.jsonl'
+    $stamp = '2026-11-26T01:02:03.0000000+00:00'
     # Synthetic secrets and filenames are deliberately present in the input;
     # none may appear in the categorical receipt.
     @(
-        'managed-main-entered framework=10 os=synthetic',
-        'fatal-startup-exception',
+        "$stamp managed-main-entered framework=10 os=synthetic",
+        "$stamp fatal-startup-exception",
         'System.InvalidOperationException: TOKEN-SECRET-DO-NOT-EMIT',
         'at C:\SENSITIVE-USERNAME\private\source.cs'
     ) | Set-Content -LiteralPath $startup -Encoding UTF8
@@ -44,10 +45,32 @@ try {
     if ($absent.startup_log_present -or $absent.fatal_startup_exception_marker_observed) {
         throw 'Missing observations were fabricated'
     }
+    if ($absent.startup_log_status -ne 'MISSING' -or $absent.stdout_status -ne 'NOT_COLLECTED') {
+        throw 'Missing and uncollected inputs must be distinguishable'
+    }
+    $embedded = Join-Path $temp 'embedded.txt'
+    @("$stamp System.Exception: fatal-startup-exception",
+      '   at managed-main-entered framework=10 os=synthetic',
+      "$stamp desktop-lifetime-returned") | Set-Content -LiteralPath $embedded -Encoding UTF8
+    $markers = & $tool -StartupLog $embedded | ConvertFrom-Json
+    if ($markers.fatal_startup_exception_marker_observed -or $markers.managed_main_entered_observed -or
+        -not $markers.desktop_lifetime_returned_observed) {
+        throw 'Only complete producer marker lines may count as observations'
+    }
+    $locked = [IO.File]::Open($embedded, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    try {
+        $unreadable = & $tool -StartupLog $embedded | ConvertFrom-Json
+        if ($unreadable.startup_log_status -ne 'UNREADABLE' -or $unreadable.desktop_lifetime_returned_observed) {
+            throw 'Unreadable input must yield a categorical receipt'
+        }
+    } finally {
+        $locked.Dispose()
+    }
     $large = Join-Path $temp 'large.txt'
     [IO.File]::WriteAllText($large,('private-payload' * 100000))
     $bounded = (& $tool -StartupLog $large | ConvertFrom-Json)
-    if (-not $bounded.startup_log_oversized -or $bounded.fatal_startup_exception_marker_observed) {
+    if ($bounded.startup_log_status -ne 'OVERSIZE' -or -not $bounded.startup_log_oversized -or
+        $bounded.fatal_startup_exception_marker_observed) {
         throw 'Oversized input was parsed or not classified'
     }
     Write-Output '{"schema":"suprachat-r50-uia-privacy-test/v1","result":"PASS","synthetic_only":true,"ui_automation_passed":false,"root_cause":"UNKNOWN"}'

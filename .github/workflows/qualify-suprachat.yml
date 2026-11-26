@@ -1088,9 +1088,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
-          $startupLog = Join-Path $env:RUNNER_TEMP 'suprachat-startup.log'
-          $stdoutLog = Join-Path $env:RUNNER_TEMP 'suprachat-stdout.log'
-          $stderrLog = Join-Path $env:RUNNER_TEMP 'suprachat-stderr.log'
+          $logPrefix = Join-Path $env:RUNNER_TEMP ('suprachat-gui-' + [Guid]::NewGuid().ToString('N'))
+          $startupLog = "$logPrefix-startup.log"
+          $stdoutLog = "$logPrefix-stdout.log"
+          $stderrLog = "$logPrefix-stderr.log"
           if (!(Test-Path $exe)) { throw "SupraChat.exe missing" }
 
           $env:SUPRACHAT_STARTUP_LOG = $startupLog
@@ -1100,67 +1101,73 @@ jobs:
           $appEvents = Join-Path $env:LOCALAPPDATA 'SemperSupra/SupraChat/diagnostics/events.jsonl'
           Remove-Item $appEvents -Force -ErrorAction SilentlyContinue
 
-          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
-          Start-Sleep -Seconds 8
+          $p = $null
+          try {
+            $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+            Start-Sleep -Seconds 8
 
-          # A fatal exception can leave a process/window alive while its UI thread is stuck.
-          if ((Test-Path $startupLog) -and
-              (Select-String -LiteralPath $startupLog -SimpleMatch 'fatal-startup-exception' -Quiet)) {
-            throw 'SupraChat reported a fatal startup exception despite process aliveness.'
-          }
-          $p.Refresh()
-          if (-not $p.HasExited -and ($p.MainWindowHandle -eq 0 -or -not $p.Responding)) {
-            throw 'SupraChat launch did not produce a responsive native window.'
-          }
-
-          if ($p.HasExited) {
-            Write-Host "SupraChat exited during launch smoke with code $($p.ExitCode)"
-            if (Test-Path $startupLog) { Get-Content $startupLog }
-            if (Test-Path $stdoutLog) { Get-Content $stdoutLog }
-            if (Test-Path $stderrLog) { Get-Content $stderrLog }
-            throw "SupraChat self-contained launch failed with code $($p.ExitCode)"
-          }
-
-          if (!(Test-Path $appEvents)) { throw 'GUI structured observability log missing.' }
-          $appEventLines = @(Get-Content $appEvents)
-          if ($appEventLines.Count -lt 2) { throw 'GUI structured observability emitted too few lifecycle events.' }
-          foreach ($eventLine in $appEventLines) {
-            $eventDoc = $eventLine | ConvertFrom-Json
-            $eventJson = [System.Text.Json.JsonDocument]::Parse($eventLine)
-            try {
-              $eventTimestampUtc = $eventJson.RootElement.GetProperty('timestamp_utc').GetString()
-            } finally {
-              $eventJson.Dispose()
+            # A fatal exception can leave a process/window alive while its UI thread is stuck.
+            if ((Test-Path $startupLog) -and
+                (Select-String -LiteralPath $startupLog -SimpleMatch 'fatal-startup-exception' -Quiet)) {
+              throw 'SupraChat reported a fatal startup exception despite process aliveness.'
             }
-            if ([string]::IsNullOrWhiteSpace($eventTimestampUtc) -or
-                -not $eventTimestampUtc.EndsWith('Z', [StringComparison]::Ordinal)) {
-              throw 'GUI serialized event timestamp is not explicit UTC.'
+            $p.Refresh()
+            if (-not $p.HasExited -and ($p.MainWindowHandle -eq 0 -or -not $p.Responding)) {
+              throw 'SupraChat launch did not produce a responsive native window.'
             }
-            if ($eventDoc.trace_id -ne $guiTrace) { throw 'GUI event did not inherit install trace correlation.' }
-            if ($eventDoc.span_id.Length -ne 16 -or $eventDoc.traceparent -notlike "00-$guiTrace-*-01") {
-              throw 'GUI W3C trace/span contract malformed.'
-            }
-          }
 
-          Stop-Process -Id $p.Id -Force
-          "SupraChat remained alive through an 8-second self-contained Windows launch smoke."
+            if ($p.HasExited) {
+              Write-Host "SupraChat exited during launch smoke with code $($p.ExitCode)"
+              throw "SupraChat self-contained launch failed with code $($p.ExitCode)"
+            }
+
+            if (!(Test-Path $appEvents)) { throw 'GUI structured observability log missing.' }
+            $appEventLines = @(Get-Content $appEvents)
+            if ($appEventLines.Count -lt 2) { throw 'GUI structured observability emitted too few lifecycle events.' }
+            foreach ($eventLine in $appEventLines) {
+              $eventDoc = $eventLine | ConvertFrom-Json
+              $eventJson = [System.Text.Json.JsonDocument]::Parse($eventLine)
+              try {
+                $eventTimestampUtc = $eventJson.RootElement.GetProperty('timestamp_utc').GetString()
+              } finally {
+                $eventJson.Dispose()
+              }
+              if ([string]::IsNullOrWhiteSpace($eventTimestampUtc) -or
+                  -not $eventTimestampUtc.EndsWith('Z', [StringComparison]::Ordinal)) {
+                throw 'GUI serialized event timestamp is not explicit UTC.'
+              }
+              if ($eventDoc.trace_id -ne $guiTrace) { throw 'GUI event did not inherit install trace correlation.' }
+              if ($eventDoc.span_id.Length -ne 16 -or $eventDoc.traceparent -notlike "00-$guiTrace-*-01") {
+                throw 'GUI W3C trace/span contract malformed.'
+              }
+            }
+
+            "SupraChat remained alive through an 8-second self-contained Windows launch smoke."
+          } finally {
+            if ($null -ne $p -and -not $p.HasExited) {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $startupLog,$stdoutLog,$stderrLog -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Windows live UI Automation accessibility smoke
-        id: windows_live_uia
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Add-Type -AssemblyName UIAutomationClient
-          Add-Type -AssemblyName UIAutomationTypes
-
-          $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
-          $env:SUPRACHAT_STARTUP_LOG = Join-Path $env:RUNNER_TEMP 'suprachat-live-uia-startup.log'
-          $p = Start-Process -FilePath $exe -PassThru
+          $startupLog = $null
+          $p = $null
           try {
+            Add-Type -AssemblyName UIAutomationClient
+            Add-Type -AssemblyName UIAutomationTypes
+            $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
+            $startupLog = Join-Path $env:RUNNER_TEMP ('suprachat-live-uia-' + [Guid]::NewGuid().ToString('N') + '.log')
+            $env:SUPRACHAT_STARTUP_LOG = $startupLog
+            $p = Start-Process -FilePath $exe -PassThru
             $deadline = (Get-Date).AddSeconds(20)
             $window = $null
             while ((Get-Date) -lt $deadline -and -not $window) {
+              if ($p.HasExited) { break }
               Start-Sleep -Milliseconds 500
               $processCondition = New-Object System.Windows.Automation.PropertyCondition(
                 [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
@@ -1173,6 +1180,12 @@ jobs:
             $qualificationDir = Join-Path $PWD 'out/win-x64/qualification'
             New-Item -ItemType Directory -Force -Path $qualificationDir | Out-Null
             $receiptPath = Join-Path $qualificationDir 'windows-uia.json'
+
+            $p.Refresh()
+            if ($p.HasExited) {
+              Write-Host "UIA host lifetime: processAlive=False exitCode=$($p.ExitCode)"
+              throw 'UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS'
+            }
 
             if (-not $window) {
               $receipt = @{
@@ -1190,6 +1203,7 @@ jobs:
               $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
               Write-Host ($receipt | ConvertTo-Json -Compress)
               Write-Host 'Windows live UI Automation qualification: RUNNER_UIA_ROOT_UNAVAILABLE.'
+              throw 'WINDOWS_LIVE_UIA_INCOMPLETE_ROOT_UNAVAILABLE'
             }
             else {
               Write-Host "UIA root: name='$($window.Current.Name)' class='$($window.Current.ClassName)' automationId='$($window.Current.AutomationId)' processId=$($window.Current.ProcessId)"
@@ -1215,6 +1229,7 @@ jobs:
                 $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
                 Write-Host ($receipt | ConvertTo-Json -Compress)
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
+                throw 'WINDOWS_LIVE_UIA_INCOMPLETE_ZERO_SEMANTIC_PEERS'
               } else {
                 $script:uiaTransientRetries = 0
                 # Issue #152: once the default ChatGPT tab's WebView2 document
@@ -1765,22 +1780,22 @@ jobs:
               }
             }
           }
-          finally {
-            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          catch {
+            try {
+              & ./tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 -StartupLog $startupLog
+            } catch {
+              Write-Warning 'UIA_STARTUP_RECEIPT_UNAVAILABLE'
+            }
+            throw
           }
-
-      - name: R50 redacted Windows UIA startup symptom receipt after failure
-        if: ${{ failure() && runner.os == 'Windows' && steps.windows_live_uia.outcome == 'failure' }}
-        shell: pwsh
-        run: |
-          # Never disclose startup exception strings, raw logs, users, paths or event bodies.
-          & ./tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 `
-            -StartupLog (Join-Path $env:RUNNER_TEMP 'suprachat-live-uia-startup.log')
-
-      - name: Remove live UIA startup log
-        if: ${{ always() && runner.os == 'Windows' && steps.windows_live_uia.outcome != 'skipped' }}
-        shell: pwsh
-        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'suprachat-live-uia-startup.log') -ErrorAction SilentlyContinue
+          finally {
+            if ($null -ne $p -and -not $p.HasExited) {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            }
+            if ($startupLog) {
+              Remove-Item -LiteralPath $startupLog -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Qualify synthetic secret UIA boundary for v0.0.1
         if: github.ref == 'refs/tags/v0.0.1' && runner.os == 'Windows'
