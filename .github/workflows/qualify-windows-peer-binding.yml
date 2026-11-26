@@ -1,0 +1,35 @@
+name: Qualify Windows local OS peer binding research
+on:
+  pull_request:
+    paths:
+      - 'SupraChat.WindowsPeerRdte/**'
+      - '.github/workflows/qualify-windows-peer-binding.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  actual-local-os-peer:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build standalone peer proving rep
+        run: dotnet build SupraChat.WindowsPeerRdte/SupraChat.WindowsPeerRdte.csproj -c Release
+      - name: Prove actual OS peer binding and refuse forged claims
+        shell: pwsh
+        run: |
+          dotnet run --no-build --project SupraChat.WindowsPeerRdte/SupraChat.WindowsPeerRdte.csproj -c Release -- --receipt "$env:RUNNER_TEMP/windows-peer-receipt.json"
+          if ($LASTEXITCODE -ne 0) { throw 'OS peer-binding proving rep failed.' }
+          $receipt = Get-Content "$env:RUNNER_TEMP/windows-peer-receipt.json" -Raw | ConvertFrom-Json
+          if (!$receipt.passed -or $receipt.human_identity_qualified -or $receipt.grant_issuer_production_qualified -or $receipt.os_subject_values_exported) {
+            throw 'OS peer proving receipt overclaimed admission or disclosed subject data.'
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sanitized-windows-peer-binding-receipt
+          path: ${{ runner.temp }}/windows-peer-receipt.json
+          if-no-files-found: ignore
