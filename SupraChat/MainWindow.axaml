@@ -13,25 +13,8 @@
     AutomationProperties.Name="SupraChat">
   <Grid RowDefinitions="Auto,*">
     <Border Grid.Row="0" Padding="8" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
-        <Button Grid.Column="0" Margin="0,0,6,0" Content="◀ Back" Click="Back_Click"
-                 AutomationProperties.AutomationId="Nav.Back"
-                 AutomationProperties.HelpText="Go back in the embedded ChatGPT product view." />
-        <Button Grid.Column="1" Margin="0,0,6,0" Content="Forward ▶" Click="Forward_Click"
-                 AutomationProperties.AutomationId="Nav.Forward"
-                 AutomationProperties.HelpText="Go forward in the embedded ChatGPT product view." />
-        <Button Grid.Column="2" Margin="0,0,6,0" Click="Reload_Click"
-                 AutomationProperties.AutomationId="Nav.Reload"
-                 AutomationProperties.HelpText="Reload the embedded ChatGPT product view.">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
-            <TextBlock Text="Reload" />
-          </StackPanel>
-        </Button>
-        <Button Grid.Column="3" Margin="0,0,6,0" Content="Home" Click="Home_Click"
-                 AutomationProperties.AutomationId="Nav.Home"
-                 AutomationProperties.HelpText="Navigate the embedded product view to ChatGPT home." />
-        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+      <Grid>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
           <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="SupraChat Cockpit" />
           <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
                   BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
@@ -55,18 +38,6 @@
             </StackPanel>
           </Button>
         </StackPanel>
-        <Button Grid.Column="5" Click="OpenExternal_Click"
-                 AutomationProperties.AutomationId="Nav.OpenExternal"
-                 AutomationProperties.HelpText="Open ChatGPT in the system browser.">
-          <StackPanel Orientation="Horizontal" Spacing="4">
-            <PathIcon Data="{StaticResource IconExternal}" Width="11" Height="11" />
-            <TextBlock Text="Open in browser" />
-          </StackPanel>
-        </Button>
-        <Button x:Name="NativeMetadataReview" Grid.Column="6" Margin="8,0,0,0" IsVisible="False"
-                Content="Review web metadata" Click="NativeMetadataReview_Click"
-                AutomationProperties.AutomationId="Native.Metadata.Review"
-                AutomationProperties.HelpText="Review a local, time-limited first-party metadata experiment. Capture remains off until confirmed." />
       </Grid>
     </Border>
 
@@ -78,53 +49,134 @@
                AutomationProperties.AcceleratorKey="Command+1 / Control+1"
                AutomationProperties.HelpText="Official ChatGPT product surface. Keyboard shortcut Command+1 on macOS or Control+1 on Windows/Linux.">
         <Grid RowDefinitions="Auto,Auto,*">
-          <Grid ColumnDefinitions="*,Auto,Auto" Margin="8,4">
+          <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="8,4">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
               <TabStrip x:Name="ChatSessionTabs"
                         AutomationProperties.AutomationId="ChatGPT.SessionTabs"
                         AutomationProperties.Name="Paired chat and terminal workspaces" />
             </ScrollViewer>
-            <Button Grid.Column="1" Content="New workspace" Click="NewChatSession_Click"
+            <Button Grid.Column="1" Click="NewChatSession_Click"
                     AutomationProperties.AutomationId="ChatGPT.NewSession"
-                    AutomationProperties.HelpText="Open a workspace with its own ChatGPT view and terminal session." />
-            <Button Grid.Column="2" x:Name="CloseWorkspaceButton" Content="Close workspace"
+                    AutomationProperties.HelpText="Open a workspace with its own ChatGPT view and terminal session." AutomationProperties.Name="New workspace">
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <PathIcon Data="{StaticResource IconAdd}" Width="12" Height="12" />
+                <TextBlock Text="New workspace" />
+              </StackPanel>
+            </Button>
+            <Button Grid.Column="2" x:Name="CloseWorkspaceButton"
                     Click="CloseWorkspace_Click" Margin="6,0,0,0"
                     AutomationProperties.AutomationId="ChatGPT.CloseWorkspace"
-                    AutomationProperties.HelpText="Close the selected workspace and stop its terminal after confirmation." />
+                    AutomationProperties.HelpText="Close the selected workspace and stop its terminal after confirmation." AutomationProperties.Name="Close workspace">
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <PathIcon Data="{StaticResource IconClear}" Width="12" Height="12" />
+                <TextBlock Text="Close workspace" />
+              </StackPanel>
+            </Button>
+            <WrapPanel Grid.Column="3" ItemSpacing="6" Margin="6,0,0,0" VerticalAlignment="Center">
+              <Button Click="WorkspaceSettings_Click"
+                      AutomationProperties.AutomationId="ChatGPT.WorkspaceSettings"
+                      AutomationProperties.Name="Workspace settings">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <PathIcon Data="{StaticResource IconSettings}" Width="12" Height="12" />
+                  <TextBlock Text="Workspace settings" />
+                </StackPanel>
+              </Button>
+              <TextBlock x:Name="WorkspaceStatus" VerticalAlignment="Center"
+                         AutomationProperties.AutomationId="ChatGPT.WorkspaceStatus"
+                         AutomationProperties.LiveSetting="Polite" />
+            </WrapPanel>
           </Grid>
           <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemSpacing="8" Margin="8,4">
             <ToggleButton x:Name="ChatTerminalToggle" Content="Show terminal" IsChecked="True" Click="ChatTerminalToggle_Click"
                           AutomationProperties.AutomationId="ChatGPT.TerminalToggle"
                           AutomationProperties.HelpText="Show or hide the paired session terminal beside ChatGPT." />
-            <Button x:Name="SplitOrientationButton" Content="Stack panes" Click="SplitOrientation_Click"
+            <Button x:Name="SplitOrientationButton" Click="SplitOrientation_Click"
                     AutomationProperties.AutomationId="ChatGPT.SplitOrientation"
-                    AutomationProperties.HelpText="Use the full window width for chat and terminal by stacking the panes." />
+                    AutomationProperties.HelpText="Change the arrangement of the chat and terminal panes.">
+              <StackPanel Orientation="Horizontal" Spacing="5">
+                <PathIcon Data="{StaticResource IconSplit}" Width="12" Height="12" />
+                <TextBlock x:Name="SplitOrientationLabel" Text="Stack panes" />
+              </StackPanel>
+            </Button>
             <Button x:Name="MoreChatSpaceButton" Content="More chat space" Click="MoreChatSpace_Click"
                     AutomationProperties.AutomationId="ChatGPT.MoreChatSpace"
                     AutomationProperties.HelpText="Increase the chat pane size without dragging the divider." />
             <Button x:Name="MoreTerminalSpaceButton" Content="More terminal space" Click="MoreTerminalSpace_Click"
                     AutomationProperties.AutomationId="ChatGPT.MoreTerminalSpace"
                     AutomationProperties.HelpText="Increase the terminal pane size without dragging the divider." />
-            <Button Content="Review session drafts" Click="ChatDraftReview_Click"
-                    AutomationProperties.AutomationId="ChatGPT.ReviewSessionDrafts" />
-            <Button Content="Workspace settings" Click="WorkspaceSettings_Click"
-                    AutomationProperties.AutomationId="ChatGPT.WorkspaceSettings" />
-            <Button x:Name="PinnedProjectButton" Content="Open pinned project" Click="PinnedProject_Click"
-                    IsVisible="False" AutomationProperties.AutomationId="ChatGPT.OpenPinnedProject" />
-            <TextBlock x:Name="WorkspaceStatus" VerticalAlignment="Center"
-                       AutomationProperties.AutomationId="ChatGPT.WorkspaceStatus"
-                       AutomationProperties.LiveSetting="Polite" />
             <TextBlock x:Name="WorkspaceShortcutHint" VerticalAlignment="Center"
                        AutomationProperties.AutomationId="ChatGPT.WorkspaceShortcuts" />
           </WrapPanel>
           <Grid Grid.Row="2" x:Name="ChatTerminalGrid" ColumnDefinitions="*,0,0" RowDefinitions="*,0,0">
-            <Grid x:Name="ChatWebViews">
-              <NativeWebView x:Name="InitialChatView"
+            <Grid RowDefinitions="Auto,*">
+              <WrapPanel ItemSpacing="6" Margin="8,0,8,4" AutomationProperties.Name="ChatGPT navigation">
+                <Button Margin="0,0,6,0" Click="Back_Click"
+                         AutomationProperties.AutomationId="Nav.Back"
+                         AutomationProperties.HelpText="Go back in the embedded ChatGPT product view." AutomationProperties.Name="Back">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <PathIcon Data="{StaticResource IconBack}" Width="12" Height="12" />
+                    <TextBlock Text="Back" />
+                  </StackPanel>
+                </Button>
+                <Button Margin="0,0,6,0" Click="Forward_Click"
+                         AutomationProperties.AutomationId="Nav.Forward"
+                         AutomationProperties.HelpText="Go forward in the embedded ChatGPT product view." AutomationProperties.Name="Forward">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <PathIcon Data="{StaticResource IconForward}" Width="12" Height="12" />
+                    <TextBlock Text="Forward" />
+                  </StackPanel>
+                </Button>
+                <Button Margin="0,0,6,0" Click="Reload_Click"
+                         AutomationProperties.AutomationId="Nav.Reload"
+                         AutomationProperties.HelpText="Reload the embedded ChatGPT product view." AutomationProperties.Name="Reload">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconRefresh}" Width="11" Height="11" />
+                    <TextBlock Text="Reload" />
+                  </StackPanel>
+                </Button>
+                <Button Margin="0,0,6,0" Click="Home_Click"
+                         AutomationProperties.AutomationId="Nav.Home"
+                         AutomationProperties.HelpText="Navigate the embedded product view to ChatGPT home." AutomationProperties.Name="Home">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <PathIcon Data="{StaticResource IconHome}" Width="12" Height="12" />
+                    <TextBlock Text="Home" />
+                  </StackPanel>
+                </Button>
+                <Button Click="OpenExternal_Click"
+                         AutomationProperties.AutomationId="Nav.OpenExternal"
+                         AutomationProperties.HelpText="Open ChatGPT in the system browser." AutomationProperties.Name="Open in browser">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <PathIcon Data="{StaticResource IconExternal}" Width="11" Height="11" />
+                    <TextBlock Text="Open in browser" />
+                  </StackPanel>
+                </Button>
+                <Button x:Name="NativeMetadataReview" Margin="8,0,0,0" IsVisible="False"
+                        Content="Review web metadata" Click="NativeMetadataReview_Click"
+                        AutomationProperties.AutomationId="Native.Metadata.Review"
+                        AutomationProperties.HelpText="Review a local, time-limited first-party metadata experiment. Capture remains off until confirmed." />
+                <Button x:Name="PinnedProjectButton" Click="PinnedProject_Click"
+                        IsVisible="False" AutomationProperties.AutomationId="ChatGPT.OpenPinnedProject" AutomationProperties.Name="Open pinned project">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <PathIcon Data="{StaticResource IconPin}" Width="12" Height="12" />
+                    <TextBlock Text="Open pinned project" />
+                  </StackPanel>
+                </Button>
+                <Button Click="ChatDraftReview_Click"
+                        AutomationProperties.AutomationId="ChatGPT.ReviewSessionDrafts" AutomationProperties.Name="Review session drafts">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <PathIcon Data="{StaticResource IconCopy}" Width="12" Height="12" />
+                    <TextBlock Text="Review session drafts" />
+                  </StackPanel>
+                </Button>
+              </WrapPanel>
+              <Grid Grid.Row="1" x:Name="ChatWebViews">
+                <NativeWebView x:Name="InitialChatView"
                        EnvironmentRequested="ChatView_EnvironmentRequested"
                        NavigationCompleted="ChatView_NavigationCompleted"
                        AutomationProperties.AutomationId="ChatGPT.WebView"
                        AutomationProperties.Name="ChatGPT product view"
                        AutomationProperties.HelpText="Official ChatGPT web product surface. Web content exposes its own accessibility tree." />
+              </Grid>
             </Grid>
             <GridSplitter x:Name="ChatTerminalDivider" Grid.Column="1" IsVisible="False"
                           HorizontalAlignment="Stretch" VerticalAlignment="Stretch"

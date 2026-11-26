@@ -9,6 +9,14 @@
   <Application.Resources>
     <!-- Standard Vector Icons for Actuators and Status -->
     <StreamGeometry x:Key="IconPlay">M8,5.14V19.14L19,12.14L8,5.14Z</StreamGeometry>
+    <StreamGeometry x:Key="IconAdd">M11,4H13V11H20V13H13V20H11V13H4V11H11Z</StreamGeometry>
+    <StreamGeometry x:Key="IconBack">M13,5L6,12L13,19L14.4,17.6L9.8,13H20V11H9.8L14.4,6.4Z</StreamGeometry>
+    <StreamGeometry x:Key="IconForward">M11,5L18,12L11,19L9.6,17.6L14.2,13H4V11H14.2L9.6,6.4Z</StreamGeometry>
+    <StreamGeometry x:Key="IconHome">M3,11L12,3L21,11H19V21H14V15H10V21H5V11Z</StreamGeometry>
+    <StreamGeometry x:Key="IconPin">M8,3H16V5H15V10L18,13V15H13V21L12,23L11,21V15H6V13L9,10V5H8Z</StreamGeometry>
+    <StreamGeometry x:Key="IconFocus">M3,3H9V5H5V9H3ZM15,3H21V9H19V5H15ZM3,15H5V19H9V21H3ZM19,15H21V21H15V19H19ZM10,10H14V14H10Z</StreamGeometry>
+    <StreamGeometry x:Key="IconSplit">M3,4H21V20H3ZM5,6V18H11V6ZM13,6V18H19V6Z</StreamGeometry>
+    <StreamGeometry x:Key="IconSettings">M10,2H14L15,5L17,6L20,5L22,9L20,11V13L22,15L20,19L17,18L15,19L14,22H10L9,19L7,18L4,19L2,15L4,13V11L2,9L4,5L7,6L9,5ZM12,8A4,4 0 1 0 12,16A4,4 0 1 0 12,8Z</StreamGeometry>
     <StreamGeometry x:Key="IconStop">M6,6H18V18H6V6Z</StreamGeometry>
     <StreamGeometry x:Key="IconClear">M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z</StreamGeometry>
     <StreamGeometry x:Key="IconCopy">M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z</StreamGeometry>

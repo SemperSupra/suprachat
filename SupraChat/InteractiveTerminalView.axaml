@@ -2,7 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="SupraChat.InteractiveTerminalView">
   <Grid RowDefinitions="Auto,Auto,*">
-    <WrapPanel Margin="0,0,0,6" ItemSpacing="6">
+    <WrapPanel Margin="0,0,0,6" ItemSpacing="6" LineSpacing="4" AutomationProperties.Name="Terminal controls">
       <ComboBox x:Name="ShellChoice" SelectedIndex="0"
                 AutomationProperties.AutomationId="Terminal.ShellChoice"
                 AutomationProperties.Name="Interactive terminal shell">
@@ -10,19 +10,44 @@
         <ComboBoxItem Content="PowerShell (pwsh)" />
         <ComboBoxItem Content="Command Prompt (cmd)" />
       </ComboBox>
-      <Button x:Name="StartShell" Content="Start shell" Click="StartShell_Click" IsEnabled="False"
-              AutomationProperties.AutomationId="Terminal.StartShell" />
-      <Button x:Name="StopShell" Content="Stop shell" Click="StopShell_Click" IsEnabled="False"
-              AutomationProperties.AutomationId="Terminal.StopShell" />
-      <Button Content="Focus terminal" Click="FocusTerminal_Click"
+      <Button x:Name="StartShell" Click="StartShell_Click" IsEnabled="False"
+              AutomationProperties.AutomationId="Terminal.StartShell" AutomationProperties.Name="Start shell">
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <PathIcon Data="{StaticResource IconPlay}" Width="12" Height="12" />
+          <TextBlock Text="Start shell" />
+        </StackPanel>
+      </Button>
+      <Button x:Name="StopShell" Click="StopShell_Click" IsEnabled="False"
+              AutomationProperties.AutomationId="Terminal.StopShell" AutomationProperties.Name="Stop shell">
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <PathIcon Data="{StaticResource IconStop}" Width="12" Height="12" />
+          <TextBlock Text="Stop shell" />
+        </StackPanel>
+      </Button>
+      <Button Click="FocusTerminal_Click" Margin="8,0,0,0"
               AutomationProperties.AutomationId="Terminal.FocusInput"
-              AutomationProperties.HelpText="Move keyboard focus to the interactive terminal." />
-      <Button Content="Retry terminal view" Click="RetryView_Click"
+              AutomationProperties.HelpText="Move keyboard focus to the interactive terminal." AutomationProperties.Name="Focus terminal">
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <PathIcon Data="{StaticResource IconFocus}" Width="12" Height="12" />
+          <TextBlock Text="Focus terminal" />
+        </StackPanel>
+      </Button>
+      <Button Click="RetryView_Click"
               AutomationProperties.AutomationId="Terminal.RetryView"
-              AutomationProperties.HelpText="Reconnect the terminal view without stopping the shell." />
-      <Button Content="Stage selection for chat" Click="StageSelection_Click"
+              AutomationProperties.HelpText="Reconnect the terminal view without stopping the shell." AutomationProperties.Name="Retry terminal view">
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <PathIcon Data="{StaticResource IconRefresh}" Width="12" Height="12" />
+          <TextBlock Text="Retry terminal view" />
+        </StackPanel>
+      </Button>
+      <Button Click="StageSelection_Click"
               AutomationProperties.AutomationId="Terminal.InteractiveStageSelection"
-              AutomationProperties.HelpText="Review selected terminal text before staging it for chat." />
+              AutomationProperties.HelpText="Review selected terminal text before staging it for chat." AutomationProperties.Name="Stage selection for chat">
+        <StackPanel Orientation="Horizontal" Spacing="5">
+          <PathIcon Data="{StaticResource IconSend}" Width="12" Height="12" />
+          <TextBlock Text="Stage for chat" />
+        </StackPanel>
+      </Button>
     </WrapPanel>
     <NativeWebView Grid.Row="2" x:Name="TerminalView"
                    AutomationProperties.AutomationId="Terminal.InteractiveView"

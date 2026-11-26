@@ -451,7 +451,8 @@ public partial class MainWindow : Window
         MoreChatSpaceButton.IsVisible = show;
         MoreTerminalSpaceButton.IsVisible = show;
         ChatTerminalToggle.Content = ChatTerminalToggle.IsChecked == true ? "Hide terminal" : "Show terminal";
-        SplitOrientationButton.Content = stacked ? "Side by side" : "Stack panes";
+        SplitOrientationLabel.Text = stacked ? "Side by side" : "Stack panes";
+        AutomationProperties.SetName(SplitOrientationButton, SplitOrientationLabel.Text);
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
