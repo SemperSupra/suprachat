@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Automation;
 using Avalonia.Interactivity;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -38,12 +40,26 @@ public partial class MainWindow : Window
     private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
     private GridLength _chatSplitWidth = new(3, GridUnitType.Star);
     private GridLength _terminalSplitWidth = new(2, GridUnitType.Star);
+    private readonly List<PairedChatSession> _pairedChatSessions = new();
+    private PairedChatSession? _activeChatSession;
+
+    private NativeWebView ChatView => _activeChatSession?.WebView ?? InitialChatView;
+    private WorkbenchView SessionWorkbench => _activeChatSession!.Workbench;
+
+    private sealed record PairedChatSession(NativeWebView WebView, WorkbenchView Workbench);
 
     public MainWindow()
     {
         _responses = new ResponsesClient(_trace.Binding, _trace.Controls);
         _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
+        ChatSessionTabs.SelectionChanged += (_, args) =>
+        {
+            if (ReferenceEquals(args.Source, ChatSessionTabs) &&
+                ChatSessionTabs.SelectedIndex is var index && index >= 0 && index < _pairedChatSessions.Count)
+                SelectChatSession(_pairedChatSessions[index]);
+        };
+        AddChatSession(InitialChatView);
         RootTabs.SelectionChanged += (_, args) =>
         {
             if (ReferenceEquals(args.Source, RootTabs))
@@ -59,6 +75,7 @@ public partial class MainWindow : Window
         {
             RootTabs.SelectedIndex = 3;
         }
+        UpdateChatTerminalDock();
         Opened += async (_, _) =>
         {
             var operation = DogfoodObservability.BeginOperation("ui-open");
@@ -83,6 +100,53 @@ public partial class MainWindow : Window
     }
 
     private void ChatTerminalToggle_Click(object? sender, RoutedEventArgs e) => UpdateChatTerminalDock();
+
+    private void NewChatSession_Click(object? sender, RoutedEventArgs e)
+    {
+        var webView = new NativeWebView { IsVisible = false };
+        webView.EnvironmentRequested += ChatView_EnvironmentRequested;
+        webView.NavigationCompleted += ChatView_NavigationCompleted;
+        AutomationProperties.SetAutomationId(webView, "ChatGPT.WebView");
+        AutomationProperties.SetName(webView, "ChatGPT product view");
+        webView.Source = new Uri("https://chatgpt.com/");
+        ChatWebViews.Children.Add(webView);
+        AddChatSession(webView);
+    }
+
+    private void AddChatSession(NativeWebView webView)
+    {
+        var session = new PairedChatSession(webView, new WorkbenchView());
+        _pairedChatSessions.Add(session);
+        var index = _pairedChatSessions.Count;
+        var tab = new TabStripItem { Content = $"Session {index}" };
+        AutomationProperties.SetAutomationId(tab, $"ChatGPT.Session.{index}");
+        ChatSessionTabs.Items.Add(tab);
+        ChatSessionTabs.SelectedItem = tab;
+        SelectChatSession(session);
+    }
+
+    private void SelectChatSession(PairedChatSession session)
+    {
+        if (ReferenceEquals(_activeChatSession, session))
+            return;
+        if (_activeChatSession is { } previous)
+        {
+            _nativeMetadataWindow?.Close();
+            previous.WebView.IsVisible = false;
+            if (ChatTerminalHost.Content is not null)
+            {
+                ChatTerminalHost.Content = null;
+                previous.Workbench.MoveTerminalTo(null);
+            }
+        }
+
+        _activeChatSession = session;
+        SessionWorkbenchHost.Content = session.Workbench;
+        session.WebView.IsVisible = true;
+        if (ChatTerminalHost.IsVisible)
+            session.Workbench.MoveTerminalTo(ChatTerminalHost);
+        UpdatePlanIndicatorFromUri(session.WebView.Source);
+    }
 
     private void ChatDraftReview_Click(object? sender, RoutedEventArgs e)
     {
@@ -468,7 +532,8 @@ public partial class MainWindow : Window
 
     private void ChatView_NavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
     {
-        UpdatePlanIndicatorFromUri(ChatView.Source);
+        if (sender is NativeWebView view && ReferenceEquals(view, ChatView))
+            UpdatePlanIndicatorFromUri(view.Source);
     }
 
     private bool _isExplicitWorkPlanSelected;
@@ -1878,7 +1943,9 @@ public partial class MainWindow : Window
         if (_nativeMetadataWindow is { } existing) { existing.Activate(); return; }
         _nativeMetadataLedger ??= new SharedSessionLedger();
         var session = _nativeMetadataLedger.Open("native-hil-window-session", "automation", "ChatGPT browser window").Session!;
-        IntPtr CurrentHandle() => ChatView.TryGetPlatformHandle() is Avalonia.Platform.IWindowsWebView2PlatformHandle handle
+        var reviewView = ChatView;
+        IntPtr CurrentHandle() => ReferenceEquals(reviewView, ChatView) &&
+            reviewView.TryGetPlatformHandle() is Avalonia.Platform.IWindowsWebView2PlatformHandle handle
             ? handle.CoreWebView2 : IntPtr.Zero;
         var review = new NativeMetadataReviewWindow(Guid.ParseExact(session.Id, "N"), CurrentHandle, _nativeMetadataOutputDirectory);
         _nativeMetadataOwnerLifetime?.TrackReview(review);
@@ -1995,6 +2062,8 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _nativeMetadataWindow?.Close();
+        foreach (var session in _pairedChatSessions)
+            session.Workbench.CloseTerminal();
         _trace.Dispose();
         try
         {

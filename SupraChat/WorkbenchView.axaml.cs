@@ -61,6 +61,7 @@ public partial class WorkbenchView : UserControl
     }
 
     internal void FocusDraftInput() => W2DraftInput.Focus();
+    internal void CloseTerminal() => _terminalHost.Stop();
 
     private async void TerminalCopyChatDraft_Click(object? sender, RoutedEventArgs e)
     {
