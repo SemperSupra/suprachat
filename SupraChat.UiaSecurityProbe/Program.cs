@@ -49,6 +49,12 @@ internal sealed class ProbeApplication : Application
 
             var status = new TextBlock { Text = "EMPTY" };
             AutomationProperties.SetAutomationId(status, "Synthetic.Probe.State");
+            var eventValue = new TextBox { Text = "EMPTY", IsReadOnly = true };
+            AutomationProperties.SetAutomationId(eventValue, "Synthetic.Probe.EventValue");
+            var pulseCount = 0;
+            var pulse = new Button { Content = "Synthetic event control" };
+            AutomationProperties.SetAutomationId(pulse, "Synthetic.Probe.EventControl");
+            pulse.Click += (_, _) => eventValue.Text = status.Text = ++pulseCount == 1 ? "ARMED" : "POST_REMOVAL";
 
             var fill = new Button { Content = "Fill test field" };
             AutomationProperties.SetAutomationId(fill, "Synthetic.Probe.Fill");
@@ -58,6 +64,7 @@ internal sealed class ProbeApplication : Application
                 // real independent UIA Invoke. No plaintext receipt or logger.
                 passphrase.Text = secret;
                 status.Text = passphrase.Text == secret ? "FILLED" : "REFUSED";
+                eventValue.Text = status.Text;
                 fill.IsEnabled = false;
             };
 
@@ -70,7 +77,7 @@ internal sealed class ProbeApplication : Application
                 {
                     Margin = new Thickness(20),
                     Spacing = 12,
-                    Children = { new TextBlock { Text = "Disposable secret-provider qualification" }, passphrase, fill, status }
+                    Children = { new TextBlock { Text = "Disposable secret-provider qualification" }, passphrase, fill, pulse, status, eventValue }
                 }
             };
             AutomationProperties.SetAutomationId(window, "SupraChat.SyntheticSecurityProbe");
