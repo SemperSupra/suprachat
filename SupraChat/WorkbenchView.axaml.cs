@@ -21,6 +21,7 @@ public partial class WorkbenchView : UserControl
     private readonly IWorkbenchSessionAuthority _authority;
     private readonly LedgerLocalDrafts _drafts;
     private readonly SessionTerminalHost _terminalHost = new();
+    private InteractiveTerminalView? _interactiveTerminal;
     private string? _w2ReviewId;
     private bool _refreshing;
     private string? _selectedId;
@@ -50,6 +51,11 @@ public partial class WorkbenchView : UserControl
 
         _terminalHost.OutputReceived += OnTerminalOutputReceived;
         _terminalHost.StateChanged += OnTerminalStateChanged;
+        if (WindowsInteractiveTerminal.IsSupported)
+        {
+            TerminalModeButton.IsVisible = true;
+            SetInteractiveMode(true);
+        }
 
         _ = RefreshAsync();
     }
@@ -61,9 +67,49 @@ public partial class WorkbenchView : UserControl
     }
 
     internal void FocusDraftInput() => W2DraftInput.Focus();
-    internal void FocusCommandInput() => TerminalCommandInput.Focus();
-    internal void CloseTerminal() => _terminalHost.Stop();
+    internal void FocusCommandInput()
+    {
+        if (InteractiveTerminalHost.IsVisible)
+            _interactiveTerminal?.FocusInput();
+        else
+            TerminalCommandInput.Focus();
+    }
+
+    internal void CloseTerminal()
+    {
+        _interactiveTerminal?.CloseShell();
+        _terminalHost.Stop();
+    }
     internal event Action? DraftReviewRequested;
+
+    private void TerminalMode_Click(object? sender, RoutedEventArgs e) =>
+        SetInteractiveMode(!InteractiveTerminalHost.IsVisible);
+
+    private void SetInteractiveMode(bool interactive)
+    {
+        if (interactive && _interactiveTerminal is null)
+        {
+            _interactiveTerminal = new InteractiveTerminalView
+            {
+                GetSettings = () =>
+                {
+                    var directory = _terminalHost.StartupDirectory ??
+                        (Directory.Exists(_terminalHost.WorkingDirectory) ? _terminalHost.WorkingDirectory : Directory.GetCurrentDirectory());
+                    return (directory, _terminalHost.EnvironmentOverrides);
+                }
+            };
+            _interactiveTerminal.SelectionForChat += StageTerminalSelectionAsync;
+            InteractiveTerminalHost.Content = _interactiveTerminal;
+        }
+        TerminalModeButton.Content = interactive ? "One-off commands" : "Interactive shell";
+        TerminalStatusPill.IsVisible = !interactive;
+        TerminalStopButton.IsVisible = !interactive;
+        TerminalClearButton.IsVisible = !interactive;
+        TerminalConsoleOutput.IsVisible = !interactive;
+        TerminalCommandRow.IsVisible = !interactive;
+        TerminalTransferControls.IsVisible = !interactive;
+        InteractiveTerminalHost.IsVisible = interactive;
+    }
 
     internal void ApplyTerminalSettings(PairedWorkspaceSettings settings)
     {
@@ -76,7 +122,7 @@ public partial class WorkbenchView : UserControl
     private void UpdateTerminalDirectory() =>
         TerminalWorkingDirectory.Text = "Working Dir: " + (_terminalHost.StartupDirectory ?? _terminalHost.WorkingDirectory);
 
-    private async void TerminalStageSelection_Click(object? sender, RoutedEventArgs e)
+    private void TerminalStageSelection_Click(object? sender, RoutedEventArgs e)
     {
         var selected = TerminalConsoleOutput.SelectedText;
         if (string.IsNullOrWhiteSpace(selected))
@@ -84,7 +130,12 @@ public partial class WorkbenchView : UserControl
             TerminalStatusText.Text = "Select terminal output first.";
             return;
         }
-        W2DraftInput.Text = selected;
+        StageTerminalSelectionAsync(selected);
+    }
+
+    private async void StageTerminalSelectionAsync(string text)
+    {
+        W2DraftInput.Text = text;
         DraftReviewRequested?.Invoke();
         await W2PrepareAsync("terminal-to-chat");
     }

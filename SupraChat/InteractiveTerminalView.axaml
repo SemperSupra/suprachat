@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SupraChat.InteractiveTerminalView">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <WrapPanel Margin="0,0,0,6" ItemSpacing="6">
+      <ComboBox x:Name="ShellChoice" SelectedIndex="0"
+                AutomationProperties.AutomationId="Terminal.ShellChoice"
+                AutomationProperties.Name="Interactive terminal shell">
+        <ComboBoxItem Content="Windows PowerShell" />
+        <ComboBoxItem Content="PowerShell (pwsh)" />
+        <ComboBoxItem Content="Command Prompt (cmd)" />
+      </ComboBox>
+      <Button x:Name="StartShell" Content="Start shell" Click="StartShell_Click" IsEnabled="False"
+              AutomationProperties.AutomationId="Terminal.StartShell" />
+      <Button x:Name="StopShell" Content="Stop shell" Click="StopShell_Click" IsEnabled="False"
+              AutomationProperties.AutomationId="Terminal.StopShell" />
+      <Button Content="Stage selection for chat" Click="StageSelection_Click"
+              AutomationProperties.AutomationId="Terminal.InteractiveStageSelection"
+              AutomationProperties.HelpText="Review selected terminal text before staging it for chat." />
+    </WrapPanel>
+    <NativeWebView Grid.Row="1" x:Name="TerminalView"
+                   AutomationProperties.AutomationId="Terminal.InteractiveView"
+                   AutomationProperties.Name="Interactive workspace terminal" />
+    <TextBlock Grid.Row="2" x:Name="InteractiveStatus" Text="Loading interactive terminal…"
+               Margin="0,5,0,0" TextWrapping="Wrap"
+               AutomationProperties.AutomationId="Terminal.InteractiveStatus" />
+  </Grid>
+</UserControl>

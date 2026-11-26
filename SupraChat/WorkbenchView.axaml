@@ -297,6 +297,9 @@
             </StackPanel>
 
             <WrapPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+              <Button x:Name="TerminalModeButton" Content="Interactive shell" Click="TerminalMode_Click"
+                      Margin="0,0,4,0" FontSize="11" IsVisible="False"
+                      AutomationProperties.AutomationId="Terminal.Mode" />
               <Button x:Name="TerminalStopButton" Click="TerminalStop_Click" IsEnabled="False"
                       Margin="0,0,4,0" FontSize="11"
                       AutomationProperties.AutomationId="Terminal.Stop">
@@ -305,7 +308,7 @@
                   <TextBlock Text="Stop" />
                 </StackPanel>
               </Button>
-              <Button Click="TerminalClear_Click" FontSize="11"
+              <Button x:Name="TerminalClearButton" Click="TerminalClear_Click" FontSize="11"
                       AutomationProperties.AutomationId="Terminal.Clear">
                 <StackPanel Orientation="Horizontal" Spacing="4">
                   <PathIcon Data="{StaticResource IconClear}" Width="10" Height="10" />
@@ -326,7 +329,7 @@
                    AutomationProperties.Name="Paired terminal live console scrollback" />
 
           <!-- Command Input Row -->
-          <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
+          <Grid Grid.Row="2" x:Name="TerminalCommandRow" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
             <TextBox Grid.Column="0" x:Name="TerminalCommandInput"
                      FontFamily="Consolas, Cascadia Code, monospace" FontSize="12"
                      PlaceholderText="Enter shell command (e.g. dir, git status, dotnet test)..."
@@ -353,7 +356,7 @@
           </Grid>
 
           <!-- Selective Bi-Directional Transfer to ChatGPT Draft Bar -->
-          <Border Grid.Row="3"
+          <Border Grid.Row="3" x:Name="TerminalTransferControls"
                   Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
                   BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
                   BorderThickness="1" CornerRadius="6" Padding="8">
@@ -396,6 +399,8 @@
                          Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
             </StackPanel>
           </Border>
+          <ContentControl Grid.Row="1" Grid.RowSpan="3" x:Name="InteractiveTerminalHost" IsVisible="False"
+                          HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
 
         </Grid>
         </Border>
