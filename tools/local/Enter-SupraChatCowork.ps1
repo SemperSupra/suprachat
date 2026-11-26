@@ -10,6 +10,7 @@ Modes:
   Plan     - non-mutating; prints the intended sibling-repository workspace.
   Apply    - clones or fetches canonical public + private repositories, exports
              durable issue context when gh is available, and writes a local actor baton.
+  ResolveWorkset - read-only; validates an owner-approved private revision.
   SelfTest - non-mutating structural checks used by CI.
 
 This script never resets, cleans, rebases, or force-checks out an existing worktree.
@@ -18,10 +19,11 @@ Existing local changes are preserved.
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Plan','Apply','SelfTest')]
+    [ValidateSet('Plan','Apply','ResolveWorkset','SelfTest')]
     [string]$Mode = 'Plan',
 
     [string]$Root,
+    [string]$ApprovedPrivateRevision,
 
     [switch]$SkipIssueExport
 )
@@ -231,36 +233,81 @@ function Get-RepoSnapshot {
     }
 }
 
-function Resolve-ParallelWorksetRelative {
-    param([string]$PrivateRoot)
+function Resolve-ParallelWorkset {
+    param([string]$PrivateRoot, [string]$ApprovedRevision)
 
-    $pointer = Join-Path $PrivateRoot 'worksets/active-parallel-workset.json'
-    if (-not (Test-Path -LiteralPath $pointer)) {
-        # The accepted pointer may still be in a DLE-linked proposal branch.
-        # Never silently select a stale historical workset in its absence.
-        return $null
+    # WinPS5.1 treats redirected native stderr as a PowerShell error.
+    # Use git's exit code to return the typed refusal below.
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $result = @{ Status = 'UNRESOLVED_FROM_PRIVATE_DLE'; Path = $null }
+    if ([string]::IsNullOrWhiteSpace($ApprovedRevision) -or
+        -not (Test-Path -LiteralPath (Join-Path $PrivateRoot '.git'))) {
+        return $result
     }
-    $candidate = Get-Content -LiteralPath $pointer -Raw | ConvertFrom-Json
-    if ($candidate.schema -ne 'suprachat-active-parallel-workset/v1' -or
-        $candidate.owner_issue -ne 'SemperSupra/suprachat-private#2' -or
-        $candidate.workset_repository -ne 'SemperSupra/suprachat-private' -or
-        ([string]$candidate.workset_path) -notmatch '^worksets/parallel-batches-r[0-9]+[.]json$') {
-        throw 'INVALID_PRIVATE_PARALLEL_WORKSET_POINTER'
+
+    if ($ApprovedRevision -notmatch '^[0-9a-f]{40}$') {
+        $result.Status = 'INVALID_PRIVATE_DLE_REVISION'
+        return $result
     }
-    return [string]$candidate.workset_path
+    $head = & git -C $PrivateRoot rev-parse --verify HEAD 2>$null
+    if ($LASTEXITCODE -ne 0 -or $head -ne $ApprovedRevision) {
+        $result.Status = 'STALE_PRIVATE_DLE_CHECKOUT'
+        return $result
+    }
+
+    $pointer = 'worksets/active-parallel-workset.json'
+    $committedPointer = & git -C $PrivateRoot show ("${ApprovedRevision}:$pointer") 2>$null
+    if ($LASTEXITCODE -ne 0) { return $result }
+    try {
+        $candidate = ($committedPointer -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        if ($candidate.schema -ne 'suprachat-active-parallel-workset/v1' -or
+            $candidate.owner_issue -ne 'SemperSupra/suprachat-private#2' -or
+            $candidate.workset_repository -ne 'SemperSupra/suprachat-private' -or
+            ([string]$candidate.workset_path) -cnotmatch '^worksets/parallel-batches-r[0-9]+[.]json$' -or
+            $candidate.candidate_only -isnot [bool]) {
+            throw 'Invalid pointer schema'
+        }
+    } catch {
+        $result.Status = 'INVALID_PRIVATE_PARALLEL_WORKSET_POINTER'
+        return $result
+    }
+    if ($candidate.candidate_only) {
+        $result.Status = 'OWNER_HELD_PRIVATE_PARALLEL_WORKSET'
+        return $result
+    }
+
+    $relative = [string]$candidate.workset_path
+    $path = Join-Path $PrivateRoot $relative
+    $objectType = & git -C $PrivateRoot cat-file -t ("${ApprovedRevision}:$relative") 2>$null
+    if ($LASTEXITCODE -ne 0 -or $objectType -ne 'blob' -or
+        -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $result.Status = 'MISSING_PRIVATE_PARALLEL_WORKSET'
+        return $result
+    }
+    $expectedBlob = & git -C $PrivateRoot rev-parse --verify ("${ApprovedRevision}:$relative") 2>$null
+    $actualBlob = & git -C $PrivateRoot hash-object "--path=$relative" -- $path 2>$null
+    if ($LASTEXITCODE -ne 0 -or $actualBlob -ne $expectedBlob) {
+        $result.Status = 'STALE_PRIVATE_PARALLEL_WORKSET'
+        return $result
+    }
+
+    $result.Status = 'VERIFIED_PRIVATE_PARALLEL_WORKSET'
+    $result.Path = $path
+    return $result
 }
 
 function Get-BatchBaton {
     param([System.Collections.IDictionary]$Plan)
 
     # The baton is a pointer, never a substitute for the private DLE.
-    $relative = Resolve-ParallelWorksetRelative -PrivateRoot $Plan.PrivatePath
-    if ($relative) {
-        $activeWorkset = Join-Path $Plan.PrivatePath $relative
-        $cardInstruction = 'After DLE reconciliation, emit bounded cards: python tools/qualification/validate_parallel_workset.py "' + $activeWorkset + '" --cards'
+    $selection = Resolve-ParallelWorkset -PrivateRoot $Plan.PrivatePath -ApprovedRevision $ApprovedPrivateRevision
+    if ($selection.Path) {
+        $activeWorkset = $selection.Path
+        $cardInstruction = 'Review the verified manifest against private issue #2 before using a qualified local critic to emit cards.'
     }
     else {
-        $activeWorkset = 'UNRESOLVED_FROM_PRIVATE_DLE'
+        $activeWorkset = $selection.Status
         $cardInstruction = 'Do not emit or execute READY cards before fetching the exact private branch linked by issue #2 and validating its active-parallel-workset.json.'
     }
     return (@(
@@ -385,6 +432,13 @@ if (Test-Path -LiteralPath $rootGitMarker) {
            "collides case-insensitively with the intended container 'SupraChat'. " +
            "Rename or relocate the legacy checkout first; this script will not nest " +
            "canonical repositories inside another repository.") -f $plan.Root
+}
+
+if ($Mode -eq 'ResolveWorkset') {
+    $selection = Resolve-ParallelWorkset -PrivateRoot $plan.PrivatePath -ApprovedRevision $ApprovedPrivateRevision
+    $selection | ConvertTo-Json -Compress
+    if (-not $selection.Path) { exit 2 }
+    exit 0
 }
 
 if ($Mode -eq 'SelfTest') {

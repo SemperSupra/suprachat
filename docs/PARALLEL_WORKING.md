@@ -46,25 +46,20 @@ The public offline critic `tools/qualification/validate_parallel_workset.py` val
 
 The existing PS5.1-safe `tools/local/Enter-SupraChatCowork.ps1 -Mode Apply` refreshes the sibling repositories and emits `SUPRACHAT-LOCAL-ACTOR.txt`; it does not reset dirty worktrees, copy secrets or grant new authority. The human's cold-start message can be simply: **"Resume SupraChat from the DLE; run independent READY batches under AGENTS.md."** All detailed instructions belong in this policy, the workset, and the issue receipts.
 
-For the local actor in the public checkout, after both repositories are current and the pointer's review branch is available (until the owner integrates it):
+From the public checkout, set `$approvedPrivateRevision` to the full SHA explicitly approved in private issue #2. Supply the workspace root containing the private sibling checkout. A proposal branch alone is insufficient.
 
 ```powershell
-$pointer = Get-Content ../suprachat-private/worksets/active-parallel-workset.json -Raw | ConvertFrom-Json
-if ($pointer.schema -ne 'suprachat-active-parallel-workset/v1' -or
-    $pointer.owner_issue -ne 'SemperSupra/suprachat-private#2' -or
-    $pointer.workset_path -notmatch '^worksets/parallel-batches-r[0-9]+[.]json
-```
-
-The output contains one small bounded JSON card per runnable lane with pinned base SHA, branch, allowlisted write paths, deterministic oracle command, adversarial case and expected evidence. Read that card rather than recreating a long user prompt. The command is **read-only** and does not dispatch a worker or authorize any action. If the private branch has not been integrated, fetch the exact branch linked in private DLE #2 into an isolated worktree; never overwrite a dirty checkout.
-) {
-    throw 'UNTRUSTED_DLE_WORKSET_POINTER'
+$selection = ./tools/local/Enter-SupraChatCowork.ps1 -Mode ResolveWorkset `
+    -Root (Split-Path -Parent (Get-Location).Path) -ApprovedPrivateRevision $approvedPrivateRevision |
+    ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $selection.Status -ne 'VERIFIED_PRIVATE_PARALLEL_WORKSET') {
+    throw $selection.Status
 }
-$workset = Join-Path ../suprachat-private $pointer.workset_path
-python tools/qualification/validate_parallel_workset.py $workset --cards
+$selection.Path
 ```
 
-The output contains one small bounded JSON card per runnable lane with pinned base SHA, branch, allowlisted write paths, deterministic oracle command, adversarial case and expected evidence. Read that card rather than recreating a long user prompt. The command is **read-only** and does not dispatch a worker or authorize any action. If the private branch has not been integrated, fetch the exact branch linked in private DLE #2 into an isolated worktree; never overwrite a dirty checkout.
+This command verifies and prints the path for local review. Card generation requires a separately available critic. Use a separate checkout if the current private checkout is at a different revision.
 
 ### Fail-closed current-workset selection
 
-The local bootstrap reads `worksets/active-parallel-workset.json` from the checked-out **private** DLE. If the pointer is missing, malformed, or points to a workset not yet fetched from the exact branch in private issue #2, the baton MUST state `UNRESOLVED_FROM_PRIVATE_DLE` and no READY task can start. Never fall back silently to the historically valid R48 workset: it can contain superseded assignments and already completed tasks. First reconcile the latest branch/owner decision and only then run the read-only task-card critic. Historical R48/R49 manifests remain evidence; only the verified pointer selects the current wave.
+The local bootstrap reads `worksets/active-parallel-workset.json` from the checked-out **private** DLE. Without an approved revision or a committed pointer, the baton states `UNRESOLVED_FROM_PRIVATE_DLE`. Malformed, stale, missing-target, and candidate-only inputs return distinct refusal statuses. Any refusal blocks card emission. Never fall back silently to the historically valid R48 workset: it can contain superseded assignments and already completed tasks. First reconcile the latest branch/owner decision and only then run the read-only task-card critic. Historical R48/R49 manifests remain evidence; only the verified pointer selects the current wave.
