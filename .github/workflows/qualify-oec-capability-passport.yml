@@ -1,0 +1,56 @@
+name: Qualify OEC Synthetic Capability Passport
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-capability-passport/**'
+      - '.github/workflows/qualify-oec-capability-passport.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: oec-capability-passport-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  evidence-reconciliation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        working-directory: tools/oec-capability-passport
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/oec-capability-passport/go.mod
+          cache: false
+      - name: Run source-schema and privacy claim-negative tests
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./... -count=5
+      - name: Download immutable source-run sanitized receipts
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/inspector evidence/chrome evidence/otel
+          gh run download 41661531502 --repo SemperSupra/suprachat --name oec-inspector-sanitized-receipt --dir evidence/inspector
+          gh run download 41662816944 --repo SemperSupra/suprachat --name oec-chrome-devtools-synthetic-receipt --dir evidence/chrome
+          gh run download 41661990184 --repo SemperSupra/suprachat --name oec-otel-sanitized-receipt --dir evidence/otel
+          test -s evidence/inspector/receipt.json
+          test -s evidence/chrome/receipt.json
+          test -s evidence/otel/receipt.json
+      - name: Verify actual receipt contents and create source-pinned synthetic passport
+        run: |
+          set -euo pipefail
+          mkdir -p passports
+          go run ./cmd/passport -inspector evidence/inspector/receipt.json -chrome evidence/chrome/receipt.json -otel evidence/otel/receipt.json -out passports/observatory-synthetic-v1.json
+      - name: Publish only the approved capability passport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-synthetic-capability-passport
+          path: tools/oec-capability-passport/passports/observatory-synthetic-v1.json
+          if-no-files-found: ignore
+          retention-days: 7
