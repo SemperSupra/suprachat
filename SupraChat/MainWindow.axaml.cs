@@ -395,10 +395,10 @@ public partial class MainWindow : Window
         if (show)
         {
             SessionWorkbench.MoveTerminalTo(ChatTerminalHost);
-            columns[0].MinWidth = 300;
+            columns[0].MinWidth = 620;
             columns[0].Width = _chatSplitWidth;
             columns[1].Width = new GridLength(8);
-            columns[2].MinWidth = 340;
+            columns[2].MinWidth = 260;
             columns[2].Width = _terminalSplitWidth;
         }
         else

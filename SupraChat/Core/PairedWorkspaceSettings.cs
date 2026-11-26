@@ -4,7 +4,7 @@ namespace SupraChat.Core;
 
 internal sealed record PairedWorkspaceSettings(Guid Id, string Name, string? ProjectUrl = null,
     string? StartupDirectory = null, Dictionary<string, string>? EnvironmentOverrides = null,
-    double ChatFraction = 0.6, bool ShowTerminal = true);
+    double ChatFraction = 0.7, bool ShowTerminal = true);
 
 internal sealed record PairedWorkspaceLayout(Guid? Active, List<PairedWorkspaceSettings> Workspaces)
 {
