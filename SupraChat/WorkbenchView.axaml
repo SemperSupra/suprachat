@@ -358,6 +358,14 @@
             <StackPanel Spacing="6">
               <TextBlock Text="Selective Output Transfer to Chat Draft" FontSize="12" FontWeight="SemiBold" />
               <WrapPanel Orientation="Horizontal">
+                <Button Content="Stage selection for chat" Click="TerminalStageSelection_Click"
+                        Margin="0,0,6,4" FontSize="11"
+                        AutomationProperties.AutomationId="Terminal.StageSelectionForChat"
+                        AutomationProperties.HelpText="Review only the selected terminal output before staging it." />
+                <Button Content="Paste into command draft" Click="TerminalPasteClipboard_Click"
+                        Margin="0,0,6,4" FontSize="11"
+                        AutomationProperties.AutomationId="Terminal.PasteClipboardDraft"
+                        AutomationProperties.HelpText="Paste copied text into the command input without running it." />
                 <Button Click="TerminalSendLastOutput_Click"
                         Margin="0,0,6,4" FontSize="11"
                         AutomationProperties.AutomationId="Terminal.SendLastOutput"

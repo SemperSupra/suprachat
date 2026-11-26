@@ -46,7 +46,14 @@ public partial class MainWindow : Window
     private NativeWebView ChatView => _activeChatSession?.WebView ?? InitialChatView;
     private WorkbenchView SessionWorkbench => _activeChatSession!.Workbench;
 
-    private sealed record PairedChatSession(NativeWebView WebView, WorkbenchView Workbench);
+    private sealed class PairedChatSession(NativeWebView webView, WorkbenchView workbench,
+        TabStripItem tab, PairedWorkspaceSettings settings)
+    {
+        public NativeWebView WebView { get; } = webView;
+        public WorkbenchView Workbench { get; } = workbench;
+        public TabStripItem Tab { get; } = tab;
+        public PairedWorkspaceSettings Settings { get; set; } = settings;
+    }
 
     public MainWindow()
     {
@@ -59,7 +66,14 @@ public partial class MainWindow : Window
                 ChatSessionTabs.SelectedIndex is var index && index >= 0 && index < _pairedChatSessions.Count)
                 SelectChatSession(_pairedChatSessions[index]);
         };
-        AddChatSession(InitialChatView);
+        var layout = PairedWorkspaceLayout.Load();
+        var saved = layout.Workspaces.Count > 0 ? layout.Workspaces : new() { NewWorkspaceSettings() };
+        for (var index = 0; index < saved.Count; index++)
+            AddChatSession(index == 0 ? InitialChatView : CreateWorkspaceWebView(), saved[index]);
+        var selected = _pairedChatSessions.FirstOrDefault(session => session.Settings.Id == layout.Active)
+            ?? _pairedChatSessions[0];
+        ChatSessionTabs.SelectedItem = selected.Tab;
+        SelectChatSession(selected);
         RootTabs.SelectionChanged += (_, args) =>
         {
             if (ReferenceEquals(args.Source, RootTabs))
@@ -101,28 +115,41 @@ public partial class MainWindow : Window
 
     private void ChatTerminalToggle_Click(object? sender, RoutedEventArgs e) => UpdateChatTerminalDock();
 
+    private PairedWorkspaceSettings NewWorkspaceSettings() =>
+        new(Guid.NewGuid(), $"Workspace {_pairedChatSessions.Count + 1}");
+
     private void NewChatSession_Click(object? sender, RoutedEventArgs e)
+    {
+        var session = AddChatSession(CreateWorkspaceWebView(), NewWorkspaceSettings());
+        ChatSessionTabs.SelectedItem = session.Tab;
+        SelectChatSession(session);
+        SaveWorkspaceLayout();
+    }
+
+    private NativeWebView CreateWorkspaceWebView()
     {
         var webView = new NativeWebView { IsVisible = false };
         webView.EnvironmentRequested += ChatView_EnvironmentRequested;
         webView.NavigationCompleted += ChatView_NavigationCompleted;
         AutomationProperties.SetAutomationId(webView, "ChatGPT.WebView");
         AutomationProperties.SetName(webView, "ChatGPT product view");
-        webView.Source = new Uri("https://chatgpt.com/");
         ChatWebViews.Children.Add(webView);
-        AddChatSession(webView);
+        return webView;
     }
 
-    private void AddChatSession(NativeWebView webView)
+    private PairedChatSession AddChatSession(NativeWebView webView, PairedWorkspaceSettings settings)
     {
-        var session = new PairedChatSession(webView, new WorkbenchView());
+        var tab = new TabStripItem { Content = settings.Name };
+        var workbench = new WorkbenchView();
+        workbench.ApplyTerminalSettings(settings);
+        workbench.DraftReviewRequested += OpenDraftReview;
+        var session = new PairedChatSession(webView, workbench, tab, settings);
         _pairedChatSessions.Add(session);
         var index = _pairedChatSessions.Count;
-        var tab = new TabStripItem { Content = $"Workspace {index}" };
         AutomationProperties.SetAutomationId(tab, $"ChatGPT.Session.{index}");
         ChatSessionTabs.Items.Add(tab);
-        ChatSessionTabs.SelectedItem = tab;
-        SelectChatSession(session);
+        webView.Source = PairedWorkspaceLayout.ProjectAddress(settings.ProjectUrl) ?? new Uri("https://chatgpt.com/");
+        return session;
     }
 
     private void SelectChatSession(PairedChatSession session)
@@ -131,6 +158,7 @@ public partial class MainWindow : Window
             return;
         if (_activeChatSession is { } previous)
         {
+            CaptureWorkspaceLayout(previous);
             _nativeMetadataWindow?.Close();
             previous.WebView.IsVisible = false;
             if (ChatTerminalHost.Content is not null)
@@ -145,13 +173,163 @@ public partial class MainWindow : Window
         session.WebView.IsVisible = true;
         if (ChatTerminalHost.IsVisible)
             session.Workbench.MoveTerminalTo(ChatTerminalHost);
+        var fraction = Math.Clamp(session.Settings.ChatFraction, 0.1, 0.9);
+        _chatSplitWidth = new GridLength(fraction, GridUnitType.Star);
+        _terminalSplitWidth = new GridLength(1 - fraction, GridUnitType.Star);
+        if (ChatTerminalHost.IsVisible)
+        {
+            ChatTerminalGrid.ColumnDefinitions[0].Width = _chatSplitWidth;
+            ChatTerminalGrid.ColumnDefinitions[2].Width = _terminalSplitWidth;
+        }
+        ChatTerminalToggle.IsChecked = session.Settings.ShowTerminal;
+        PinnedProjectButton.IsVisible = PairedWorkspaceLayout.ProjectAddress(session.Settings.ProjectUrl) is not null;
+        UpdateChatTerminalDock();
         UpdatePlanIndicatorFromUri(session.WebView.Source);
     }
 
-    private void ChatDraftReview_Click(object? sender, RoutedEventArgs e)
+    private void ChatDraftReview_Click(object? sender, RoutedEventArgs e) => OpenDraftReview();
+
+    private void OpenDraftReview()
     {
         RootTabs.SelectedItem = SessionsTab;
         Dispatcher.UIThread.Post(SessionWorkbench.FocusDraftInput);
+    }
+
+    private void CaptureWorkspaceLayout(PairedChatSession session)
+    {
+        var fraction = session.Settings.ChatFraction;
+        var columns = ChatTerminalGrid.ColumnDefinitions;
+        if (ChatTerminalHost.IsVisible && columns[0].ActualWidth + columns[2].ActualWidth > 0)
+            fraction = columns[0].ActualWidth / (columns[0].ActualWidth + columns[2].ActualWidth);
+        else if (_chatSplitWidth.IsStar && _terminalSplitWidth.IsStar &&
+                 _chatSplitWidth.Value + _terminalSplitWidth.Value > 0)
+            fraction = _chatSplitWidth.Value / (_chatSplitWidth.Value + _terminalSplitWidth.Value);
+        session.Settings = session.Settings with
+        {
+            ChatFraction = fraction,
+            ShowTerminal = ChatTerminalToggle.IsChecked == true
+        };
+    }
+
+    private void SaveWorkspaceLayout()
+    {
+        if (_activeChatSession is { } active)
+            CaptureWorkspaceLayout(active);
+        try
+        {
+            new PairedWorkspaceLayout(_activeChatSession?.Settings.Id,
+                _pairedChatSessions.Select(session => session.Settings).ToList()).Save();
+            WorkspaceStatus.Text = string.Empty;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            WorkspaceStatus.Text = "Could not save workspace settings.";
+        }
+    }
+
+    private void PinnedProject_Click(object? sender, RoutedEventArgs e)
+    {
+        if (PairedWorkspaceLayout.ProjectAddress(_activeChatSession?.Settings.ProjectUrl) is { } address)
+            ChatView.Navigate(address);
+    }
+
+    private async void WorkspaceSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_activeChatSession is not { } session)
+            return;
+
+        var name = new TextBox { Text = session.Settings.Name, MaxLength = 80 };
+        var project = new TextBox { Text = session.Settings.ProjectUrl };
+        var directory = new TextBox { Text = session.Settings.StartupDirectory };
+        var environment = new TextBox
+        {
+            AcceptsReturn = true, MinHeight = 78,
+            Text = string.Join(Environment.NewLine,
+                session.Settings.EnvironmentOverrides?.Select(pair => $"{pair.Key}={pair.Value}") ?? [])
+        };
+        var feedback = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        var save = new Button { Content = "Save", IsDefault = true };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var form = new StackPanel { Margin = new Avalonia.Thickness(20), Spacing = 8 };
+        foreach (var (label, input) in new[]
+        {
+            ("Workspace name", name), ("ChatGPT project link (optional)", project),
+            ("Terminal startup directory (optional)", directory),
+            ("Environment overrides, one NAME=value per line (no secrets)", environment)
+        })
+        {
+            AutomationProperties.SetName(input, label);
+            form.Children.Add(new TextBlock { Text = label });
+            form.Children.Add(input);
+        }
+        form.Children.Add(feedback);
+        form.Children.Add(new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+            Children = { save, cancel }
+        });
+        var dialog = new Window
+        {
+            Title = "Workspace settings", Width = 560, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = form
+        };
+        cancel.Click += (_, _) => dialog.Close();
+        save.Click += (_, _) =>
+        {
+            var title = name.Text?.Trim();
+            var projectText = project.Text?.Trim();
+            var projectAddress = PairedWorkspaceLayout.ProjectAddress(projectText);
+            var startup = directory.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                feedback.Text = "Enter a workspace name.";
+                return;
+            }
+            if (!string.IsNullOrEmpty(projectText) && projectAddress is null)
+            {
+                feedback.Text = "Paste the project homepage link from ChatGPT.";
+                return;
+            }
+            if (!string.IsNullOrEmpty(startup) && (!Path.IsPathFullyQualified(startup) || !Directory.Exists(startup)))
+            {
+                feedback.Text = "Enter an existing absolute directory.";
+                return;
+            }
+
+            var variables = new Dictionary<string, string>(
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            foreach (var line in (environment.Text ?? string.Empty).Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+                var separator = line.IndexOf('=');
+                var key = separator > 0 ? line[..separator].Trim() : string.Empty;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(key, @"^[A-Za-z_][A-Za-z0-9_]*$") ||
+                    !variables.TryAdd(key, line[(separator + 1)..].TrimEnd('\r')))
+                {
+                    feedback.Text = "Use one NAME=value per line, with unique variable names.";
+                    return;
+                }
+                if (TerminalTransferBridge.ContainsSensitiveTokens(line))
+                {
+                    feedback.Text = "Remove credential-like values before saving.";
+                    return;
+                }
+            }
+
+            session.Settings = session.Settings with
+            {
+                Name = title, ProjectUrl = projectAddress?.AbsoluteUri,
+                StartupDirectory = string.IsNullOrEmpty(startup) ? null : startup,
+                EnvironmentOverrides = variables
+            };
+            session.Tab.Content = title;
+            session.Workbench.ApplyTerminalSettings(session.Settings);
+            PinnedProjectButton.IsVisible = projectAddress is not null;
+            SaveWorkspaceLayout();
+            dialog.Close();
+        };
+        await dialog.ShowDialog(this);
     }
 
     private void UpdateChatTerminalDock()
@@ -196,6 +374,26 @@ public partial class MainWindow : Window
 
         if ((e.KeyModifiers & primaryModifier) != primaryModifier)
             return;
+
+        if ((e.KeyModifiers & KeyModifiers.Alt) != 0 && e.Key is Key.D1 or Key.D2 or Key.D3)
+        {
+            if (e.Key == Key.D3)
+                OpenDraftReview();
+            else
+            {
+                RootTabs.SelectedIndex = 0;
+                if (e.Key == Key.D1)
+                    Dispatcher.UIThread.Post(() => ChatView.Focus());
+                else
+                {
+                    ChatTerminalToggle.IsChecked = true;
+                    UpdateChatTerminalDock();
+                    Dispatcher.UIThread.Post(SessionWorkbench.FocusCommandInput);
+                }
+            }
+            e.Handled = true;
+            return;
+        }
 
         switch (e.Key)
         {
@@ -2061,6 +2259,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        SaveWorkspaceLayout();
         _nativeMetadataWindow?.Close();
         foreach (var session in _pairedChatSessions)
             session.Workbench.CloseTerminal();

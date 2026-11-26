@@ -61,7 +61,61 @@ public partial class WorkbenchView : UserControl
     }
 
     internal void FocusDraftInput() => W2DraftInput.Focus();
+    internal void FocusCommandInput() => TerminalCommandInput.Focus();
     internal void CloseTerminal() => _terminalHost.Stop();
+    internal event Action? DraftReviewRequested;
+
+    internal void ApplyTerminalSettings(PairedWorkspaceSettings settings)
+    {
+        _terminalHost.StartupDirectory = settings.StartupDirectory;
+        _terminalHost.EnvironmentOverrides = settings.EnvironmentOverrides;
+        UpdateTerminalDirectory();
+    }
+
+    private void UpdateTerminalDirectory() =>
+        TerminalWorkingDirectory.Text = "Working Dir: " + (_terminalHost.StartupDirectory ?? _terminalHost.WorkingDirectory);
+
+    private async void TerminalStageSelection_Click(object? sender, RoutedEventArgs e)
+    {
+        var selected = TerminalConsoleOutput.SelectedText;
+        if (string.IsNullOrWhiteSpace(selected))
+        {
+            TerminalStatusText.Text = "Select terminal output first.";
+            return;
+        }
+        W2DraftInput.Text = selected;
+        DraftReviewRequested?.Invoke();
+        await W2PrepareAsync("terminal-to-chat");
+    }
+
+    private async void TerminalPasteClipboard_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (TopLevel.GetTopLevel(SessionTerminalPane)?.Clipboard is not { } clipboard)
+                return;
+            var text = await clipboard.TryGetTextAsync();
+            if (string.IsNullOrWhiteSpace(text) || Encoding.UTF8.GetByteCount(text) > 16 * 1024)
+            {
+                TerminalStatusText.Text = "Copy text up to 16 KiB first.";
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(TerminalCommandInput.Text))
+            {
+                TerminalStatusText.Text = "Clear the current command draft before pasting.";
+                return;
+            }
+            if (!SessionTerminalPane.IsEffectivelyVisible)
+                return;
+            TerminalCommandInput.Text = text;
+            TerminalStatusText.Text = "Pasted into command draft. Review before running.";
+            FocusCommandInput();
+        }
+        catch (InvalidOperationException)
+        {
+            TerminalStatusText.Text = "Clipboard unavailable.";
+        }
+    }
 
     private async void TerminalCopyChatDraft_Click(object? sender, RoutedEventArgs e)
     {
@@ -166,13 +220,13 @@ public partial class WorkbenchView : UserControl
             if (active is not null && !string.IsNullOrWhiteSpace(active.WorkspaceKey))
             {
                 _terminalHost.WorkingDirectory = active.WorkspaceKey;
-                TerminalWorkingDirectory.Text = "Working Dir: " + active.WorkspaceKey;
+                UpdateTerminalDirectory();
                 WorkbenchPairStatusText.Text = $"Session: {active.Title}";
             }
             else
             {
                 _terminalHost.WorkingDirectory = Directory.GetCurrentDirectory();
-                TerminalWorkingDirectory.Text = "Working Dir: " + Directory.GetCurrentDirectory();
+                UpdateTerminalDirectory();
                 WorkbenchPairStatusText.Text = "Local Execution Bound";
             }
         }

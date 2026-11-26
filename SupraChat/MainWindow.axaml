@@ -88,17 +88,22 @@
                     AutomationProperties.AutomationId="ChatGPT.NewSession"
                     AutomationProperties.HelpText="Open a workspace with its own ChatGPT view and terminal session." />
           </Grid>
-          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="8,4">
+          <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemSpacing="8" Margin="8,4">
             <ToggleButton x:Name="ChatTerminalToggle" Content="Show terminal" IsChecked="True" Click="ChatTerminalToggle_Click"
                           AutomationProperties.AutomationId="ChatGPT.TerminalToggle"
                           AutomationProperties.HelpText="Show or hide the paired session terminal beside ChatGPT." />
             <Button Content="Review session drafts" Click="ChatDraftReview_Click"
                     AutomationProperties.AutomationId="ChatGPT.ReviewSessionDrafts" />
-          </StackPanel>
+            <Button Content="Workspace settings" Click="WorkspaceSettings_Click"
+                    AutomationProperties.AutomationId="ChatGPT.WorkspaceSettings" />
+            <Button x:Name="PinnedProjectButton" Content="Open pinned project" Click="PinnedProject_Click"
+                    IsVisible="False" AutomationProperties.AutomationId="ChatGPT.OpenPinnedProject" />
+            <TextBlock x:Name="WorkspaceStatus" VerticalAlignment="Center"
+                       AutomationProperties.AutomationId="ChatGPT.WorkspaceStatus" />
+          </WrapPanel>
           <Grid Grid.Row="2" x:Name="ChatTerminalGrid" ColumnDefinitions="*,0,0">
             <Grid x:Name="ChatWebViews">
               <NativeWebView x:Name="InitialChatView"
-                       Source="https://chatgpt.com/"
                        EnvironmentRequested="ChatView_EnvironmentRequested"
                        NavigationCompleted="ChatView_NavigationCompleted"
                        AutomationProperties.AutomationId="ChatGPT.WebView"
