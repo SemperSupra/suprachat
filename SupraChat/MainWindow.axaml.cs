@@ -38,8 +38,6 @@ public partial class MainWindow : Window
     private NativeReviewOwnerLifetime? _nativeMetadataOwnerLifetime;
     private SharedSessionLedger? _nativeMetadataLedger;
     private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
-    private GridLength _chatSplitWidth = new(3, GridUnitType.Star);
-    private GridLength _terminalSplitWidth = new(2, GridUnitType.Star);
     private readonly List<PairedChatSession> _pairedChatSessions = new();
     private PairedChatSession? _activeChatSession;
 
@@ -52,6 +50,12 @@ public partial class MainWindow : Window
         public NativeWebView WebView { get; } = webView;
         public WorkbenchView Workbench { get; } = workbench;
         public TabStripItem Tab { get; } = tab;
+        public ContentControl TerminalDock { get; } = new()
+        {
+            IsVisible = false,
+            HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+            VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+        };
         public PairedWorkspaceSettings Settings { get; set; } = settings;
     }
 
@@ -117,6 +121,16 @@ public partial class MainWindow : Window
 
     private void ChatTerminalToggle_Click(object? sender, RoutedEventArgs e) => UpdateChatTerminalDock();
 
+    private void SplitOrientation_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_activeChatSession is not { } session)
+            return;
+        CaptureWorkspaceLayout(session);
+        session.Settings = session.Settings with { StackPanes = !session.Settings.StackPanes };
+        ChatTerminalToggle.IsChecked = true;
+        UpdateChatTerminalDock(captureBeforeChanging: false);
+    }
+
     private PairedWorkspaceSettings NewWorkspaceSettings() =>
         new(Guid.NewGuid(), $"Workspace {_pairedChatSessions.Count + 1}");
 
@@ -173,6 +187,7 @@ public partial class MainWindow : Window
         closing.WebView.NavigationCompleted -= ChatView_NavigationCompleted;
         closing.WebView.EnvironmentRequested -= ChatView_EnvironmentRequested;
         ChatWebViews.Children.Remove(closing.WebView);
+        ChatTerminalHost.Children.Remove(closing.TerminalDock);
         _pairedChatSessions.Remove(closing);
         ChatSessionTabs.Items.Remove(closing.Tab);
         CloseWorkspaceButton.IsEnabled = _pairedChatSessions.Count > 1;
@@ -198,6 +213,7 @@ public partial class MainWindow : Window
         workbench.DraftReviewRequested += OpenDraftReview;
         var session = new PairedChatSession(webView, workbench, tab, settings);
         _pairedChatSessions.Add(session);
+        ChatTerminalHost.Children.Add(session.TerminalDock);
         AutomationProperties.SetAutomationId(tab, $"ChatGPT.Session.{settings.Id:N}");
         ChatSessionTabs.Items.Add(tab);
         CloseWorkspaceButton.IsEnabled = _pairedChatSessions.Count > 1;
@@ -214,29 +230,15 @@ public partial class MainWindow : Window
             CaptureWorkspaceLayout(previous);
             _nativeMetadataWindow?.Close();
             previous.WebView.IsVisible = false;
-            if (ChatTerminalHost.Content is not null)
-            {
-                ChatTerminalHost.Content = null;
-                previous.Workbench.MoveTerminalTo(null);
-            }
+            previous.TerminalDock.IsVisible = false;
         }
 
         _activeChatSession = session;
         SessionWorkbenchHost.Content = session.Workbench;
         session.WebView.IsVisible = true;
-        if (ChatTerminalHost.IsVisible)
-            session.Workbench.MoveTerminalTo(ChatTerminalHost);
-        var fraction = Math.Clamp(session.Settings.ChatFraction, 0.1, 0.9);
-        _chatSplitWidth = new GridLength(fraction, GridUnitType.Star);
-        _terminalSplitWidth = new GridLength(1 - fraction, GridUnitType.Star);
-        if (ChatTerminalHost.IsVisible)
-        {
-            ChatTerminalGrid.ColumnDefinitions[0].Width = _chatSplitWidth;
-            ChatTerminalGrid.ColumnDefinitions[2].Width = _terminalSplitWidth;
-        }
         ChatTerminalToggle.IsChecked = session.Settings.ShowTerminal;
         PinnedProjectButton.IsVisible = PairedWorkspaceLayout.ProjectAddress(session.Settings.ProjectUrl) is not null;
-        UpdateChatTerminalDock();
+        UpdateChatTerminalDock(captureBeforeChanging: false);
         UpdatePlanIndicatorFromUri(session.WebView.Source);
     }
 
@@ -251,15 +253,20 @@ public partial class MainWindow : Window
     private void CaptureWorkspaceLayout(PairedChatSession session)
     {
         var fraction = session.Settings.ChatFraction;
+        var stackedFraction = session.Settings.StackedChatFraction;
         var columns = ChatTerminalGrid.ColumnDefinitions;
-        if (ChatTerminalHost.IsVisible && columns[0].ActualWidth + columns[2].ActualWidth > 0)
-            fraction = columns[0].ActualWidth / (columns[0].ActualWidth + columns[2].ActualWidth);
-        else if (_chatSplitWidth.IsStar && _terminalSplitWidth.IsStar &&
-                 _chatSplitWidth.Value + _terminalSplitWidth.Value > 0)
-            fraction = _chatSplitWidth.Value / (_chatSplitWidth.Value + _terminalSplitWidth.Value);
+        var rows = ChatTerminalGrid.RowDefinitions;
+        if (ChatTerminalHost.IsVisible)
+        {
+            if (session.Settings.StackPanes && rows[0].ActualHeight + rows[2].ActualHeight > 0)
+                stackedFraction = rows[0].ActualHeight / (rows[0].ActualHeight + rows[2].ActualHeight);
+            else if (!session.Settings.StackPanes && columns[0].ActualWidth + columns[2].ActualWidth > 0)
+                fraction = columns[0].ActualWidth / (columns[0].ActualWidth + columns[2].ActualWidth);
+        }
         session.Settings = session.Settings with
         {
             ChatFraction = fraction,
+            StackedChatFraction = stackedFraction,
             ShowTerminal = ChatTerminalToggle.IsChecked == true
         };
     }
@@ -385,38 +392,50 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
-    private void UpdateChatTerminalDock()
+    private void UpdateChatTerminalDock(bool captureBeforeChanging = true)
     {
-        var show = RootTabs.SelectedIndex == 0 && ChatTerminalToggle.IsChecked == true;
-        if (ChatTerminalHost.IsVisible == show)
+        if (_activeChatSession is not { } session)
             return;
+        if (captureBeforeChanging)
+            CaptureWorkspaceLayout(session);
 
+        var show = RootTabs.SelectedIndex == 0 && ChatTerminalToggle.IsChecked == true;
+        if (show && session.TerminalDock.Content is null)
+            session.Workbench.MoveTerminalTo(session.TerminalDock);
+        else if (ReferenceEquals(RootTabs.SelectedItem, SessionsTab) && session.TerminalDock.Content is not null)
+        {
+            session.TerminalDock.Content = null;
+            session.Workbench.MoveTerminalTo(null);
+        }
+
+        var stacked = session.Settings.StackPanes;
+        var fraction = Math.Clamp(stacked ? session.Settings.StackedChatFraction : session.Settings.ChatFraction, 0.1, 0.9);
         var columns = ChatTerminalGrid.ColumnDefinitions;
-        if (show)
-        {
-            SessionWorkbench.MoveTerminalTo(ChatTerminalHost);
-            columns[0].MinWidth = 620;
-            columns[0].Width = _chatSplitWidth;
-            columns[1].Width = new GridLength(8);
-            columns[2].MinWidth = 260;
-            columns[2].Width = _terminalSplitWidth;
-        }
-        else
-        {
-            _chatSplitWidth = columns[0].Width;
-            _terminalSplitWidth = columns[2].Width;
-            ChatTerminalHost.Content = null;
-            SessionWorkbench.MoveTerminalTo(null);
-            columns[0].MinWidth = 0;
-            columns[0].Width = new GridLength(1, GridUnitType.Star);
-            columns[1].Width = new GridLength(0);
-            columns[2].MinWidth = 0;
-            columns[2].Width = new GridLength(0);
-        }
+        var rows = ChatTerminalGrid.RowDefinitions;
+        columns[0].MinWidth = show && !stacked ? 620 : 0;
+        columns[2].MinWidth = show && !stacked ? 260 : 0;
+        rows[0].MinHeight = show && stacked ? 200 : 0;
+        rows[2].MinHeight = show && stacked ? 150 : 0;
+        columns[0].Width = new GridLength(show && !stacked ? fraction : 1, GridUnitType.Star);
+        columns[1].Width = new GridLength(show && !stacked ? 8 : 0);
+        columns[2].Width = show && !stacked ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
+        rows[0].Height = new GridLength(show && stacked ? fraction : 1, GridUnitType.Star);
+        rows[1].Height = new GridLength(show && stacked ? 8 : 0);
+        rows[2].Height = show && stacked ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
+        Grid.SetColumn(ChatTerminalDivider, stacked ? 0 : 1);
+        Grid.SetRow(ChatTerminalDivider, stacked ? 1 : 0);
+        Grid.SetColumn(ChatTerminalHost, stacked ? 0 : 2);
+        Grid.SetRow(ChatTerminalHost, stacked ? 2 : 0);
+        ChatTerminalDivider.ResizeDirection = stacked ? GridResizeDirection.Rows : GridResizeDirection.Columns;
+        AutomationProperties.SetHelpText(ChatTerminalDivider, stacked
+            ? "Use the up and down arrow keys to resize the panes."
+            : "Use the left and right arrow keys to resize the panes.");
 
+        session.TerminalDock.IsVisible = show;
         ChatTerminalHost.IsVisible = show;
         ChatTerminalDivider.IsVisible = show;
-        ChatTerminalToggle.Content = show ? "Hide terminal" : "Show terminal";
+        ChatTerminalToggle.Content = ChatTerminalToggle.IsChecked == true ? "Hide terminal" : "Show terminal";
+        SplitOrientationButton.Content = stacked ? "Side by side" : "Stack panes";
     }
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)

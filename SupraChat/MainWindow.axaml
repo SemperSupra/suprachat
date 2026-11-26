@@ -96,6 +96,9 @@
             <ToggleButton x:Name="ChatTerminalToggle" Content="Show terminal" IsChecked="True" Click="ChatTerminalToggle_Click"
                           AutomationProperties.AutomationId="ChatGPT.TerminalToggle"
                           AutomationProperties.HelpText="Show or hide the paired session terminal beside ChatGPT." />
+            <Button x:Name="SplitOrientationButton" Content="Stack panes" Click="SplitOrientation_Click"
+                    AutomationProperties.AutomationId="ChatGPT.SplitOrientation"
+                    AutomationProperties.HelpText="Use the full window width for chat and terminal by stacking the panes." />
             <Button Content="Review session drafts" Click="ChatDraftReview_Click"
                     AutomationProperties.AutomationId="ChatGPT.ReviewSessionDrafts" />
             <Button Content="Workspace settings" Click="WorkspaceSettings_Click"
@@ -107,7 +110,7 @@
             <TextBlock x:Name="WorkspaceShortcutHint" VerticalAlignment="Center"
                        AutomationProperties.AutomationId="ChatGPT.WorkspaceShortcuts" />
           </WrapPanel>
-          <Grid Grid.Row="2" x:Name="ChatTerminalGrid" ColumnDefinitions="*,0,0">
+          <Grid Grid.Row="2" x:Name="ChatTerminalGrid" ColumnDefinitions="*,0,0" RowDefinitions="*,0,0">
             <Grid x:Name="ChatWebViews">
               <NativeWebView x:Name="InitialChatView"
                        EnvironmentRequested="ChatView_EnvironmentRequested"
@@ -124,8 +127,7 @@
                           AutomationProperties.AutomationId="ChatGPT.TerminalDivider"
                           AutomationProperties.Name="Resize chat and terminal"
                           AutomationProperties.HelpText="Use the left and right arrow keys to resize the panes." />
-            <ContentControl x:Name="ChatTerminalHost" Grid.Column="2" IsVisible="False"
-                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+            <Grid x:Name="ChatTerminalHost" Grid.Column="2" IsVisible="False" />
           </Grid>
         </Grid>
       </TabItem>
