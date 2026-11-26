@@ -1,0 +1,10 @@
+{
+  "name": "oec-chrome-devtools-synthetic-witness",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "dependencies": {
+    "chrome-devtools-mcp": "1.12.0",
+    "@modelcontextprotocol/sdk": "1.25.2"
+  }
+}

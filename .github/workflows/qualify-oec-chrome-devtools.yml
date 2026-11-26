@@ -1,0 +1,36 @@
+name: Qualify OEC Chrome DevTools MCP (public synthetic)
+on:
+  pull_request:
+    paths:
+      - 'tools/oec-chrome-devtools/**'
+      - '.github/workflows/qualify-oec-chrome-devtools.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: oec-chrome-devtools-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser-witness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    defaults:
+      run:
+        working-directory: tools/oec-chrome-devtools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - name: Install pinned DevTools MCP packages
+        run: npm install --ignore-scripts --no-audit --no-fund --save-exact
+      - name: MCP client drives isolated Chrome DevTools observation
+        run: node probe.mjs
+      - name: Publish only synthetic metadata receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oec-chrome-devtools-synthetic-receipt
+          path: tools/oec-chrome-devtools/evidence/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
