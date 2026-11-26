@@ -118,7 +118,7 @@ public partial class MainWindow : Window
         var session = new PairedChatSession(webView, new WorkbenchView());
         _pairedChatSessions.Add(session);
         var index = _pairedChatSessions.Count;
-        var tab = new TabStripItem { Content = $"Session {index}" };
+        var tab = new TabStripItem { Content = $"Workspace {index}" };
         AutomationProperties.SetAutomationId(tab, $"ChatGPT.Session.{index}");
         ChatSessionTabs.Items.Add(tab);
         ChatSessionTabs.SelectedItem = tab;

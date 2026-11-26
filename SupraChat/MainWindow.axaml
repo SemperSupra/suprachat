@@ -82,11 +82,11 @@
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
               <TabStrip x:Name="ChatSessionTabs"
                         AutomationProperties.AutomationId="ChatGPT.SessionTabs"
-                        AutomationProperties.Name="Paired chat and terminal sessions" />
+                        AutomationProperties.Name="Paired chat and terminal workspaces" />
             </ScrollViewer>
-            <Button Grid.Column="1" Content="New session" Click="NewChatSession_Click"
+            <Button Grid.Column="1" Content="New workspace" Click="NewChatSession_Click"
                     AutomationProperties.AutomationId="ChatGPT.NewSession"
-                    AutomationProperties.HelpText="Open another ChatGPT view with its own paired terminal." />
+                    AutomationProperties.HelpText="Open a workspace with its own ChatGPT view and terminal session." />
           </Grid>
           <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="8,4">
             <ToggleButton x:Name="ChatTerminalToggle" Content="Show terminal" IsChecked="True" Click="ChatTerminalToggle_Click"
