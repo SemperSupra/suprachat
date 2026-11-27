@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
     private readonly List<PairedChatSession> _pairedChatSessions = new();
     private PairedChatSession? _activeChatSession;
+    private bool _renderedStacked;
 
     private NativeWebView ChatView => _activeChatSession?.WebView ?? InitialChatView;
     private WorkbenchView SessionWorkbench => _activeChatSession!.Workbench;
@@ -85,16 +86,21 @@ public partial class MainWindow : Window
             if (ReferenceEquals(args.Source, RootTabs))
                 UpdateChatTerminalDock();
         };
+        ChatTerminalGrid.SizeChanged += (_, _) =>
+        {
+            if (ChatTerminalHost.IsVisible && _activeChatSession is { } workspace &&
+                _renderedStacked != UseStackedPanes(workspace))
+                UpdateChatTerminalDock();
+        };
         if (OperatingSystem.IsWindows())
             _nativeMetadataOwnerLifetime = NativeReviewOwnerLifetime.Attach(this, () => _nativeMetadataWindow as NativeMetadataReviewWindow);
         ShowTrace("status");
         LoadCapabilityCatalog();
         var initialTab = Environment.GetEnvironmentVariable("SUPRACHAT_INITIAL_TAB");
-        if (string.Equals(initialTab, "Sessions", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(initialTab, "3", StringComparison.OrdinalIgnoreCase))
-        {
+        if (string.Equals(initialTab, "Sessions", StringComparison.OrdinalIgnoreCase))
+            RootTabs.SelectedItem = SessionsTab;
+        else if (string.Equals(initialTab, "3", StringComparison.OrdinalIgnoreCase))
             RootTabs.SelectedIndex = 3;
-        }
         UpdateChatTerminalDock();
         Opened += async (_, _) =>
         {
@@ -139,7 +145,7 @@ public partial class MainWindow : Window
         if (_activeChatSession is not { } session || !ChatTerminalHost.IsVisible)
             return;
         CaptureWorkspaceLayout(session);
-        session.Settings = session.Settings.StackPanes
+        session.Settings = _renderedStacked
             ? session.Settings with { StackedChatFraction = Math.Clamp(session.Settings.StackedChatFraction + change, 0.1, 0.9) }
             : session.Settings with { ChatFraction = Math.Clamp(session.Settings.ChatFraction + change, 0.1, 0.9) };
         UpdateChatTerminalDock(captureBeforeChanging: false);
@@ -272,9 +278,9 @@ public partial class MainWindow : Window
         var rows = ChatTerminalGrid.RowDefinitions;
         if (ChatTerminalHost.IsVisible)
         {
-            if (session.Settings.StackPanes && rows[0].ActualHeight + rows[2].ActualHeight > 0)
+            if (_renderedStacked && rows[0].ActualHeight + rows[2].ActualHeight > 0)
                 stackedFraction = rows[0].ActualHeight / (rows[0].ActualHeight + rows[2].ActualHeight);
-            else if (!session.Settings.StackPanes && columns[0].ActualWidth + columns[2].ActualWidth > 0)
+            else if (!_renderedStacked && columns[0].ActualWidth + columns[2].ActualWidth > 0)
                 fraction = columns[0].ActualWidth / (columns[0].ActualWidth + columns[2].ActualWidth);
         }
         session.Settings = session.Settings with
@@ -314,6 +320,7 @@ public partial class MainWindow : Window
 
         var name = new TextBox { Text = session.Settings.Name, MaxLength = 80 };
         var project = new TextBox { Text = session.Settings.ProjectUrl };
+        var issue = new TextBox { Text = session.Settings.DurableIssue, MaxLength = 250 };
         var directory = new TextBox { Text = session.Settings.StartupDirectory };
         var environment = new TextBox
         {
@@ -328,6 +335,7 @@ public partial class MainWindow : Window
         foreach (var (label, input) in new[]
         {
             ("Workspace name", name), ("ChatGPT project link (optional)", project),
+            ("DLE issue link or owner/repo#number (optional)", issue),
             ("Terminal startup directory (optional)", directory),
             ("Environment overrides, one NAME=value per line (no secrets)", environment)
         })
@@ -353,6 +361,7 @@ public partial class MainWindow : Window
             var title = name.Text?.Trim();
             var projectText = project.Text?.Trim();
             var projectAddress = PairedWorkspaceLayout.ProjectAddress(projectText);
+            var issueLocator = PairedWorkspaceLayout.IssueLocator(issue.Text);
             var startup = directory.Text?.Trim();
             if (string.IsNullOrWhiteSpace(title))
             {
@@ -362,6 +371,11 @@ public partial class MainWindow : Window
             if (!string.IsNullOrEmpty(projectText) && projectAddress is null)
             {
                 feedback.Text = "Paste the project homepage link from ChatGPT.";
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(issue.Text) && issueLocator is null)
+            {
+                feedback.Text = "Enter a GitHub issue link or owner/repo#number.";
                 return;
             }
             if (!string.IsNullOrEmpty(startup) && (!Path.IsPathFullyQualified(startup) || !Directory.Exists(startup)))
@@ -395,13 +409,59 @@ public partial class MainWindow : Window
             {
                 Name = title, ProjectUrl = projectAddress?.AbsoluteUri,
                 StartupDirectory = string.IsNullOrEmpty(startup) ? null : startup,
-                EnvironmentOverrides = variables
+                EnvironmentOverrides = variables,
+                DurableIssue = issueLocator
             };
             session.Tab.Content = title;
             session.Workbench.ApplyTerminalSettings(session.Settings);
             PinnedProjectButton.IsVisible = projectAddress is not null;
             SaveWorkspaceLayout();
             dialog.Close();
+        };
+        await dialog.ShowDialog(this);
+    }
+
+    private async void ResumeFromDle_Click(object? sender, RoutedEventArgs e)
+    {
+        var locator = PairedWorkspaceLayout.IssueLocator(_activeChatSession?.Settings.DurableIssue);
+        if (locator is null)
+        {
+            WorkspaceStatus.Text = "Set a DLE issue in Workspace settings first.";
+            return;
+        }
+
+        var prompt = $"Resume {locator}.";
+        var copy = new Button { Content = "Copy prompt" };
+        var close = new Button { Content = "Cancel", IsDefault = true, IsCancel = true };
+        var preview = new TextBox { Text = prompt, IsReadOnly = true, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        AutomationProperties.SetName(preview, "Resume prompt");
+        var feedback = new TextBlock { Text = "Copy the prompt, then paste it into the intended actor." };
+        var dialog = new Window
+        {
+            Title = "Resume from DLE", Width = 540, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20), Spacing = 10,
+                Children = { preview, feedback, new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8,
+                    Children = { copy, close }
+                } }
+            }
+        };
+        close.Click += (_, _) => dialog.Close();
+        copy.Click += async (_, _) =>
+        {
+            var clipboard = dialog.Clipboard;
+            if (clipboard is null)
+                feedback.Text = "Clipboard unavailable. Select and copy the prompt manually.";
+            else
+            {
+                await clipboard.SetTextAsync(prompt);
+                dialog.Close();
+                WorkspaceStatus.Text = "Resume prompt copied.";
+            }
         };
         await dialog.ShowDialog(this);
     }
@@ -422,7 +482,8 @@ public partial class MainWindow : Window
             session.Workbench.MoveTerminalTo(null);
         }
 
-        var stacked = session.Settings.StackPanes;
+        var stacked = UseStackedPanes(session);
+        _renderedStacked = stacked;
         var fraction = Math.Clamp(stacked ? session.Settings.StackedChatFraction : session.Settings.ChatFraction, 0.1, 0.9);
         var columns = ChatTerminalGrid.ColumnDefinitions;
         var rows = ChatTerminalGrid.RowDefinitions;
@@ -448,12 +509,16 @@ public partial class MainWindow : Window
         session.TerminalDock.IsVisible = show;
         ChatTerminalHost.IsVisible = show;
         ChatTerminalDivider.IsVisible = show;
-        MoreChatSpaceButton.IsVisible = show;
-        MoreTerminalSpaceButton.IsVisible = show;
+        PaneSizeMenu.IsVisible = show;
         ChatTerminalToggle.Content = ChatTerminalToggle.IsChecked == true ? "Hide terminal" : "Show terminal";
-        SplitOrientationLabel.Text = stacked ? "Side by side" : "Stack panes";
+        SplitOrientationButton.IsEnabled = !IsNarrowSplit;
+        SplitOrientationLabel.Text = IsNarrowSplit ? "Stacked to fit" : stacked ? "Side by side" : "Stack panes";
         AutomationProperties.SetName(SplitOrientationButton, SplitOrientationLabel.Text);
     }
+
+    private bool IsNarrowSplit => ChatTerminalGrid.Bounds.Width is > 0 and < 888;
+
+    private bool UseStackedPanes(PairedChatSession workspace) => workspace.Settings.StackPanes || IsNarrowSplit;
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
@@ -502,6 +567,10 @@ public partial class MainWindow : Window
                 break;
             case Key.D4:
                 RootTabs.SelectedIndex = 3;
+                e.Handled = true;
+                break;
+            case Key.D5:
+                RootTabs.SelectedItem = SessionsTab;
                 e.Handled = true;
                 break;
             case Key.L:

@@ -5,7 +5,7 @@ namespace SupraChat.Core;
 internal sealed record PairedWorkspaceSettings(Guid Id, string Name, string? ProjectUrl = null,
     string? StartupDirectory = null, Dictionary<string, string>? EnvironmentOverrides = null,
     double ChatFraction = 0.7, bool ShowTerminal = true, bool StackPanes = false,
-    double StackedChatFraction = 0.58);
+    double StackedChatFraction = 0.58, string? DurableIssue = null);
 
 internal sealed record PairedWorkspaceLayout(Guid? Active, List<PairedWorkspaceSettings> Workspaces)
 {
@@ -55,6 +55,20 @@ internal sealed record PairedWorkspaceLayout(Guid? Active, List<PairedWorkspaceS
         string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment) &&
         System.Text.RegularExpressions.Regex.IsMatch(url.AbsolutePath, @"^/g/g-p-[a-zA-Z0-9-]+/project/?$")
             ? url : null;
+
+    internal static string? IssueLocator(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var match = System.Text.RegularExpressions.Regex.Match(value.Trim(),
+            @"\A(?:https://github\.com/(?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/(?<issue>[1-9][0-9]*)/?|(?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(?<issue>[1-9][0-9]*))\z");
+        if (!match.Success || !int.TryParse(match.Groups["issue"].Value, out var number))
+            return null;
+        var repository = match.Groups["repo"].Value;
+        if (repository.Split('/').Any(segment => segment is "." or ".."))
+            return null;
+        return $"{repository}#{number}";
+    }
 }
 
 public static class SavedWorkspaceInventory
@@ -74,6 +88,7 @@ public static class SavedWorkspaceInventory
                 layout = workspace.StackPanes ? "stacked" : "side-by-side",
                 show_terminal = workspace.ShowTerminal,
                 project_pinned = PairedWorkspaceLayout.ProjectAddress(workspace.ProjectUrl) is not null,
+                durable_issue_configured = PairedWorkspaceLayout.IssueLocator(workspace.DurableIssue) is not null,
                 startup_directory_configured = !string.IsNullOrEmpty(workspace.StartupDirectory),
                 environment_overrides_configured = workspace.EnvironmentOverrides is { Count: > 0 }
             }).ToArray()

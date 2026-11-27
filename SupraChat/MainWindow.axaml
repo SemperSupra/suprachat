@@ -15,6 +15,9 @@
     <Border Grid.Row="0" Padding="8" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
       <Grid>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+          <ToggleButton x:Name="NavigationRailToggle" IsChecked="True" Content="Navigation labels"
+                        AutomationProperties.AutomationId="Navigation.ShowLabels"
+                        AutomationProperties.HelpText="Show or hide labels on the left navigation rail." />
           <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="SupraChat Cockpit" />
           <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}"
                   BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
@@ -41,13 +44,19 @@
       </Grid>
     </Border>
 
-    <TabControl x:Name="RootTabs" Grid.Row="1"
+    <TabControl x:Name="RootTabs" Grid.Row="1" TabStripPlacement="Left"
                 AutomationProperties.AutomationId="RootTabs"
                 AutomationProperties.Name="SupraChat work areas">
-      <TabItem Header="ChatGPT"
+      <TabItem
                AutomationProperties.AutomationId="Tab.ChatGPT"
                AutomationProperties.AcceleratorKey="Command+1 / Control+1"
-               AutomationProperties.HelpText="Official ChatGPT product surface. Keyboard shortcut Command+1 on macOS or Control+1 on Windows/Linux.">
+               AutomationProperties.HelpText="Official ChatGPT product surface. Keyboard shortcut Command+1 on macOS or Control+1 on Windows/Linux." AutomationProperties.Name="Workspace" ToolTip.Tip="Workspace">
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <PathIcon Data="{StaticResource IconSplit}" Width="16" Height="16" />
+            <TextBlock Text="Workspace" IsVisible="{Binding IsChecked, ElementName=NavigationRailToggle}" />
+          </StackPanel>
+        </TabItem.Header>
         <Grid RowDefinitions="Auto,Auto,*">
           <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="8,4">
             <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
@@ -81,6 +90,9 @@
                   <TextBlock Text="Workspace settings" />
                 </StackPanel>
               </Button>
+              <Button Content="Resume from DLE" Click="ResumeFromDle_Click"
+                      AutomationProperties.AutomationId="ChatGPT.ResumeFromDle"
+                      AutomationProperties.HelpText="Preview a short issue locator for a paired actor." />
               <TextBlock x:Name="WorkspaceStatus" VerticalAlignment="Center"
                          AutomationProperties.AutomationId="ChatGPT.WorkspaceStatus"
                          AutomationProperties.LiveSetting="Polite" />
@@ -98,12 +110,20 @@
                 <TextBlock x:Name="SplitOrientationLabel" Text="Stack panes" />
               </StackPanel>
             </Button>
-            <Button x:Name="MoreChatSpaceButton" Content="More chat space" Click="MoreChatSpace_Click"
-                    AutomationProperties.AutomationId="ChatGPT.MoreChatSpace"
-                    AutomationProperties.HelpText="Increase the chat pane size without dragging the divider." />
-            <Button x:Name="MoreTerminalSpaceButton" Content="More terminal space" Click="MoreTerminalSpace_Click"
-                    AutomationProperties.AutomationId="ChatGPT.MoreTerminalSpace"
-                    AutomationProperties.HelpText="Increase the terminal pane size without dragging the divider." />
+            <Button x:Name="PaneSizeMenu" Content="Pane size"
+                    AutomationProperties.AutomationId="ChatGPT.PaneSizeMenu"
+                    AutomationProperties.HelpText="Give either pane more room without dragging the divider.">
+              <Button.Flyout>
+                <MenuFlyout>
+                  <MenuItem x:Name="MoreChatSpaceButton" Header="More chat space" Click="MoreChatSpace_Click"
+                          AutomationProperties.AutomationId="ChatGPT.MoreChatSpace"
+                          AutomationProperties.HelpText="Increase the chat pane size without dragging the divider." />
+                  <MenuItem x:Name="MoreTerminalSpaceButton" Header="More terminal space" Click="MoreTerminalSpace_Click"
+                          AutomationProperties.AutomationId="ChatGPT.MoreTerminalSpace"
+                          AutomationProperties.HelpText="Increase the terminal pane size without dragging the divider." />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
             <TextBlock x:Name="WorkspaceShortcutHint" VerticalAlignment="Center"
                        AutomationProperties.AutomationId="ChatGPT.WorkspaceShortcuts" />
           </WrapPanel>
@@ -191,10 +211,16 @@
         </Grid>
       </TabItem>
 
-      <TabItem Header="Agent Lab"
+      <TabItem
                AutomationProperties.AutomationId="Tab.AgentLab"
                AutomationProperties.AcceleratorKey="Command+2 / Control+2"
-               AutomationProperties.HelpText="ChatGPT-plan and Codex capability laboratory. Keyboard shortcut Command+2 on macOS or Control+2 on Windows/Linux.">
+               AutomationProperties.HelpText="ChatGPT-plan and Codex capability laboratory. Keyboard shortcut Command+2 on macOS or Control+2 on Windows/Linux." AutomationProperties.Name="Agent Lab" ToolTip.Tip="Agent Lab">
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <PathIcon Data="{StaticResource IconTerminal}" Width="16" Height="16" />
+            <TextBlock Text="Agent Lab" IsVisible="{Binding IsChecked, ElementName=NavigationRailToggle}" />
+          </StackPanel>
+        </TabItem.Header>
         <ScrollViewer>
           <StackPanel Margin="20" Spacing="10" MaxWidth="1100">
             <TextBlock FontSize="22" FontWeight="SemiBold"
@@ -522,10 +548,16 @@
         </ScrollViewer>
       </TabItem>
 
-      <TabItem Header="Automation &amp; Agents"
+      <TabItem
                AutomationProperties.AutomationId="Tab.AutomationAgents"
                AutomationProperties.AcceleratorKey="Command+3 / Control+3"
-               AutomationProperties.HelpText="Machine interfaces, readiness and accessibility information. Keyboard shortcut Command+3 on macOS or Control+3 on Windows/Linux.">
+               AutomationProperties.HelpText="Machine interfaces, readiness and accessibility information. Keyboard shortcut Command+3 on macOS or Control+3 on Windows/Linux." AutomationProperties.Name="Developer tools" ToolTip.Tip="Developer tools">
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <PathIcon Data="{StaticResource IconCode}" Width="16" Height="16" />
+            <TextBlock Text="Developer tools" IsVisible="{Binding IsChecked, ElementName=NavigationRailToggle}" />
+          </StackPanel>
+        </TabItem.Header>
         <ScrollViewer>
           <StackPanel Margin="20" Spacing="10" MaxWidth="1000">
             <TextBlock FontSize="22" FontWeight="SemiBold" Text="Human · Automation · Agent access"
@@ -663,10 +695,16 @@
         </ScrollViewer>
       </TabItem>
 
-      <TabItem Header="Remote Control"
+      <TabItem
                AutomationProperties.AutomationId="Tab.RemoteControl"
                AutomationProperties.AcceleratorKey="Command+4 / Control+4"
-               AutomationProperties.HelpText="Codex Remote reverse tunnel, pairing codes, and connected client management.">
+               AutomationProperties.HelpText="Codex Remote reverse tunnel, pairing codes, and connected client management." AutomationProperties.Name="Connections" ToolTip.Tip="Connections">
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <PathIcon Data="{StaticResource IconExternal}" Width="16" Height="16" />
+            <TextBlock Text="Connections" IsVisible="{Binding IsChecked, ElementName=NavigationRailToggle}" />
+          </StackPanel>
+        </TabItem.Header>
         <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="20" Spacing="16" MaxWidth="900">
             <!-- Hero Header Card -->
@@ -812,10 +850,16 @@
         </ScrollViewer>
       </TabItem>
 
-      <TabItem x:Name="SessionsTab" Header="Sessions"
+      <TabItem x:Name="SessionsTab"
                AutomationProperties.AutomationId="Tab.Sessions"
-               AutomationProperties.AcceleratorKey="Command+4 / Control+4"
-               AutomationProperties.HelpText="Session workbench for human, automation, and agent coordination.">
+               AutomationProperties.AcceleratorKey="Command+5 / Control+5"
+               AutomationProperties.HelpText="Session workbench for human, automation, and agent coordination." AutomationProperties.Name="Sessions" ToolTip.Tip="Sessions">
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <PathIcon Data="{StaticResource IconCopy}" Width="16" Height="16" />
+            <TextBlock Text="Sessions" IsVisible="{Binding IsChecked, ElementName=NavigationRailToggle}" />
+          </StackPanel>
+        </TabItem.Header>
         <ContentControl x:Name="SessionWorkbenchHost"
                         HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
       </TabItem>
