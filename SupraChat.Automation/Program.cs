@@ -48,6 +48,7 @@ internal static class Program
             {
                 "capabilities" => WriteSuccess(Capabilities()),
                 "accessibility" => WriteSuccess(Accessibility()),
+                "workspace-list" => WriteSuccess(SavedWorkspaceInventory.Read()),
                 "accessibility-preferences" => WriteSuccess(await AccessibilityPreferencesAsync()),
                 "accessibility-set" => WriteSuccess(await SetAccessibilityPreferencesAsync(args[1..])),
                 "parity" => WriteSuccess(ReadCatalog("audience-parity-20261001.json")),
@@ -144,6 +145,7 @@ internal static class Program
         {
             new { name = "capabilities", description = "Read machine/product capability metadata." },
             new { name = "accessibility", description = "Read the cross-platform accessibility/UI/UX/DX contract." },
+            new { name = "workspace-list", description = "List saved local workspace identities and configuration status." },
             new { name = "accessibility-preferences", description = "Read effective local accessibility preferences." },
             new { name = "accessibility-set", description = "Set local accessibility preferences.", syntax = "accessibility-set [--scale <0.8-2.0>] [--reduced-motion <true|false>]" },
             new { name = "parity", description = "Read machine-readable human/accessibility/automation/agent parity by capability." },
@@ -253,6 +255,7 @@ internal static class Program
             "session/restore",
             "capabilities/read",
             "accessibility/read",
+            "workspace/list",
             "accessibility/preferences/read",
             "accessibility/preferences/write",
             "parity/read",
@@ -1486,6 +1489,7 @@ internal static class Program
             "session/restore" => await RpcSessionRestoreAsync(parameters),
             "capabilities/read" => Capabilities(),
             "accessibility/read" => Accessibility(),
+            "workspace/list" => SavedWorkspaceInventory.Read(),
             "accessibility/preferences/read" => await AccessibilityPreferencesAsync(),
             "accessibility/preferences/write" => await RpcAccessibilityPreferencesWriteAsync(parameters),
             "parity/read" => ReadCatalog("audience-parity-20261001.json"),

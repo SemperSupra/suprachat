@@ -59,6 +59,8 @@ public sealed class SessionTerminalHost : IDisposable
     }
 
     public string WorkingDirectory { get; set; } = Directory.GetCurrentDirectory();
+    internal string? StartupDirectory { get; set; }
+    internal IReadOnlyDictionary<string, string>? EnvironmentOverrides { get; set; }
 
     public async Task<int> ExecuteCommandAsync(string command, CancellationToken externalCt = default)
     {
@@ -72,6 +74,9 @@ public sealed class SessionTerminalHost : IDisposable
         {
             if (_activeProcess is not null && !_activeProcess.HasExited)
                 throw new InvalidOperationException("A command is already executing in this paired terminal.");
+
+            if (StartupDirectory is not null && !Directory.Exists(StartupDirectory))
+                throw new InvalidOperationException("The workspace startup directory is unavailable. Update workspace settings before running a command.");
 
             _activeCts?.Dispose();
             _activeCts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
@@ -87,7 +92,8 @@ public sealed class SessionTerminalHost : IDisposable
                 ? $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"{EscapeForCmd(command)}\""
                 : $"-c \"{command.Replace("\"", "\\\"")}\"";
 
-            var resolvedDir = Directory.Exists(WorkingDirectory) ? WorkingDirectory : Directory.GetCurrentDirectory();
+            var resolvedDir = StartupDirectory ??
+                (Directory.Exists(WorkingDirectory) ? WorkingDirectory : Directory.GetCurrentDirectory());
 
             var psi = new ProcessStartInfo(shell, args)
             {
@@ -99,6 +105,9 @@ public sealed class SessionTerminalHost : IDisposable
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+            if (EnvironmentOverrides is not null)
+                foreach (var (key, value) in EnvironmentOverrides)
+                    psi.Environment[key] = value;
 
             process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _activeProcess = process;

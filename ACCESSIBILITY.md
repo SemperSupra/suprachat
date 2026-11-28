@@ -85,6 +85,15 @@ A feature is not considered cross-audience complete until its parity ledger answ
 
 Accessibility regressions are qualification failures, not documentation debt.
 
+### Paired workspace preview
+
+- **Visual desktop:** The ChatGPT area shows each paired workspace. Use **Stack panes** to give both views the full window width, **Workspace settings** to configure the terminal, and **Start shell** to launch it.
+- **Accessible desktop:** The divider is focusable and uses arrow keys along its current orientation. The native **Focus terminal** button provides a keyboard entry point; terminal and workspace status use polite live regions. The embedded terminal has screen-reader mode enabled. Native focus traversal and announcements across the WebView boundary still require live qualification.
+- **Automation CLI:** `workspace-list` returns `suprachat-saved-workspaces/v1` with stable IDs and configuration flags. It reads saved local settings, including the last saved selection.
+- **Agent JSON-RPC:** `workspace/list` exposes the same read-only payload over stdio. Project URLs, directory paths, environment values, terminal output and draft text are outside this inventory.
+
+Existing session draft commands and methods use the ledger session ID. The workspace inventory does not expose a live GUI workspace-to-ledger binding or grant shell control.
+
 
 ## User-adjustable preferences
 

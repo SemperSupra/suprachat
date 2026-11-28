@@ -21,6 +21,7 @@ public partial class WorkbenchView : UserControl
     private readonly IWorkbenchSessionAuthority _authority;
     private readonly LedgerLocalDrafts _drafts;
     private readonly SessionTerminalHost _terminalHost = new();
+    private InteractiveTerminalView? _interactiveTerminal;
     private string? _w2ReviewId;
     private bool _refreshing;
     private string? _selectedId;
@@ -50,8 +51,146 @@ public partial class WorkbenchView : UserControl
 
         _terminalHost.OutputReceived += OnTerminalOutputReceived;
         _terminalHost.StateChanged += OnTerminalStateChanged;
+        if (WindowsInteractiveTerminal.IsSupported)
+        {
+            TerminalModeButton.IsVisible = true;
+            SetInteractiveMode(true);
+        }
 
         _ = RefreshAsync();
+    }
+
+    internal void MoveTerminalTo(ContentControl? destination)
+    {
+        SessionTerminalDock.Content = null;
+        (destination ?? SessionTerminalDock).Content = SessionTerminalPane;
+    }
+
+    internal void FocusDraftInput() => W2DraftInput.Focus();
+    internal void FocusCommandInput()
+    {
+        if (InteractiveTerminalHost.IsVisible)
+            _interactiveTerminal?.FocusInput();
+        else
+            TerminalCommandInput.Focus();
+    }
+
+    internal void CloseTerminal()
+    {
+        _interactiveTerminal?.CloseShell();
+        _terminalHost.Stop();
+    }
+    internal event Action? DraftReviewRequested;
+
+    private void TerminalMode_Click(object? sender, RoutedEventArgs e) =>
+        SetInteractiveMode(!InteractiveTerminalHost.IsVisible);
+
+    private void SetInteractiveMode(bool interactive)
+    {
+        if (interactive && _interactiveTerminal is null)
+        {
+            _interactiveTerminal = new InteractiveTerminalView
+            {
+                GetSettings = () =>
+                {
+                    var directory = _terminalHost.StartupDirectory ??
+                        (Directory.Exists(_terminalHost.WorkingDirectory) ? _terminalHost.WorkingDirectory : Directory.GetCurrentDirectory());
+                    return (directory, _terminalHost.EnvironmentOverrides);
+                }
+            };
+            _interactiveTerminal.SelectionForChat += StageTerminalSelectionAsync;
+            InteractiveTerminalHost.Content = _interactiveTerminal;
+        }
+        TerminalModeButton.Content = interactive ? "One-off commands" : "Interactive shell";
+        TerminalStatusPill.IsVisible = !interactive;
+        TerminalStopButton.IsVisible = !interactive;
+        TerminalClearButton.IsVisible = !interactive;
+        TerminalConsoleOutput.IsVisible = !interactive;
+        TerminalCommandRow.IsVisible = !interactive;
+        TerminalTransferControls.IsVisible = !interactive;
+        InteractiveTerminalHost.IsVisible = interactive;
+    }
+
+    internal void ApplyTerminalSettings(PairedWorkspaceSettings settings)
+    {
+        DraftWorkspaceName.Text = $"Drafts for workspace: {settings.Name}";
+        _terminalHost.StartupDirectory = settings.StartupDirectory;
+        _terminalHost.EnvironmentOverrides = settings.EnvironmentOverrides;
+        UpdateTerminalDirectory();
+    }
+
+    private void UpdateTerminalDirectory() =>
+        TerminalWorkingDirectory.Text = "Working Dir: " + (_terminalHost.StartupDirectory ?? _terminalHost.WorkingDirectory);
+
+    private void TerminalStageSelection_Click(object? sender, RoutedEventArgs e)
+    {
+        var selected = TerminalConsoleOutput.SelectedText;
+        if (string.IsNullOrWhiteSpace(selected))
+        {
+            TerminalStatusText.Text = "Select terminal output first.";
+            return;
+        }
+        StageTerminalSelectionAsync(selected);
+    }
+
+    private async void StageTerminalSelectionAsync(string text)
+    {
+        W2DraftInput.Text = text;
+        DraftReviewRequested?.Invoke();
+        await W2PrepareAsync("terminal-to-chat");
+    }
+
+    private async void TerminalPasteClipboard_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (TopLevel.GetTopLevel(SessionTerminalPane)?.Clipboard is not { } clipboard)
+                return;
+            var text = await clipboard.TryGetTextAsync();
+            if (string.IsNullOrWhiteSpace(text) || Encoding.UTF8.GetByteCount(text) > 16 * 1024)
+            {
+                TerminalStatusText.Text = "Copy text up to 16 KiB first.";
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(TerminalCommandInput.Text))
+            {
+                TerminalStatusText.Text = "Clear the current command draft before pasting.";
+                return;
+            }
+            if (!SessionTerminalPane.IsEffectivelyVisible)
+                return;
+            TerminalCommandInput.Text = text;
+            TerminalStatusText.Text = "Pasted into command draft. Review before running.";
+            FocusCommandInput();
+        }
+        catch (InvalidOperationException)
+        {
+            TerminalStatusText.Text = "Clipboard unavailable.";
+        }
+    }
+
+    private async void TerminalCopyChatDraft_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var chatDraft = _drafts.ReadSelected().ChatInput;
+            if (string.IsNullOrWhiteSpace(chatDraft))
+            {
+                TerminalStatusText.Text = "Review and stage a chat draft first.";
+                return;
+            }
+            if (TopLevel.GetTopLevel(SessionTerminalPane)?.Clipboard is not { } clipboard)
+            {
+                TerminalStatusText.Text = "Clipboard unavailable.";
+                return;
+            }
+            await clipboard.SetTextAsync(chatDraft);
+            TerminalStatusText.Text = "Copied draft. Paste into ChatGPT to review and send.";
+        }
+        catch (InvalidOperationException)
+        {
+            TerminalStatusText.Text = "No current session draft to copy.";
+        }
     }
 
     private void OnTerminalOutputReceived(string line)
@@ -63,8 +202,17 @@ public partial class WorkbenchView : UserControl
                 TerminalConsoleOutput.Text = string.Empty;
                 return;
             }
+            var selectionStart = TerminalConsoleOutput.SelectionStart;
+            var selectionEnd = TerminalConsoleOutput.SelectionEnd;
+            var preserveSelection = selectionStart != selectionEnd;
             TerminalConsoleOutput.Text += line + Environment.NewLine;
-            TerminalConsoleOutput.CaretIndex = TerminalConsoleOutput.Text?.Length ?? 0;
+            if (preserveSelection)
+            {
+                TerminalConsoleOutput.SelectionStart = selectionStart;
+                TerminalConsoleOutput.SelectionEnd = selectionEnd;
+            }
+            else
+                TerminalConsoleOutput.CaretIndex = TerminalConsoleOutput.Text?.Length ?? 0;
         });
     }
 
@@ -133,13 +281,13 @@ public partial class WorkbenchView : UserControl
             if (active is not null && !string.IsNullOrWhiteSpace(active.WorkspaceKey))
             {
                 _terminalHost.WorkingDirectory = active.WorkspaceKey;
-                TerminalWorkingDirectory.Text = "Working Dir: " + active.WorkspaceKey;
+                UpdateTerminalDirectory();
                 WorkbenchPairStatusText.Text = $"Session: {active.Title}";
             }
             else
             {
                 _terminalHost.WorkingDirectory = Directory.GetCurrentDirectory();
-                TerminalWorkingDirectory.Text = "Working Dir: " + Directory.GetCurrentDirectory();
+                UpdateTerminalDirectory();
                 WorkbenchPairStatusText.Text = "Local Execution Bound";
             }
         }
