@@ -7,5 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../SupraChat/SupraChat.csproj" />
+    <!-- Compile the exact existing W12 verifier without cloning it or adding a host. -->
+    <Compile Include="../SupraChat.Automation/W12ScopedGrantAuthority.cs" Link="W12ScopedGrantAuthority.cs" />
   </ItemGroup>
 </Project>

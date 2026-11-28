@@ -14,11 +14,14 @@ public static class HumanInterventionPolicy
 {
     public const string Schema = "suprachat-human-priority-policy/v1";
     public const string Observation = "SYNTHETIC_POLICY_ONLY";
-    public static HumanControlState Initial(string sessionId)
+    public static HumanControlState Initial(string sessionId, string externallyVerifiedOwnerActorId)
     {
         if (!Guid.TryParseExact(sessionId, "N", out _))
             throw new ArgumentException("SESSION_ID_REQUIRED", nameof(sessionId));
-        return new(sessionId, 0, HumanControlPhase.Running, null, null, null, null);
+        if (!ValidActorId(externallyVerifiedOwnerActorId))
+            throw new ArgumentException("VERIFIED_SESSION_OWNER_REQUIRED", nameof(externallyVerifiedOwnerActorId));
+        return new(sessionId, externallyVerifiedOwnerActorId, 0,
+            HumanControlPhase.Running, null, null, null, null);
     }
 
     public static HumanControlOutcome Apply(HumanControlState current,
@@ -26,7 +29,7 @@ public static class HumanInterventionPolicy
     {
         CheckState(current);
         CheckRequest(request);
-        if (!AdmittedHuman(current.SessionId, verifiedHuman) ||
+        if (!AdmittedHuman(current.SessionId, current.OwnerActorId, verifiedHuman) ||
             request.SessionId != current.SessionId)
             return Denied("AUTHENTICATED_HUMAN_REQUIRED", current);
         var fingerprint = Hash(JsonSerializer.Serialize(new
@@ -105,7 +108,7 @@ public static class HumanInterventionPolicy
             verifiedActor.SessionId != current.SessionId ||
             verifiedActor.Audience is not ("automation" or "agent") ||
             verifiedActor.HumanBootstrapVerified ||
-            string.IsNullOrWhiteSpace(verifiedActor.ActorId) ||
+            !ValidActorId(verifiedActor.ActorId) ||
             !Guid.TryParseExact(verifiedActor.GrantId, "N", out _))
             return new("AUTHENTICATED_ACTOR_REQUIRED", false, false);
         if (observedEpoch != current.Epoch)
@@ -116,15 +119,20 @@ public static class HumanInterventionPolicy
             true, false);
     }
 
-    private static bool AdmittedHuman(string session, SessionLedgerAdmission actor) =>
+    private static bool AdmittedHuman(string session, string ownerActorId,
+        SessionLedgerAdmission actor) =>
         actor.Allowed && actor.Audience == "human" && actor.HumanBootstrapVerified &&
-        actor.SessionId == session && !string.IsNullOrWhiteSpace(actor.ActorId) &&
-        actor.ActorId.Length <= 80 &&
+        actor.SessionId == session && actor.ActorId == ownerActorId &&
+        ValidActorId(actor.ActorId) &&
         Guid.TryParseExact(actor.GrantId, "N", out _);
+
+    private static bool ValidActorId(string? id) =>
+        !string.IsNullOrWhiteSpace(id) && id.Length <= 80 &&
+        id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
     private static void CheckState(HumanControlState s)
     {
-        if (!Guid.TryParseExact(s.SessionId, "N", out _) || s.Epoch < 0 ||
+        if (!Guid.TryParseExact(s.SessionId, "N", out _) || !ValidActorId(s.OwnerActorId) || s.Epoch < 0 ||
             !Enum.IsDefined(s.Phase))
             throw new ArgumentException("INVALID_CONTROL_STATE");
     }
@@ -155,7 +163,7 @@ public enum HumanControlPhase
     StopRequested,
     Stopped
 }
-public sealed record HumanControlState(string SessionId, long Epoch,
+public sealed record HumanControlState(string SessionId, string OwnerActorId, long Epoch,
     HumanControlPhase Phase, string? GuidanceDigest, string? LastOperationKey,
     string? LastOperationFingerprint, string? LastHumanActorId);
 public sealed record HumanControlRequest(string SessionId, long ExpectedEpoch,
