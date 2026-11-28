@@ -1154,8 +1154,17 @@ jobs:
           Add-Type -AssemblyName UIAutomationTypes
 
           $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
-          $p = Start-Process -FilePath $exe -PassThru
+          # Bind diagnostics to this UIA launch, never the earlier launch smoke.
+          $uiaLogDir = Join-Path $env:RUNNER_TEMP ('suprachat-uia-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $uiaLogDir -ErrorAction Stop | Out-Null
+          $uiaStartupLog = Join-Path $uiaLogDir 'startup.log'
+          $uiaStdoutLog = Join-Path $uiaLogDir 'stdout.log'
+          $uiaStderrLog = Join-Path $uiaLogDir 'stderr.log'
+          $previousStartupLog = $env:SUPRACHAT_STARTUP_LOG
+          $env:SUPRACHAT_STARTUP_LOG = $uiaStartupLog
+          $p = $null
           try {
+            $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $uiaStdoutLog -RedirectStandardError $uiaStderrLog
             $deadline = (Get-Date).AddSeconds(20)
             $window = $null
             while ((Get-Date) -lt $deadline -and -not $window) {
@@ -1763,8 +1772,27 @@ jobs:
               }
             }
           }
+          catch {
+            $uiaFirstFailure = $_
+            # Only the failing launch's fresh files; the shared events.jsonl is
+            # intentionally excluded because it is not process-bound.
+            try {
+              & ./tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 `
+                -StartupLog $uiaStartupLog -StdoutLog $uiaStdoutLog -StderrLog $uiaStderrLog
+            }
+            catch {
+              Write-Host 'UIA startup symptom receipt unavailable; original qualification failure retained.'
+            }
+            throw $uiaFirstFailure
+          }
           finally {
-            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            try {
+              if ($null -ne $p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            }
+            finally {
+              $env:SUPRACHAT_STARTUP_LOG = $previousStartupLog
+              Remove-Item -LiteralPath $uiaLogDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
           }
 
       - name: Qualify synthetic secret UIA boundary for v0.0.1

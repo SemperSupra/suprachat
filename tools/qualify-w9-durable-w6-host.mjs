@@ -15,7 +15,8 @@ const dll=path.join(root,'SupraChat.Automation','bin','Release','net10.0','Supra
 const token=randomBytes(32).toString('base64url');
 const temp=await mkdtemp(path.join(os.tmpdir(),'suprachat-w9-'));
 const store=path.join(temp,'w9.sqlite');
-const envBase={...process.env,SUPRACHAT_LEDGER_TOKEN:token,SUPRACHAT_LEDGER_STORE:store};
+const envBase={...process.env,SUPRACHAT_W6_DISPOSABLE_ONLY:'yes',
+  SUPRACHAT_LEDGER_TOKEN:token,SUPRACHAT_LEDGER_STORE:store};
 const stages=[];
 let host=null,port;
 const record=(name)=>stages.push({name,status:'PASS'});
@@ -167,7 +168,13 @@ try{
   await stop();
   await launch();
   let inventory=(await request('/v1/sessions')).body;
-  assert.equal(inventory.durableAcrossProcessRestart,true);
+  // The *pure W6 ledger inventory* intentionally advertises no inherent
+  // process durability. The separately admitted W9 host owns that guarantee
+  // through /v1/health and externally observed SQLite restart/replay.
+  assert.equal(inventory.durableAcrossProcessRestart,false);
+  const healthAfterRestart=await request('/v1/health');
+  assert.equal(healthAfterRestart.status,200);
+  assert.equal(healthAfterRestart.body.durable_recovery_available,true);
   assert.equal(inventory.authenticatedAudiences,false);
   assert.equal(inventory.sessions.length,2);
   assert.equal(inventory.sessions.find(s=>s.id===sidA).version,1);
@@ -209,6 +216,133 @@ try{
   assert.equal(after.body.session.version,2);
   record('lost-ack-replays-durable-first-outcome-not-second-change');
 
+  // R50: three audiences concurrently contest ONE session's immutable
+  // version, through HTTP and a separate agent JSON-RPC process. This
+  // explicitly does NOT prove independently authenticated human identity
+  // or higher-priority human preemption; W8/W9 epoch integration is HOLD.
+  const beforeRace=(await request('/v1/sessions')).body;
+  const aBefore=beforeRace.sessions.find(s=>s.id===sidA);
+  const bBefore=beforeRace.sessions.find(s=>s.id===sidB);
+  assert.equal(aBefore.version,1);
+  assert.equal(bBefore.version,2);
+  const replayContestant=async (c)=>{
+    if(c.kind==='agent'){
+      const r=await agentRpc('session/ledger/change',c.req);
+      return {status:r.http_status,body:r.payload};
+    }
+    return request('/v1/sessions/change','POST',c.req);
+  };
+  const verifyReplay=(first,replay)=>{
+    assert.equal(replay.status,first.status);
+    assert.deepEqual(replay.body,{...first.body,isReplay:true});
+  };
+  const verifyUnchanged=(observed,expected)=>{
+    assert.deepEqual(observed,expected,'UNEXPECTED_LEDGER_MUTATION');
+  };
+  const humanRace=change('w50-human-same-session-0001','human',
+                         sidA,1,'synthetic-human-race');
+  const autoRace=change('w50-auto-same-session-00001','automation',
+                        sidA,1,'synthetic-automation-race');
+  const agentRace=change('w50-agent-same-session-0001','agent',
+                         sidA,1,'synthetic-agent-race');
+  const [humanR,autoR,agentR]=await Promise.all([
+    request('/v1/sessions/change','POST',humanRace),
+    request('/v1/sessions/change','POST',autoRace),
+    agentRpc('session/ledger/change',agentRace)
+  ]);
+  const contestants=[
+    {kind:'human',status:humanR.status,body:humanR.body,req:humanRace},
+    {kind:'automation',status:autoR.status,body:autoR.body,req:autoRace},
+    {kind:'agent',status:agentR.http_status,body:agentR.payload,req:agentRace}
+  ];
+  assert.equal(contestants.filter(x=>x.status===200&&x.body.applied).length,1);
+  assert.equal(contestants.filter(x=>x.status===409&&
+                                    x.body.status==='VERSION_CONFLICT').length,2);
+  const raceWinner=contestants.find(x=>x.status===200&&x.body.applied);
+  assert.equal(raceWinner.body.session.id,sidA);
+  assert.equal(raceWinner.body.session.title,raceWinner.req.value);
+  assert.equal(raceWinner.body.session.version,2);
+  const afterRace=(await request('/v1/sessions')).body;
+  assert.deepEqual(afterRace.sessions.find(s=>s.id===sidA),raceWinner.body.session);
+  assert.deepEqual(afterRace.sessions.find(s=>s.id===sidB),bBefore);
+  assert.equal(afterRace.sequence,beforeRace.sequence+1);
+  assert.deepEqual(afterRace.events.slice(beforeRace.events.length),[{
+    sequence:afterRace.sequence,sessionId:sidA,audience:raceWinner.kind,
+    operation:'set-title',sessionVersion:2
+  }]);
+  for(const c of contestants){
+    assert.equal(c.body.isReplay,false);
+    verifyReplay(c,await replayContestant(c));
+  }
+  verifyUnchanged((await request('/v1/sessions')).body,afterRace);
+  record('three-audiences-same-session-single-writer-cas');
+  // A later synthetic human request is accepted at the NEW revision, while
+  // stale automation/agent proposals remain refused. This is NOT human
+  // priority, real guidance capture, or physical-tool fencing.
+  const humanFollow=change('w50-human-followup-00001','human',
+                           sidA,2,'synthetic-human-updated-intent');
+  const follow=await request('/v1/sessions/change','POST',humanFollow);
+  assert.equal(follow.status,200);
+  assert.equal(follow.body.applied,true);
+  assert.equal(follow.body.session.version,3);
+  assert.equal(follow.body.session.id,sidA);
+  assert.equal(follow.body.session.title,humanFollow.value);
+  const staleAuto=change('w50-stale-auto-00000001','automation',
+                         sidA,2,'unadmitted-stale-work');
+  const staleAgent=change('w50-stale-agent-0000001','agent',
+                          sidA,2,'unadmitted-agent-work');
+  const stale=await request('/v1/sessions/change','POST',staleAuto);
+  const staleAgentR=await agentRpc('session/ledger/change',staleAgent);
+  assert.equal(stale.status,409);
+  assert.equal(stale.body.status,'VERSION_CONFLICT');
+  assert.equal(staleAgentR.http_status,409);
+  assert.equal(staleAgentR.payload.status,'VERSION_CONFLICT');
+  const reuse=await request('/v1/sessions/change','POST',
+    {...raceWinner.req,sessionId:sidB,expectedVersion:bBefore.version,value:'wrong-target'});
+  assert.equal(reuse.status,409);
+  assert.equal(reuse.body.status,'IDEMPOTENCY_KEY_PAYLOAD_CONFLICT');
+  const afterFollow=(await request('/v1/sessions')).body;
+  assert.deepEqual(afterFollow.sessions.find(s=>s.id===sidA),follow.body.session);
+  assert.deepEqual(afterFollow.sessions.find(s=>s.id===sidB),bBefore);
+  assert.equal(afterFollow.sequence,afterRace.sequence+1);
+  record('revision-bound-human-followup-stale-actors-and-wrong-target-refused');
+
+  await stop();
+  await launch();
+  inventory=(await request('/v1/sessions')).body;
+  verifyUnchanged(inventory,afterFollow);
+  // Replay all three original outcomes AFTER further mutation and restart.
+  // A fresh current-state response is not a valid historical receipt.
+  for(const c of contestants)verifyReplay(c,await replayContestant(c));
+  verifyReplay(follow,await request('/v1/sessions/change','POST',humanFollow));
+  verifyReplay(stale,await request('/v1/sessions/change','POST',staleAuto));
+  const staleAgentReplay=await agentRpc('session/ledger/change',staleAgent);
+  verifyReplay({status:staleAgentR.http_status,body:staleAgentR.payload},
+               {status:staleAgentReplay.http_status,body:staleAgentReplay.payload});
+  verifyUnchanged((await request('/v1/sessions')).body,afterFollow);
+  assert.equal(inventory.authenticatedAudiences,false);
+  record('three-audience-shared-session-exact-outcomes-recovered-after-restart');
+
+  // Explicit target restoration: B is archived later, but restore A.
+  // This is the metadata contract only, not native GUI restore qualification.
+  const archiveA={...change('w54-archive-A-00000001','human',sidA,3,null),operation:'archive'};
+  const archiveB={...change('w54-archive-B-00000001','automation',sidB,2,null),operation:'archive'};
+  const arA=await request('/v1/sessions/change','POST',archiveA);
+  const arB=await request('/v1/sessions/change','POST',archiveB);
+  assert.equal(arA.status,200);assert.equal(arA.body.session.isArchived,true);
+  assert.equal(arB.status,200);assert.equal(arB.body.session.isArchived,true);
+  const restoreA={...change('w54-restore-A-00000001','agent',sidA,4,null),operation:'restore'};
+  const restored=await agentRpc('session/ledger/change',restoreA);
+  assert.equal(restored.http_status,200);
+  assert.equal(restored.payload.session.id,sidA);
+  assert.equal(restored.payload.session.isArchived,false);
+  assert.equal(restored.payload.session.version,5);
+  const restoredInventory=(await request('/v1/sessions')).body;
+  assert.deepEqual(restoredInventory.sessions.find(s=>s.id===sidB),arB.body.session);
+  assert.deepEqual(restoredInventory.sessions.find(s=>s.id===sidA),restored.payload.session);
+  record('explicit-archive-restore-target-not-latest-archive');
+
+
   await stop();
   // Corrupt metadata store in a separate disposable location, not the gold DB.
   const corruptPath=path.join(temp,'corrupt.sqlite');
@@ -228,6 +362,10 @@ try{
     independent_client_processes:true,
     recovered_applied_and_rejected_receipts:true,
     host_restart_and_lost_ack:true,
+    concurrent_human_automation_agent_same_session:true,
+    three_audience_cas_recovered_after_restart:true,
+    independently_authenticated_human_priority:false,
+    durable_preemption_epoch_enforced:false,
     durable_provider_prompt_receipts:false,
     authenticated_audience_identity:false,
     chatgpt_prompt_sent:false,terminal_command_executed:false,
