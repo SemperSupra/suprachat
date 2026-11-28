@@ -421,6 +421,81 @@ try{
   verifyUnchanged((await request('/v1/sessions')).body,currentAfterRestore);
   record('historical-archive-replay-does-not-rearchive-restored-current-target');
 
+  // R55: distinguish observation from retry of an ambiguous restore.
+  // A GET after BEFORE_COMMIT is nonmutating; repeating the original
+  // command may perform the mutation for the first time. After a
+  // committed/lost response, replay returns the historical receipt.
+  // The UI must never equate either with permission to discard new drafts.
+  const restoreB={...change('w55-restore-b-unknown-001','human',sidB,
+                            arB.body.session.version,null),operation:'restore'};
+  await stop();
+  await launch({...envBase,SUPRACHAT_W9_RDTE_FAULTS:'1',SUPRACHAT_W9_FAULT:'BEFORE_COMMIT'});
+  const restoreBefore=await Promise.allSettled([
+    request('/v1/sessions/change','POST',restoreB)
+  ]);
+  assert(restoreBefore[0].status==='rejected'||restoreBefore[0].value.status!==200);
+  assert.equal(await waitExit(host),88);
+  host=null;
+  await launch();
+  // Observation only: the user may abandon a previously requested change.
+  const observedBefore=(await request('/v1/sessions')).body;
+  verifyUnchanged(observedBefore,currentAfterRestore);
+  assert.equal(observedBefore.sessions.find(s=>s.id===sidB).isArchived,true);
+  verifyUnchanged((await request('/v1/sessions')).body,currentAfterRestore);
+  record('unknown-restore-read-only-observation-does-not-execute-retry');
+
+  await stop();
+  await launch({...envBase,SUPRACHAT_W9_RDTE_FAULTS:'1',SUPRACHAT_W9_FAULT:'AFTER_COMMIT_BEFORE_ACK'});
+  // Explicit test-fixture intent to retry the SAME request; not automatic.
+  const restoreLost=await Promise.allSettled([
+    request('/v1/sessions/change','POST',restoreB)
+  ]);
+  assert(restoreLost[0].status==='rejected'||restoreLost[0].value.status!==200);
+  assert.equal(await waitExit(host),89);
+  host=null;
+  await launch();
+  const observedRestored=(await request('/v1/sessions')).body;
+  assert.equal(observedRestored.sequence,currentAfterRestore.sequence+1);
+  const bRestored=observedRestored.sessions.find(s=>s.id===sidB);
+  assert.equal(bRestored.id,sidB);
+  assert.equal(bRestored.version,arB.body.session.version+1);
+  assert.equal(bRestored.isArchived,false);
+  assert.deepEqual(observedRestored.sessions.find(s=>s.id===sidA),
+                   currentAfterRestore.sessions.find(s=>s.id===sidA));
+  assert.deepEqual(observedRestored.events.slice(currentAfterRestore.events.length),[{
+    sequence:observedRestored.sequence,sessionId:sidB,audience:'human',
+    operation:'restore',sessionVersion:bRestored.version
+  }]);
+  const recoveredRestore=await request('/v1/sessions/change','POST',restoreB);
+  assert.equal(recoveredRestore.status,200);
+  assert.equal(recoveredRestore.body.applied,true);
+  assert.equal(recoveredRestore.body.isReplay,true);
+  assert.deepEqual(recoveredRestore.body.session,bRestored);
+  verifyUnchanged((await request('/v1/sessions')).body,observedRestored);
+  record('restore-explicit-retry-commits-once-and-recovers-lost-ack');
+
+  const rearchiveB={...change('w55-rearchive-b-0000001','automation',sidB,
+                              bRestored.version,null),operation:'archive'};
+  const rearchived=await request('/v1/sessions/change','POST',rearchiveB);
+  assert.equal(rearchived.status,200);
+  assert.equal(rearchived.body.session.id,sidB);
+  assert.equal(rearchived.body.session.isArchived,true);
+  const archivedAgain=(await request('/v1/sessions')).body;
+  assert.equal(archivedAgain.sequence,observedRestored.sequence+1);
+  assert.deepEqual(archivedAgain.sessions.find(s=>s.id===sidA),
+                   observedRestored.sessions.find(s=>s.id===sidA));
+  const wrongRestore=await request('/v1/sessions/change','POST',
+    {...restoreB,sessionId:sidA,expectedVersion:7});
+  assert.equal(wrongRestore.status,409);
+  assert.equal(wrongRestore.body.status,'IDEMPOTENCY_KEY_PAYLOAD_CONFLICT');
+  await stop();
+  await launch();
+  verifyUnchanged((await request('/v1/sessions')).body,archivedAgain);
+  assert.deepEqual(await request('/v1/sessions/change','POST',restoreB),recoveredRestore);
+  verifyUnchanged((await request('/v1/sessions')).body,archivedAgain);
+  record('historical-restore-replay-does-not-reactivate-newer-archive');
+
+
 
 
   await stop();
