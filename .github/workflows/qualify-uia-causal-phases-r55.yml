@@ -1,0 +1,50 @@
+name: R55 Windows UIA causal phase experiment
+on:
+  pull_request:
+    paths:
+      - 'tools/ci-failure-lineage/Invoke-UiaCausalPhase.ps1'
+      - '.github/workflows/qualify-uia-causal-phases-r55.yml'
+permissions:
+  contents: read
+jobs:
+  phase:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - probe: Idle
+            launch: StartupOnly
+          - probe: Root
+            launch: StartupOnly
+          - probe: Descendants
+            launch: StartupOnly
+          - probe: Descendants
+            launch: Redirected
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: SemperSupra/suprachat
+          ref: 824147915e7fba498a9b94d9ec22075fe3dd082a
+          path: app-source
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build pinned public diagnostic app (not the PR merge tree)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git -C app-source rev-parse HEAD) -ne '824147915e7fba498a9b94d9ec22075fe3dd082a') { throw 'WRONG_APP_PIN' }
+          dotnet publish app-source/SupraChat/SupraChat.csproj -c Release -r win-x64 --self-contained true -o causal-app
+          if ($LASTEXITCODE -ne 0) { throw 'APP_PUBLISH_FAILED' }
+      - name: Observe one bounded lifecycle phase
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          ./tools/ci-failure-lineage/Invoke-UiaCausalPhase.ps1 -Exe ./causal-app/SupraChat.exe -Collector ./app-source/tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 -Probe '${{ matrix.probe }}' -Launch '${{ matrix.launch }}'
