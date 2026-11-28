@@ -40,7 +40,9 @@ public partial class MainWindow : Window
     private string _nativeMetadataOutputDirectory = Path.Combine(AppState.DirectoryPath, "metadata-experiments");
     private readonly List<PairedChatSession> _pairedChatSessions = new();
     private PairedChatSession? _activeChatSession;
-    private bool _renderedStacked;
+    private WorkspacePaneLayout _renderedPaneLayout;
+    private double _chatNavigationHeight;
+    private int _paneFocusRequest;
 
     private NativeWebView ChatView => _activeChatSession?.WebView ?? InitialChatView;
     private WorkbenchView SessionWorkbench => _activeChatSession!.Workbench;
@@ -58,6 +60,7 @@ public partial class MainWindow : Window
             VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Stretch
         };
         public PairedWorkspaceSettings Settings { get; set; } = settings;
+        public bool FocusTerminalWhenCompact { get; set; }
     }
 
     public MainWindow()
@@ -66,7 +69,8 @@ public partial class MainWindow : Window
         _core = new SupraChatCore(responses: _responses);
         InitializeComponent();
         var shortcutModifier = OperatingSystem.IsMacOS() ? "Command+Option" : "Ctrl+Alt";
-        WorkspaceShortcutHint.Text = $"{shortcutModifier}+1 Chat · +2 Terminal · +3 Draft review";
+        AutomationProperties.SetAcceleratorKey(ChatPaneFocusButton, $"{shortcutModifier}+1");
+        AutomationProperties.SetAcceleratorKey(TerminalPaneFocusButton, $"{shortcutModifier}+2");
         ChatSessionTabs.SelectionChanged += (_, args) =>
         {
             if (ReferenceEquals(args.Source, ChatSessionTabs) &&
@@ -86,11 +90,25 @@ public partial class MainWindow : Window
             if (ReferenceEquals(args.Source, RootTabs))
                 UpdateChatTerminalDock();
         };
-        ChatTerminalGrid.SizeChanged += (_, _) =>
+        void UpdatePaneSize()
         {
-            if (ChatTerminalHost.IsVisible && _activeChatSession is { } workspace &&
-                _renderedStacked != UseStackedPanes(workspace))
+            if (_activeChatSession is not { } workspace || RootTabs.SelectedIndex != 0)
+                return;
+            if (_renderedPaneLayout != ChoosePaneLayout(workspace))
                 UpdateChatTerminalDock();
+            else
+                RefreshSplitControls(workspace);
+        }
+        ChatTerminalGrid.SizeChanged += (_, _) => UpdatePaneSize();
+        ChatNavigation.SizeChanged += (_, args) =>
+        {
+            if (args.NewSize.Height > 0)
+            {
+                _chatNavigationHeight = args.NewSize.Height + ChatNavigation.Margin.Top + ChatNavigation.Margin.Bottom;
+                if (_renderedPaneLayout == WorkspacePaneLayout.Stacked)
+                    ChatTerminalGrid.RowDefinitions[0].MinHeight = WorkspacePaneSizing.ChatHeight(_chatNavigationHeight);
+            }
+            UpdatePaneSize();
         };
         if (OperatingSystem.IsWindows())
             _nativeMetadataOwnerLifetime = NativeReviewOwnerLifetime.Attach(this, () => _nativeMetadataWindow as NativeMetadataReviewWindow);
@@ -125,7 +143,45 @@ public partial class MainWindow : Window
         _ = InitializeAgentLabAsync();
     }
 
-    private void ChatTerminalToggle_Click(object? sender, RoutedEventArgs e) => UpdateChatTerminalDock();
+    private void ChatTerminalToggle_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_activeChatSession is { } session)
+        {
+            if (ChatTerminalToggle.IsChecked != true)
+                session.FocusTerminalWhenCompact = false;
+            else if (ChoosePaneLayout(session) == WorkspacePaneLayout.ChatOnly)
+            {
+                FocusWorkspacePane(terminal: true);
+                return;
+            }
+        }
+        UpdateChatTerminalDock();
+    }
+
+    private void ChatPaneFocus_Click(object? sender, RoutedEventArgs e) => FocusWorkspacePane(terminal: false);
+    private void TerminalPaneFocus_Click(object? sender, RoutedEventArgs e) => FocusWorkspacePane(terminal: true);
+
+    private void FocusWorkspacePane(bool terminal)
+    {
+        if (_activeChatSession is not { } session)
+            return;
+        session.FocusTerminalWhenCompact = terminal;
+        if (terminal)
+            ChatTerminalToggle.IsChecked = true;
+        RootTabs.SelectedIndex = 0;
+        UpdateChatTerminalDock();
+        var request = ++_paneFocusRequest;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (request != _paneFocusRequest || !ReferenceEquals(_activeChatSession, session) ||
+                RootTabs.SelectedIndex != 0)
+                return;
+            if (terminal && session.TerminalDock.IsVisible)
+                session.Workbench.FocusCommandInput();
+            else if (!terminal && ChatPaneHost.IsVisible)
+                session.WebView.Focus();
+        });
+    }
 
     private void SplitOrientation_Click(object? sender, RoutedEventArgs e)
     {
@@ -142,10 +198,10 @@ public partial class MainWindow : Window
 
     private void AdjustPaneShare(double change)
     {
-        if (_activeChatSession is not { } session || !ChatTerminalHost.IsVisible)
+        if (_activeChatSession is not { } session || !HasSplit)
             return;
         CaptureWorkspaceLayout(session);
-        session.Settings = _renderedStacked
+        session.Settings = _renderedPaneLayout == WorkspacePaneLayout.Stacked
             ? session.Settings with { StackedChatFraction = Math.Clamp(session.Settings.StackedChatFraction + change, 0.1, 0.9) }
             : session.Settings with { ChatFraction = Math.Clamp(session.Settings.ChatFraction + change, 0.1, 0.9) };
         UpdateChatTerminalDock(captureBeforeChanging: false);
@@ -245,6 +301,7 @@ public partial class MainWindow : Window
     {
         if (ReferenceEquals(_activeChatSession, session))
             return;
+        _paneFocusRequest++;
         if (_activeChatSession is { } previous)
         {
             CaptureWorkspaceLayout(previous);
@@ -276,12 +333,13 @@ public partial class MainWindow : Window
         var stackedFraction = session.Settings.StackedChatFraction;
         var columns = ChatTerminalGrid.ColumnDefinitions;
         var rows = ChatTerminalGrid.RowDefinitions;
-        if (ChatTerminalHost.IsVisible)
+        if (HasSplit)
         {
-            if (_renderedStacked && rows[0].ActualHeight + rows[2].ActualHeight > 0)
-                stackedFraction = rows[0].ActualHeight / (rows[0].ActualHeight + rows[2].ActualHeight);
-            else if (!_renderedStacked && columns[0].ActualWidth + columns[2].ActualWidth > 0)
-                fraction = columns[0].ActualWidth / (columns[0].ActualWidth + columns[2].ActualWidth);
+            // The splitter updates the star weights. Actual sizes can be clamped by a resize.
+            if (_renderedPaneLayout == WorkspacePaneLayout.Stacked)
+                stackedFraction = rows[0].Height.Value / (rows[0].Height.Value + rows[2].Height.Value);
+            else
+                fraction = columns[0].Width.Value / (columns[0].Width.Value + columns[2].Width.Value);
         }
         session.Settings = session.Settings with
         {
@@ -473,8 +531,13 @@ public partial class MainWindow : Window
         if (captureBeforeChanging)
             CaptureWorkspaceLayout(session);
 
-        var show = RootTabs.SelectedIndex == 0 && ChatTerminalToggle.IsChecked == true;
-        if (show && session.TerminalDock.Content is null)
+        var layout = ChoosePaneLayout(session);
+        _renderedPaneLayout = layout;
+        var stacked = layout == WorkspacePaneLayout.Stacked;
+        var sideBySide = layout == WorkspacePaneLayout.SideBySide;
+        var terminalOnly = layout == WorkspacePaneLayout.TerminalOnly;
+        var showTerminal = HasSplit || terminalOnly;
+        if (showTerminal && session.TerminalDock.Content is null)
             session.Workbench.MoveTerminalTo(session.TerminalDock);
         else if (ReferenceEquals(RootTabs.SelectedItem, SessionsTab) && session.TerminalDock.Content is not null)
         {
@@ -482,43 +545,63 @@ public partial class MainWindow : Window
             session.Workbench.MoveTerminalTo(null);
         }
 
-        var stacked = UseStackedPanes(session);
-        _renderedStacked = stacked;
         var fraction = Math.Clamp(stacked ? session.Settings.StackedChatFraction : session.Settings.ChatFraction, 0.1, 0.9);
         var columns = ChatTerminalGrid.ColumnDefinitions;
         var rows = ChatTerminalGrid.RowDefinitions;
-        columns[0].MinWidth = show && !stacked ? 620 : 0;
-        columns[2].MinWidth = show && !stacked ? 260 : 0;
-        rows[0].MinHeight = show && stacked ? 150 : 0;
-        rows[2].MinHeight = show && stacked ? 140 : 0;
-        columns[0].Width = new GridLength(show && !stacked ? fraction : 1, GridUnitType.Star);
-        columns[1].Width = new GridLength(show && !stacked ? 8 : 0);
-        columns[2].Width = show && !stacked ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
-        rows[0].Height = new GridLength(show && stacked ? fraction : 1, GridUnitType.Star);
-        rows[1].Height = new GridLength(show && stacked ? 8 : 0);
-        rows[2].Height = show && stacked ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
+        columns[0].MinWidth = sideBySide ? WorkspacePaneSizing.ChatWidth : 0;
+        columns[2].MinWidth = sideBySide ? WorkspacePaneSizing.TerminalWidth : 0;
+        rows[0].MinHeight = stacked ? WorkspacePaneSizing.ChatHeight(_chatNavigationHeight) : 0;
+        rows[2].MinHeight = stacked ? WorkspacePaneSizing.TerminalHeight : 0;
+        columns[0].Width = new GridLength(sideBySide ? fraction : 1, GridUnitType.Star);
+        columns[1].Width = new GridLength(sideBySide ? WorkspacePaneSizing.Divider : 0);
+        columns[2].Width = sideBySide ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
+        rows[0].Height = new GridLength(stacked ? fraction : 1, GridUnitType.Star);
+        rows[1].Height = new GridLength(stacked ? WorkspacePaneSizing.Divider : 0);
+        rows[2].Height = stacked ? new GridLength(1 - fraction, GridUnitType.Star) : new GridLength(0);
         Grid.SetColumn(ChatTerminalDivider, stacked ? 0 : 1);
         Grid.SetRow(ChatTerminalDivider, stacked ? 1 : 0);
-        Grid.SetColumn(ChatTerminalHost, stacked ? 0 : 2);
+        Grid.SetColumn(ChatTerminalHost, sideBySide ? 2 : 0);
         Grid.SetRow(ChatTerminalHost, stacked ? 2 : 0);
         ChatTerminalDivider.ResizeDirection = stacked ? GridResizeDirection.Rows : GridResizeDirection.Columns;
         AutomationProperties.SetHelpText(ChatTerminalDivider, stacked
             ? "Use the up and down arrow keys to resize the panes."
             : "Use the left and right arrow keys to resize the panes.");
 
-        session.TerminalDock.IsVisible = show;
-        ChatTerminalHost.IsVisible = show;
-        ChatTerminalDivider.IsVisible = show;
-        PaneSizeMenu.IsVisible = show;
-        ChatTerminalToggle.Content = ChatTerminalToggle.IsChecked == true ? "Hide terminal" : "Show terminal";
-        SplitOrientationButton.IsEnabled = !IsNarrowSplit;
-        SplitOrientationLabel.Text = IsNarrowSplit ? "Stacked to fit" : stacked ? "Side by side" : "Stack panes";
+        session.TerminalDock.IsVisible = showTerminal;
+        ChatTerminalHost.IsVisible = showTerminal;
+        ChatPaneHost.IsVisible = !terminalOnly;
+        ChatTerminalDivider.IsVisible = HasSplit;
+        PaneSizeMenu.IsEnabled = HasSplit;
+        ChatTerminalToggle.Content = ChatTerminalToggle.IsChecked != true
+            ? "Show terminal"
+            : showTerminal ? "Hide terminal" : "Turn split off";
+        RefreshSplitControls(session);
+    }
+
+    private void RefreshSplitControls(PairedChatSession session)
+    {
+        var layout = _renderedPaneLayout;
+        var stacked = layout == WorkspacePaneLayout.Stacked;
+        var otherSplit = ChoosePaneLayout(session, preferStacked: !stacked);
+        var canChangeOrientation = HasSplit && otherSplit != layout;
+        SplitOrientationButton.IsEnabled = canChangeOrientation;
+        SplitOrientationLabel.Text = canChangeOrientation
+            ? stacked ? "Side by side" : "Stack panes"
+            : layout switch
+            {
+                WorkspacePaneLayout.SideBySide => "Side by side to fit",
+                WorkspacePaneLayout.Stacked => "Stacked to fit",
+                _ => ChatTerminalToggle.IsChecked == true ? "One pane to fit" : "Split panes"
+            };
         AutomationProperties.SetName(SplitOrientationButton, SplitOrientationLabel.Text);
     }
 
-    private bool IsNarrowSplit => ChatTerminalGrid.Bounds.Width is > 0 and < 888;
+    private bool HasSplit => _renderedPaneLayout is WorkspacePaneLayout.SideBySide or WorkspacePaneLayout.Stacked;
 
-    private bool UseStackedPanes(PairedChatSession workspace) => workspace.Settings.StackPanes || IsNarrowSplit;
+    private WorkspacePaneLayout ChoosePaneLayout(PairedChatSession workspace, bool? preferStacked = null) =>
+        WorkspacePaneSizing.Choose(ChatTerminalGrid.Bounds.Width, ChatTerminalGrid.Bounds.Height, _chatNavigationHeight,
+            RootTabs.SelectedIndex == 0 && ChatTerminalToggle.IsChecked == true,
+            preferStacked ?? workspace.Settings.StackPanes, workspace.FocusTerminalWhenCompact);
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
@@ -534,17 +617,7 @@ public partial class MainWindow : Window
             if (e.Key == Key.D3)
                 OpenDraftReview();
             else
-            {
-                RootTabs.SelectedIndex = 0;
-                if (e.Key == Key.D1)
-                    Dispatcher.UIThread.Post(() => ChatView.Focus());
-                else
-                {
-                    ChatTerminalToggle.IsChecked = true;
-                    UpdateChatTerminalDock();
-                    Dispatcher.UIThread.Post(SessionWorkbench.FocusCommandInput);
-                }
-            }
+                FocusWorkspacePane(terminal: e.Key == Key.D2);
             e.Handled = true;
             return;
         }
@@ -552,8 +625,7 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.D1:
-                RootTabs.SelectedIndex = 0;
-                ChatView.Focus();
+                FocusWorkspacePane(terminal: false);
                 e.Handled = true;
                 break;
             case Key.D2:

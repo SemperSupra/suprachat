@@ -100,7 +100,7 @@
           <WrapPanel Grid.Row="1" Orientation="Horizontal" ItemSpacing="8" Margin="8,4">
             <ToggleButton x:Name="ChatTerminalToggle" Content="Show terminal" IsChecked="True" Click="ChatTerminalToggle_Click"
                           AutomationProperties.AutomationId="ChatGPT.TerminalToggle"
-                          AutomationProperties.HelpText="Show or hide the paired session terminal beside ChatGPT." />
+                          AutomationProperties.HelpText="Show or hide the paired terminal. When space is limited, use Focus chat and Focus terminal to switch panes." />
             <Button x:Name="SplitOrientationButton" Click="SplitOrientation_Click"
                     AutomationProperties.AutomationId="ChatGPT.SplitOrientation"
                     AutomationProperties.HelpText="Change the arrangement of the chat and terminal panes.">
@@ -123,12 +123,14 @@
                 </MenuFlyout>
               </Button.Flyout>
             </Button>
-            <TextBlock x:Name="WorkspaceShortcutHint" VerticalAlignment="Center"
-                       AutomationProperties.AutomationId="ChatGPT.WorkspaceShortcuts" />
+            <Button x:Name="ChatPaneFocusButton" Content="Focus chat" Click="ChatPaneFocus_Click"
+                    AutomationProperties.AutomationId="ChatGPT.FocusChatPane" />
+            <Button x:Name="TerminalPaneFocusButton" Content="Focus terminal" Click="TerminalPaneFocus_Click"
+                    AutomationProperties.AutomationId="ChatGPT.FocusTerminalPane" />
           </WrapPanel>
           <Grid Grid.Row="2" x:Name="ChatTerminalGrid" ColumnDefinitions="*,0,0" RowDefinitions="*,0,0">
-            <Grid RowDefinitions="Auto,*">
-              <WrapPanel ItemSpacing="6" Margin="8,0,8,4" AutomationProperties.Name="ChatGPT navigation">
+            <Grid x:Name="ChatPaneHost" RowDefinitions="Auto,*">
+              <WrapPanel x:Name="ChatNavigation" ItemSpacing="6" Margin="8,0,8,4" AutomationProperties.Name="ChatGPT navigation">
                 <Button Margin="0,0,6,0" Click="Back_Click"
                          AutomationProperties.AutomationId="Nav.Back"
                          AutomationProperties.HelpText="Go back in the embedded ChatGPT product view." AutomationProperties.Name="Back">

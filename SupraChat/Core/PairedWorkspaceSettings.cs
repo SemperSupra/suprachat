@@ -7,6 +7,36 @@ internal sealed record PairedWorkspaceSettings(Guid Id, string Name, string? Pro
     double ChatFraction = 0.7, bool ShowTerminal = true, bool StackPanes = false,
     double StackedChatFraction = 0.58, string? DurableIssue = null);
 
+internal enum WorkspacePaneLayout { ChatOnly, TerminalOnly, SideBySide, Stacked }
+
+internal static class WorkspacePaneSizing
+{
+    internal const double Divider = 8;
+    internal const double ChatWidth = 620;
+    internal const double TerminalWidth = 260;
+    internal const double TerminalHeight = 190;
+
+    // Allocate an actual viewport for the embedded composer in addition to app navigation.
+    internal static double ChatHeight(double navigationHeight) => 340 + navigationHeight;
+
+    internal static WorkspacePaneLayout Choose(double width, double height, double navigationHeight,
+        bool showTerminal, bool preferStacked, bool focusTerminal)
+    {
+        if (!showTerminal)
+            return WorkspacePaneLayout.ChatOnly;
+
+        var chatHeight = ChatHeight(navigationHeight);
+        var sideFits = (width <= 0 || width >= ChatWidth + TerminalWidth + Divider) &&
+            (height <= 0 || height >= chatHeight);
+        var stackFits = height <= 0 || height >= chatHeight + TerminalHeight + Divider;
+        if (stackFits && (preferStacked || !sideFits))
+            return WorkspacePaneLayout.Stacked;
+        if (sideFits)
+            return WorkspacePaneLayout.SideBySide;
+        return focusTerminal ? WorkspacePaneLayout.TerminalOnly : WorkspacePaneLayout.ChatOnly;
+    }
+}
+
 internal sealed record PairedWorkspaceLayout(Guid? Active, List<PairedWorkspaceSettings> Workspaces)
 {
     private static string FilePath => Path.Combine(AppState.DirectoryPath, "paired-workspaces.json");
