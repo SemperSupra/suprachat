@@ -22,7 +22,9 @@ jobs:
           persist-credentials: false
       - name: Synthetic redacted startup logs and negative privacy tests
         shell: pwsh
-        run: ./tools/uia-lifetime-diagnostics/tests/Test-RedactedUiaFailureReceipt.ps1
+        run: |
+          ./tools/uia-lifetime-diagnostics/tests/Test-RedactedUiaFailureReceipt.ps1
+          ./tools/uia-lifetime-diagnostics/tests/Test-UiaHostLifetimeGuard.ps1
   ps51-privacy:
     runs-on: windows-2025
     timeout-minutes: 6
@@ -32,4 +34,6 @@ jobs:
           persist-credentials: false
       - name: Windows PowerShell 5.1 privacy negative tests
         shell: powershell
-        run: .\tools\uia-lifetime-diagnostics\tests\Test-RedactedUiaFailureReceipt.ps1
+        run: |
+          .\tools\uia-lifetime-diagnostics\tests\Test-RedactedUiaFailureReceipt.ps1
+          .\tools\uia-lifetime-diagnostics\tests\Test-UiaHostLifetimeGuard.ps1

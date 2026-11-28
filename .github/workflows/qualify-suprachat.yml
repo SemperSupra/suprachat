@@ -1163,25 +1163,35 @@ jobs:
           $previousStartupLog = $env:SUPRACHAT_STARTUP_LOG
           $env:SUPRACHAT_STARTUP_LOG = $uiaStartupLog
           $p = $null
+          $uiaPhase = 'Launch'
+          . ./tools/uia-lifetime-diagnostics/Assert-UiaHostAlive.ps1
           try {
             $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $uiaStdoutLog -RedirectStandardError $uiaStderrLog
+            $uiaPhase = 'RootSearch'
+            Write-Host 'UIA_PHASE=RootSearch'
             $deadline = (Get-Date).AddSeconds(20)
             $window = $null
             while ((Get-Date) -lt $deadline -and -not $window) {
+              Assert-UiaHostAlive -Process $p -Phase RootSearch
               Start-Sleep -Milliseconds 500
+              Assert-UiaHostAlive -Process $p -Phase RootSearch
               $processCondition = New-Object System.Windows.Automation.PropertyCondition(
                 [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
                 $p.Id)
               $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
                 [System.Windows.Automation.TreeScope]::Descendants,
                 $processCondition)
+              Assert-UiaHostAlive -Process $p -Phase RootSearch
             }
+            Assert-UiaHostAlive -Process $p -Phase RootSearch
 
             $qualificationDir = Join-Path $PWD 'out/win-x64/qualification'
             New-Item -ItemType Directory -Force -Path $qualificationDir | Out-Null
             $receiptPath = Join-Path $qualificationDir 'windows-uia.json'
 
             if (-not $window) {
+              $uiaPhase = 'RootBoundary'
+              Assert-UiaHostAlive -Process $p -Phase RootBoundary
               $receipt = @{
                 schema = 'suprachat-windows-uia-qualification/v1'
                 state = 'RUNNER_UIA_ROOT_UNAVAILABLE'
@@ -1194,22 +1204,33 @@ jobs:
                 gui_launch_smoke = 'PASS'
                 explanation = 'Hosted runner kept SupraChat alive but exposed no UI Automation root in this non-interactive desktop session. This is an environment qualification boundary; semantic correctness is still enforced whenever UIA peers are exposed.'
               }
+              Assert-UiaHostAlive -Process $p -Phase RootBoundary
               $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
+              Assert-UiaHostAlive -Process $p -Phase RootBoundary
               Write-Host ($receipt | ConvertTo-Json -Compress)
               Write-Host 'Windows live UI Automation qualification: RUNNER_UIA_ROOT_UNAVAILABLE.'
             }
             else {
               Write-Host "UIA root: name='$($window.Current.Name)' class='$($window.Current.ClassName)' automationId='$($window.Current.AutomationId)' processId=$($window.Current.ProcessId)"
 
+              $uiaPhase = 'InitialTree'
+              Write-Host 'UIA_PHASE=InitialTree'
+              Assert-UiaHostAlive -Process $p -Phase InitialTree
               $allDescendants = $window.FindAll(
                 [System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition)
+              Assert-UiaHostAlive -Process $p -Phase InitialTree
+              $uiaPhase = 'InitialPeerRead'
+              Write-Host 'UIA_PHASE=InitialPeerRead'
               $semanticPeers = @(
                 $allDescendants |
                   Where-Object { -not [string]::IsNullOrWhiteSpace($_.Current.AutomationId) }
               )
 
+              Assert-UiaHostAlive -Process $p -Phase InitialPeerRead
               if ($semanticPeers.Count -eq 0) {
+              $uiaPhase = 'PeerBoundary'
+              Assert-UiaHostAlive -Process $p -Phase PeerBoundary
               $receipt = @{
                 schema = 'suprachat-windows-uia-qualification/v1'
                 state = 'RUNNER_UIA_BOUNDARY'
@@ -1221,8 +1242,11 @@ jobs:
               }
                 $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
                 Write-Host ($receipt | ConvertTo-Json -Compress)
+                Assert-UiaHostAlive -Process $p -Phase PeerBoundary
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
+                $uiaPhase = 'SemanticPeers'
+                Write-Host 'UIA_PHASE=SemanticPeers'
                 $script:uiaTransientRetries = 0
                 # Issue #152: once the default ChatGPT tab's WebView2 document
                 # loads, TreeScope.Descendants searches from the main window
@@ -1281,16 +1305,8 @@ jobs:
                     # Native WebView remounts can recreate the provider tree on
                     # tab selection. Reacquire the current, declared main HWND
                     # on every attempt; fall back to root process search if HWND is zero.
-                    $p.Refresh()
-                    # The real app process can terminate after exposing its
-                    # initial HWND. Refuse immediately instead of misreporting
-                    # this lifetime failure as a missing Avalonia tab.
-                    if ($p.HasExited) {
-                      $observedExitCode = 'unavailable'
-                      try { $observedExitCode = [string][int]$p.ExitCode } catch {}
-                      Write-Host ('UIA host lifetime: processAlive=False exitCode=' + $observedExitCode)
-                      throw 'UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS'
-                    }
+                    # Preserve the historical semantic-phase failure marker.
+                    Assert-UiaHostAlive -Process $p -Phase SemanticPeers
                     $window = $null
                     if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
                       try {
@@ -1755,6 +1771,8 @@ jobs:
                 $reset = Require-SemanticControl 'Accessibility.ScaleReset'
                 $reset.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
+                $uiaPhase = 'FinalReceipt'
+                Assert-UiaHostAlive -Process $p -Phase FinalReceipt
                 $receipt = @{
                   schema = 'suprachat-windows-uia-qualification/v1'
                   state = 'PASS'
@@ -1767,13 +1785,16 @@ jobs:
                   static_accessibility_contract = 'PASS'
                   gui_launch_smoke = 'PASS'
                 }
+                Assert-UiaHostAlive -Process $p -Phase FinalReceipt
                 $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
+                Assert-UiaHostAlive -Process $p -Phase FinalReceipt
                 'Windows live UI Automation accessibility smoke PASS.'
               }
             }
           }
           catch {
             $uiaFirstFailure = $_
+            Write-Host ('UIA_FAILURE_PHASE=' + $uiaPhase)
             # Only the failing launch's fresh files; the shared events.jsonl is
             # intentionally excluded because it is not process-bound.
             try {
