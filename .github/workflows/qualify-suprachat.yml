@@ -1164,8 +1164,15 @@ jobs:
           $env:SUPRACHAT_STARTUP_LOG = $uiaStartupLog
           $p = $null
           $uiaPhase = 'Launch'
+          $script:uiaFirstObserverFault = $null
           . ./tools/uia-lifetime-diagnostics/Assert-UiaHostAlive.ps1
           try {
+            # Record the actual published managed assembly as well as the apphost.
+            $uiaAppHostHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            $uiaAssemblyHash = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $exe) 'SupraChat.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+            $uiaSourceCommit = (git rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $uiaSourceCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'UIA_SOURCE_PIN_UNAVAILABLE' }
+            Write-Host ([ordered]@{schema='suprachat-uia-published-identity/v1';checkout_sha=$uiaSourceCommit;apphost_sha256=$uiaAppHostHash;managed_assembly_sha256=$uiaAssemblyHash} | ConvertTo-Json -Compress)
             $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $uiaStdoutLog -RedirectStandardError $uiaStderrLog
             $uiaPhase = 'RootSearch'
             Write-Host 'UIA_PHASE=RootSearch'
@@ -1228,6 +1235,7 @@ jobs:
               )
 
               Assert-UiaHostAlive -Process $p -Phase InitialPeerRead
+              Write-Host ("UIA_INITIAL_TREE_COUNTS raw={0} named={1}" -f $allDescendants.Count,$semanticPeers.Count)
               if ($semanticPeers.Count -eq 0) {
               $uiaPhase = 'PeerBoundary'
               Assert-UiaHostAlive -Process $p -Phase PeerBoundary
@@ -1340,6 +1348,11 @@ jobs:
                     }
                   }
                   catch [System.Windows.Automation.ElementNotAvailableException] {
+                    if ($null -eq $script:uiaFirstObserverFault) {
+                      $script:uiaFirstObserverFault = [ordered]@{schema='suprachat-uia-observer-fault/v1';kind='ElementNotAvailable';hresult=[int]$_.Exception.HResult;retryable=$true}
+                      Write-Host ($script:uiaFirstObserverFault | ConvertTo-Json -Compress)
+                    }
+                    Assert-UiaHostAlive -Process $p -Phase SemanticPeers
                     $script:uiaTransientRetries++
                     $element = $null
                   }
@@ -1348,7 +1361,18 @@ jobs:
                     # RPC_E_CALL_REJECTED (0x80010001) and
                     # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
                     # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
-                    if ($_.Exception.HResult -notin @(-2147418113, -2147418111, -2147417846)) { throw }
+                    $observerHResult = [int]$_.Exception.HResult
+                    $retryable = Test-UiaTransientRpcHResult -HResult $observerHResult
+                    $observation = [ordered]@{schema='suprachat-uia-observer-fault/v1';kind='COM';hresult=$observerHResult;retryable=$retryable}
+                    if ($null -eq $script:uiaFirstObserverFault) {
+                      $script:uiaFirstObserverFault = $observation
+                      Write-Host ($observation | ConvertTo-Json -Compress)
+                    }
+                    elseif (-not $retryable) {
+                      Write-Host ($observation | ConvertTo-Json -Compress)
+                    }
+                    if (-not $retryable) { throw }
+                    Assert-UiaHostAlive -Process $p -Phase SemanticPeers
                     $script:uiaTransientRetries++
                     $element = $null
                   }
@@ -1444,7 +1468,12 @@ jobs:
                 # Inactive tab content is not attached to the live UIA tree. Select each
                 # work area before checking its controls. Native WebView content has
                 # its own provider; its declarative ID is covered by contract checks.
-                foreach ($automationId in @('RootTabs', 'Nav.Back', 'Nav.Home', 'Tab.ChatGPT')) {
+                $uiaPhase = 'FirstOwnedRootTabs'
+                Write-Host 'UIA_PHASE=FirstOwnedRootTabs'
+                $null = Require-SemanticControl 'RootTabs'
+                $uiaPhase = 'SemanticPeers'
+                Write-Host 'UIA_PHASE=RemainingSemanticPeers'
+                foreach ($automationId in @('Nav.Back', 'Nav.Home', 'Tab.ChatGPT')) {
                   $null = Require-SemanticControl $automationId
                 }
                 foreach ($area in @(
@@ -1795,6 +1824,35 @@ jobs:
           catch {
             $uiaFirstFailure = $_
             Write-Host ('UIA_FAILURE_PHASE=' + $uiaPhase)
+            # Preserve observer and app lifetime observations separately.
+            # Do not emit exception strings, paths, or provider content.
+            $failureHResult = $null
+            $failureInnerHResult = $null
+            try { $failureHResult = [int]$uiaFirstFailure.Exception.HResult } catch {}
+            try {
+              if ($null -ne $uiaFirstFailure.Exception.InnerException) {
+                $failureInnerHResult = [int]$uiaFirstFailure.Exception.InnerException.HResult
+              }
+            } catch {}
+            $failureProcessAlive = $null
+            $failureExitCode = $null
+            try {
+              if ($null -ne $p) {
+                $p.Refresh()
+                $failureProcessAlive = -not $p.HasExited
+                if (-not $failureProcessAlive) { $failureExitCode = [int]$p.ExitCode }
+              }
+            } catch {}
+            Write-Host ([ordered]@{
+              schema = 'suprachat-uia-failure-boundary/v1'
+              phase = $uiaPhase
+              observer_hresult = $failureHResult
+              observer_inner_hresult = $failureInnerHResult
+              process_alive = $failureProcessAlive
+              process_exit_code = $failureExitCode
+              first_observer_fault = $script:uiaFirstObserverFault
+              root_cause = 'UNKNOWN'
+            } | ConvertTo-Json -Depth 5 -Compress)
             # Only the failing launch's fresh files; the shared events.jsonl is
             # intentionally excluded because it is not process-bound.
             try {

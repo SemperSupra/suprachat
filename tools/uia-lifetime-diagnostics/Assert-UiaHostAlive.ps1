@@ -31,3 +31,10 @@ function Assert-UiaHostAlive {
         'FinalReceipt'    { throw 'UIA_HOST_PROCESS_EXITED_BEFORE_FINAL_RECEIPT' }
     }
 }
+
+# Do not coerce malformed observations or expand the finite retry policy.
+function Test-UiaTransientRpcHResult {
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true)][AllowNull()]$HResult)
+    return ($HResult -is [int] -and $HResult -in @(-2147418111,-2147417846))
+}

@@ -53,5 +53,18 @@ Require-Failure $null RootSearch 'UIA_HOST_LIFETIME_UNAVAILABLE'
 $current = Get-Process -Id $PID
 Assert-UiaHostAlive -Process $current -Phase FinalReceipt
 $checks++
+# Exact signed HRESULT policy. No E_UNEXPECTED or generic failures are retryable.
+$rpcChecks = 0
+foreach ($code in @(-2147418111,-2147417846)) {
+    if (-not (Test-UiaTransientRpcHResult -HResult $code)) { throw 'TRANSIENT_RPC_REFUSED' }
+    $rpcChecks++
+}
+foreach ($code in @(-2147418113,-2147467259,-2147417848,-2147220991,0,1,
+                     [long]-2147418111, [long]2147549185, '-2147418111', $true, $null)) {
+    if (Test-UiaTransientRpcHResult -HResult $code) { throw 'UNEXPECTED_RPC_RETRY_ACCEPTED' }
+    $rpcChecks++
+}
+[ordered]@{schema='suprachat-uia-rpc-retry-policy-test/v1';result='PASS';checks=$rpcChecks;
+    e_unexpected_retryable=$false;release_gate_waived=$false} | ConvertTo-Json -Compress
 [ordered]@{schema='suprachat-uia-lifetime-guard-test/v1';result='PASS';checks=$checks;
     actual_desktop_repaired=$false;release_gate_waived=$false} | ConvertTo-Json -Compress
