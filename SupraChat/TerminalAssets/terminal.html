@@ -27,13 +27,13 @@ document.addEventListener("DOMContentLoaded", () => {
             window.chrome.webview.postMessage(message);
     };
     const element = document.getElementById("terminal");
+    Terminal.strings.promptLabel = "Workspace shell input";
     const terminal = new Terminal({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: "Consolas, monospace",
         scrollback: 3000,
         screenReaderMode: true,
-        promptLabel: "Workspace shell input",
         theme: { background: "#171717", foreground: "#eeeeee" },
         linkHandler: { activate: () => {} }
     });
