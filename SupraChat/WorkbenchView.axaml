@@ -65,10 +65,24 @@
                         AutomationProperties.HelpText="Compare-and-swap title change through the same ledger." />
                 <Button Content="Close" Click="W0Close_Click" Margin="0,0,6,6"
                         AutomationProperties.AutomationId="Sessions.CloseSession"
-                        AutomationProperties.HelpText="Archives the selected session and clears active draft buffers." />
-                <Button Content="Restore" Click="W0Restore_Click" Margin="0,0,6,6"
+                        AutomationProperties.HelpText="Archives the selected session. Clears its staged drafts only after a confirmed close." />
+                <Button Content="Reconcile closes" Click="W0ReconcileClose_Click" Margin="0,0,6,6"
+                        AutomationProperties.AutomationId="Sessions.ReconcileCloses"
+                        AutomationProperties.HelpText="Rechecks outstanding close requests using their original operation IDs. Retains draft buffers." />
+              </WrapPanel>
+
+              <WrapPanel Orientation="Horizontal">
+                <ComboBox x:Name="W0ArchivedSessions" MinWidth="160" Margin="0,0,6,6"
+                          PlaceholderText="Select archived session"
+                          AutomationProperties.AutomationId="Sessions.ArchivedList"
+                          AutomationProperties.Name="Archived sessions">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate><TextBlock Text="{Binding DisplayText}" /></DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Content="Restore selected" Click="W0Restore_Click" Margin="0,0,6,6"
                         AutomationProperties.AutomationId="Sessions.RestoreSession"
-                        AutomationProperties.HelpText="Restores an archived session back to the active list." />
+                        AutomationProperties.HelpText="Restores the selected archived session to the active list." />
               </WrapPanel>
 
               <Border x:Name="W0CollisionBorder" IsVisible="False"

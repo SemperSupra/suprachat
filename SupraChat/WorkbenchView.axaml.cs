@@ -19,6 +19,7 @@ namespace SupraChat;
 public partial class WorkbenchView : UserControl
 {
     private readonly IWorkbenchSessionAuthority _authority;
+    private readonly WorkbenchSessionClose _sessionClose;
     private readonly LedgerLocalDrafts _drafts;
     private readonly SessionTerminalHost _terminalHost = new();
     private InteractiveTerminalView? _interactiveTerminal;
@@ -26,6 +27,8 @@ public partial class WorkbenchView : UserControl
     private bool _refreshing;
     private string? _selectedId;
     private int _refreshGeneration;
+    private int _selectionGeneration;
+    private int _draftGeneration;
     private IReadOnlyList<CodeSnippet> _extractedSnippets = Array.Empty<CodeSnippet>();
 
     public WorkbenchView() : this(CreateDefaultAuthority())
@@ -46,8 +49,14 @@ public partial class WorkbenchView : UserControl
     public WorkbenchView(IWorkbenchSessionAuthority authority)
     {
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
+        _sessionClose = new WorkbenchSessionClose(_authority);
         _drafts = new LedgerLocalDrafts(_authority);
         InitializeComponent();
+        W2DraftInput.TextChanged += (_, _) =>
+        {
+            _draftGeneration++;
+            _drafts.DiscardPending();
+        };
 
         _terminalHost.OutputReceived += OnTerminalOutputReceived;
         _terminalHost.StateChanged += OnTerminalStateChanged;
@@ -241,6 +250,7 @@ public partial class WorkbenchView : UserControl
             if (generation == _refreshGeneration)
             {
                 W0Sessions.ItemsSource = null;
+                W0ArchivedSessions.ItemsSource = null;
                 W0Output.Text = string.Empty;
                 W0Status.Text = "OWNER_UNAVAILABLE: session view cannot connect; no local fallback.";
             }
@@ -251,6 +261,7 @@ public partial class WorkbenchView : UserControl
         if (receipt.Snapshot is null)
         {
             W0Sessions.ItemsSource = null;
+            W0ArchivedSessions.ItemsSource = null;
             W0Output.Text = string.Empty;
             W0Status.Text = "Session view refused: " + receipt.Status;
             W0CollisionBorder.IsVisible = false;
@@ -267,12 +278,17 @@ public partial class WorkbenchView : UserControl
             {
                 // Stale or uncommitted selection ignored
             }
+            if (generation != _refreshGeneration) return;
             W2ClearReview();
         }
         RefreshDraftFields();
         _refreshing = true;
         try
         {
+            var archivedSelection = (W0ArchivedSessions.SelectedItem as WorkbenchSession)?.Id;
+            W0ArchivedSessions.ItemsSource = receipt.Snapshot.ArchivedSessions;
+            W0ArchivedSessions.SelectedItem = receipt.Snapshot.ArchivedSessions
+                ?.FirstOrDefault(session => session.Id == archivedSelection);
             W0Sessions.ItemsSource = receipt.Snapshot.Sessions;
             var active = receipt.Snapshot.Sessions.FirstOrDefault(s => s.Id == _selectedId);
             W0Sessions.SelectedItem = active;
@@ -316,6 +332,7 @@ public partial class WorkbenchView : UserControl
     private async void W0Sessions_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_refreshing || W0Sessions.SelectedItem is not WorkbenchSession item) return;
+        _selectionGeneration++;
         _selectedId = item.Id;
         W2ClearReview();
         W0Output.Text = string.Empty;
@@ -389,62 +406,76 @@ public partial class WorkbenchView : UserControl
             W0Status.Text = "SESSION_SELECTION_REQUIRED";
             return;
         }
-        SessionLedgerResult outcome;
-        try
+        var selectionGeneration = _selectionGeneration;
+        var draftGeneration = _draftGeneration;
+        bool StillSelected() => _selectedId == selected && _selectionGeneration == selectionGeneration;
+        var outcome = await _sessionClose.ExecuteAsync(selected, StillSelected);
+        if (!StillSelected()) return;
+        if (outcome.Status != "ARCHIVED")
         {
-            var existing = await _authority.InspectAsync(selected);
-            if (existing is null || _selectedId != selected)
-            {
-                W0Status.Text = "SESSION_SELECTION_STALE";
-                return;
-            }
-            outcome = await _authority.CloseAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
-                existing.Id, existing.Version);
-        }
-        catch (Exception)
-        {
-            W0Status.Text = "OUTCOME_UNKNOWN: close may have committed; drafts retained. Reconnect and refresh before retrying.";
+            W0Status.Text = outcome.Status == "OUTCOME_UNKNOWN"
+                ? "Close outcome unknown. Drafts retained. Use Reconcile closes to recheck the same request."
+                : "Close: " + outcome.Status + "; drafts retained.";
             return;
         }
 
-        if (!outcome.Applied)
+        var discard = outcome.MayDiscardDrafts && draftGeneration == _draftGeneration;
+        if (discard)
         {
-            W0Status.Text = "Close refused: " + outcome.Status + "; drafts retained.";
-            return;
-        }
-
-        _drafts.Forget(selected);
-        if (_selectedId == selected)
-        {
-            _selectedId = null;
+            _drafts.Forget(selected);
             W2ClearReview();
             W0Output.Text = string.Empty;
         }
-        await RefreshAsync("Session archived; its draft buffers cleared.");
+        _selectedId = null;
+        await RefreshAsync(discard ? "Session archived; its draft buffers cleared." : "Session archived; drafts retained.");
+    }
+
+    private async void W0ReconcileClose_Click(object? sender, RoutedEventArgs e)
+    {
+        var pending = _sessionClose.PendingSessions();
+        if (pending.Length == 0)
+        {
+            W0Status.Text = "No close requests need reconciliation.";
+            return;
+        }
+
+        var outcomes = new List<string>();
+        foreach (var sessionId in pending)
+        {
+            var outcome = await _sessionClose.ExecuteAsync(sessionId, () => true, retryOnly: true);
+            outcomes.Add(outcome.Status);
+        }
+        await RefreshAsync("Close reconciliation: " + string.Join(", ", outcomes) + ". Drafts retained.");
     }
 
     private async void W0Restore_Click(object? sender, RoutedEventArgs e)
     {
+        if (W0ArchivedSessions.SelectedItem is not WorkbenchSession toRestore)
+        {
+            W0Status.Text = "Select an archived session to restore.";
+            return;
+        }
+        var selectionGeneration = _selectionGeneration;
         try
         {
-            var receipt = await _authority.ReadAsync(_selectedId);
-            if (receipt.Snapshot?.ArchivedSessions is null || receipt.Snapshot.ArchivedSessions.Count == 0)
-            {
-                W0Status.Text = "NO_ARCHIVED_SESSIONS";
-                return;
-            }
-            var toRestore = receipt.Snapshot.ArchivedSessions.Last();
             var existing = await _authority.InspectAsync(toRestore.Id);
-            if (existing is null)
+            if (existing is not { IsArchived: true } || existing.Id != toRestore.Id ||
+                W0ArchivedSessions.SelectedItem is not WorkbenchSession current || current.Id != toRestore.Id)
             {
                 W0Status.Text = "SESSION_SELECTION_STALE";
                 return;
             }
             var outcome = await _authority.RestoreAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
                 existing.Id, existing.Version);
-            if (outcome.Applied && outcome.Session is not null)
+            if (outcome.Applied && outcome.Status == "APPLIED" && outcome.Schema == SharedSessionLedger.Schema &&
+                outcome.Session is { IsArchived: false } restored && restored.Id == toRestore.Id &&
+                restored.Version > 0 && restored.Version - 1 == existing.Version)
             {
-                _selectedId = outcome.Session.Id;
+                if (_selectionGeneration == selectionGeneration)
+                {
+                    _selectionGeneration++;
+                    _selectedId = restored.Id;
+                }
                 await RefreshAsync("Session restored to active list");
             }
             else
@@ -521,6 +552,7 @@ public partial class WorkbenchView : UserControl
 
     private void W2ClearReview()
     {
+        _draftGeneration++;
         _w2ReviewId = null;
         _drafts.DiscardPending();
         W2ReviewOutput.Text = string.Empty;
@@ -613,6 +645,7 @@ public partial class WorkbenchView : UserControl
     private async Task W2PrepareAsync(string direction)
     {
         W2ClearReview();
+        var generation = _draftGeneration;
         try
         {
             var rawText = W2DraftInput.Text ?? string.Empty;
@@ -624,6 +657,8 @@ public partial class WorkbenchView : UserControl
             }
 
             var review = await _drafts.PrepareAsync(direction, sanitized);
+            if (generation != _draftGeneration) return;
+            _draftGeneration++;
             _w2ReviewId = review.ReviewId;
             W2ReviewOutput.Text = review.PreviewText;
             W2Status.Text = "Review valid for two minutes, one use, selected session/version only. " +
@@ -631,6 +666,7 @@ public partial class WorkbenchView : UserControl
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
+            if (generation != _draftGeneration) return;
             W2Status.Text = "Draft review refused; check selection, direction and 16 KiB UTF-8 bound.";
         }
     }
@@ -643,6 +679,7 @@ public partial class WorkbenchView : UserControl
 
     private async void W2Stage_Click(object? sender, RoutedEventArgs e)
     {
+        var generation = ++_draftGeneration;
         var id = _w2ReviewId;
         _w2ReviewId = null;
         if (id is null)
@@ -653,6 +690,8 @@ public partial class WorkbenchView : UserControl
         try
         {
             var receipt = await _drafts.StageReviewedAsync(id, W2ReviewOutput.Text ?? string.Empty);
+            if (generation != _draftGeneration) return;
+            _draftGeneration++;
             W2DraftInput.Text = string.Empty;
             W2ReviewOutput.Text = string.Empty;
             RefreshDraftFields();
@@ -662,6 +701,7 @@ public partial class WorkbenchView : UserControl
         }
         catch (InvalidOperationException)
         {
+            if (generation != _draftGeneration) return;
             W2ClearReview();
             W2Status.Text = "STAGE_REFUSED: review changed, expired, replayed, or ledger version changed.";
         }
