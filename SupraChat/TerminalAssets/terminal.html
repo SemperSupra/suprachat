@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workspace terminal</title>
+<style>
+/* XTERM_CSS */
+html, body { height: 100%; margin: 0; background: #171717; overflow: hidden; }
+#terminal { position: absolute; inset: 5px; }
+</style>
+</head>
+<body>
+<div id="terminal" role="region" aria-label="Interactive workspace terminal"></div>
+<script>/* XTERM_JS */</script>
+<script>/* FIT_JS */</script>
+<script>
+"use strict";
+document.addEventListener("DOMContentLoaded", () => {
+    const token = "TERMINAL_DOCUMENT_TOKEN";
+    const send = (kind, fields = {}) => {
+        const message = JSON.stringify({ token, kind, ...fields });
+        if (typeof window.invokeCSharpAction === "function")
+            window.invokeCSharpAction(message);
+        else
+            window.chrome.webview.postMessage(message);
+    };
+    const element = document.getElementById("terminal");
+    Terminal.strings.promptLabel = "Workspace shell input";
+    const terminal = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: "Consolas, monospace",
+        scrollback: 3000,
+        screenReaderMode: true,
+        theme: { background: "#171717", foreground: "#eeeeee" },
+        linkHandler: { activate: () => {} }
+    });
+    const fit = new FitAddon.FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(element);
+    terminal.onData((text) => {
+        if (text.length <= 16384) send("input", { text });
+    });
+    terminal.onResize(({ cols, rows }) => send("resize", { cols, rows }));
+    new ResizeObserver(() => fit.fit()).observe(element);
+    fit.fit();
+    window.terminalAction = (expected, action, text) => {
+        if (expected !== token) return;
+        switch (action) {
+            case "write": terminal.write(text); break;
+            case "reset": terminal.reset(); break;
+            case "focus": terminal.focus(); break;
+            case "selection": send("selection", { text: terminal.getSelection().slice(0, 16385) }); break;
+        }
+    };
+    send("ready", { cols: terminal.cols, rows: terminal.rows });
+}, { once: true });
+</script>
+</body>
+</html>

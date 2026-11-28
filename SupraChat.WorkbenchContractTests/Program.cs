@@ -24,6 +24,20 @@ static class Program
     static int Main()
     {
         // No local desktop, browser, credential, network, terminal process or profile.
+        Check(WorkspacePaneSizing.Choose(750, 400, 48, true, true, false) == WorkspacePaneLayout.ChatOnly,
+            "short_stack_gives_chat_full_viewport");
+        Check(WorkspacePaneSizing.Choose(750, 400, 48, true, true, true) == WorkspacePaneLayout.TerminalOnly,
+            "short_stack_can_switch_to_terminal");
+        Check(WorkspacePaneSizing.Choose(750, 586, 48, true, true, true) == WorkspacePaneLayout.Stacked,
+            "short_stack_recovers_at_full_minimum");
+        Check(WorkspacePaneSizing.Choose(750, 585, 48, true, true, true) == WorkspacePaneLayout.TerminalOnly,
+            "stack_requires_space_for_divider");
+        Check(WorkspacePaneSizing.Choose(1000, 430, 48, true, true, true) == WorkspacePaneLayout.SideBySide,
+            "short_wide_workspace_can_split_horizontally");
+        Check(WorkspacePaneSizing.Choose(1000, 386, 48, true, false, false) == WorkspacePaneLayout.ChatOnly,
+            "horizontal_split_accounts_for_navigation_height");
+        Check(WorkspacePaneSizing.Choose(1000, 700, 48, false, true, true) == WorkspacePaneLayout.ChatOnly,
+            "explicit_hide_wins_over_size_and_terminal_focus");
         var id = Guid.NewGuid();
         var inspected = ChatGptControlContract.Inspect($"https://chatgpt.com/c/{id:D}");
         Check(inspected.Recognized && inspected.ConversationId == id.ToString("D"), "recognized_reference");

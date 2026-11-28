@@ -130,9 +130,160 @@ static class Program
         Check(renameResult.Applied, "authority_session_renamed");
         await RefuseAsync(async () => await asyncDrafts.StageReviewedAsync(asyncReview2.ReviewId, "BEFORE_RENAME"), "async_version_fence");
 
+        await CloseReconciliationAsync();
+        await DelayedDraftsAsync();
         Console.WriteLine($"LEDGER_DRAFT_LOCAL_ONLY_PASS cases={passed} " +
             "provider_contact=false terminal_execution=false persistent_state=false " +
             "actor_authentication=false payloads_logged=false");
         return 0;
+    }
+
+    private static async Task CloseReconciliationAsync()
+    {
+        var authority = new DelayedCloseAuthority();
+        var closer = new WorkbenchSessionClose(authority);
+        var a = (await authority.CreateAsync("close-fixture-a-001", "A")).Session!;
+        var b = (await authority.CreateAsync("close-fixture-b-001", "B")).Session!;
+        var selected = a.Id;
+        bool ASelected() => selected == a.Id;
+        Check((await closer.ExecuteAsync(a.Id, ASelected, retryOnly: true)).Status == "NO_PENDING_CLOSE" &&
+            authority.Requests.Count == 0, "close_reconcile_without_pending_never_dispatches");
+        var first = closer.ExecuteAsync(a.Id, ASelected).AsTask();
+        Check(authority.Requests.Count == 1 && !first.IsCompleted, "close_dispatch_waits");
+        Check((await closer.ExecuteAsync(a.Id, ASelected)).Status == "CLOSE_PENDING",
+            "close_duplicate_in_flight_refused");
+        selected = b.Id;
+        await authority.CompleteAsync(loseAcknowledgment: true);
+        Check((await first).Status == "OUTCOME_UNKNOWN", "close_lost_ack_unknown");
+        Check(closer.PendingSessions().SequenceEqual([a.Id]), "close_lost_ack_remains_discoverable");
+        Check((await authority.InspectAsync(b.Id))?.Version == b.Version, "close_unrelated_b_untouched");
+        var archived = (await authority.InspectAsync(a.Id))!;
+        Check(archived.IsArchived && archived.Version == a.Version + 1, "close_committed_once");
+
+        selected = a.Id;
+        var replay = closer.ExecuteAsync(a.Id, ASelected, retryOnly: true).AsTask();
+        Check(authority.Requests[0] == authority.Requests[1], "close_retry_exact_request");
+        await authority.CompleteAsync();
+        var replayed = await replay;
+        Check(replayed.Status == "ARCHIVED" && !replayed.MayDiscardDrafts,
+            "historical_replay_cannot_discard_drafts");
+
+        var restored = (await authority.RestoreAsync("close-restore-a-001", a.Id, archived.Version)).Session!;
+        var closing = closer.ExecuteAsync(a.Id, ASelected).AsTask();
+        await authority.CompleteAsync(beforeAcknowledgment: async receipt =>
+        {
+            await authority.RestoreAsync("close-restore-a-002", a.Id, receipt.Session!.Version);
+        });
+        var superseded = await closing;
+        Check(superseded.Status == "ARCHIVE_SUPERSEDED" && !superseded.MayDiscardDrafts,
+            "late_close_after_restore_keeps_drafts");
+        Check(authority.Requests[2].Version == restored.Version, "new_close_binds_current_revision");
+
+        var other = closer.ExecuteAsync(a.Id, ASelected).AsTask();
+        selected = b.Id;
+        await authority.CompleteAsync();
+        Check(!(await other).MayDiscardDrafts, "late_close_after_switch_keeps_drafts");
+        var closeB = closer.ExecuteAsync(b.Id, () => selected == b.Id).AsTask();
+        await authority.CompleteAsync();
+        Check((await closeB).MayDiscardDrafts, "confirmed_current_close_can_discard_prior_drafts");
+        archived = (await authority.InspectAsync(a.Id))!;
+        var explicitRestore = await authority.RestoreAsync("close-restore-a-003", a.Id, archived.Version);
+        Check(explicitRestore.Applied && explicitRestore.Session is { IsArchived: false } reopened && reopened.Id == a.Id,
+            "explicit_restore_targets_a");
+        Check((await authority.InspectAsync(b.Id)) is { IsArchived: true }, "explicit_restore_leaves_b_archived");
+        var conflict = closer.ExecuteAsync(a.Id, () => true).AsTask();
+        await authority.RenameAsync("close-rename-a-001", a.Id, explicitRestore.Session!.Version, "A renamed");
+        await authority.CompleteAsync();
+        var refused = await conflict;
+        Check(refused.Status == "VERSION_CONFLICT" && !refused.MayDiscardDrafts && closer.PendingSessions().Length == 0,
+            "known_close_refusal_does_not_discard_or_require_replay");
+    }
+
+    private static async Task DelayedDraftsAsync()
+    {
+        var authority = new DelayedCloseAuthority();
+        var a = (await authority.CreateAsync("draft-delay-a-001", "A")).Session!;
+        var b = (await authority.CreateAsync("draft-delay-b-001", "B")).Session!;
+        using var drafts = new LedgerLocalDrafts(authority);
+        var delayed = authority.DelayNextInspection();
+        var selectA = drafts.SelectAsync(a.Id).AsTask();
+        await drafts.SelectAsync(b.Id);
+        delayed.SetResult(a);
+        await selectA;
+        Check(drafts.SelectedId == b.Id, "late_selection_cannot_replace_newer_selection");
+
+        await drafts.SelectAsync(a.Id);
+        var reviewA = await drafts.PrepareAsync("chat-to-terminal", "SYNTHETIC_A");
+        delayed = authority.DelayNextInspection();
+        var stageA = drafts.StageReviewedAsync(reviewA.ReviewId, reviewA.PreviewText).AsTask();
+        await drafts.SelectAsync(b.Id);
+        var reviewB = await drafts.PrepareAsync("chat-to-terminal", "SYNTHETIC_B");
+        delayed.SetResult(a);
+        await RefuseAsync(async () => await stageA, "late_stage_refused_after_selection_change");
+        await drafts.StageReviewedAsync(reviewB.ReviewId, reviewB.PreviewText);
+        Check(drafts.ReadSelected().TerminalInput == "SYNTHETIC_B", "newer_target_review_preserved");
+        await drafts.SelectAsync(a.Id);
+        Check(drafts.ReadSelected().TerminalInput.Length == 0, "late_stage_cannot_recreate_old_buffer");
+    }
+
+    private sealed class DelayedCloseAuthority : IWorkbenchSessionAuthority
+    {
+        private readonly ExperimentalLocalWorkbenchSessionAuthority _owner = new();
+        private TaskCompletionSource<SessionLedgerResult>? _pending;
+        private TaskCompletionSource<SessionLedgerState?>? _inspection;
+        public List<(string Key, string Id, long Version)> Requests { get; } = [];
+
+        public ValueTask<SessionLedgerResult> CloseAsync(string operationId, string sessionId,
+            long expectedVersion, CancellationToken token = default)
+        {
+            Requests.Add((operationId, sessionId, expectedVersion));
+            _pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            return new(_pending.Task);
+        }
+
+        public async Task CompleteAsync(bool loseAcknowledgment = false,
+            Func<SessionLedgerResult, Task>? beforeAcknowledgment = null)
+        {
+            var pending = _pending!;
+            var (key, id, version) = Requests[^1];
+            var receipt = await _owner.CloseAsync(key, id, version);
+            if (beforeAcknowledgment is not null)
+                await beforeAcknowledgment(receipt);
+            if (loseAcknowledgment)
+                pending.SetException(new TimeoutException());
+            else
+                pending.SetResult(receipt);
+        }
+
+        public TaskCompletionSource<SessionLedgerState?> DelayNextInspection() =>
+            _inspection = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<SessionLedgerState?> InspectAsync(string sessionId, CancellationToken token = default)
+        {
+            var delayed = _inspection;
+            _inspection = null;
+            return delayed is null ? _owner.InspectAsync(sessionId, token) : new(delayed.Task);
+        }
+
+        public ValueTask<SessionLedgerResult> CreateAsync(string operationId, string title,
+            string? conversationUrl = null, string? workspaceKey = null, CancellationToken token = default) =>
+            _owner.CreateAsync(operationId, title, conversationUrl, workspaceKey, token);
+
+        public ValueTask<SessionLedgerResult> RestoreAsync(string operationId, string sessionId,
+            long expectedVersion, CancellationToken token = default) =>
+            _owner.RestoreAsync(operationId, sessionId, expectedVersion, token);
+
+        public ValueTask<LedgerWorkbenchReadReceipt> ReadAsync(string? selectedSessionId = null,
+            CancellationToken token = default) => throw new NotSupportedException();
+
+        public ValueTask<SessionLedgerResult> RenameAsync(string operationId, string sessionId,
+            long expectedVersion, string title, CancellationToken token = default) =>
+            _owner.RenameAsync(operationId, sessionId, expectedVersion, title, token);
+
+        public ValueTask<SessionLedgerResult> SetStatusAsync(string operationId, string sessionId,
+            long expectedVersion, string status, CancellationToken token = default) => throw new NotSupportedException();
+
+        public ValueTask<SessionLedgerResult> SetUnreadAsync(string operationId, string sessionId,
+            long expectedVersion, bool hasUnread, CancellationToken token = default) => throw new NotSupportedException();
     }
 }

@@ -20,6 +20,8 @@ public sealed class LedgerLocalDrafts : IDisposable
     private readonly Dictionary<string, LedgerDraftBuffers> _drafts = new(StringComparer.Ordinal);
     private string? _selectedId;
     private PendingReview? _pending;
+    private int _selectionRequest;
+    private int _draftOperation;
     private bool _disposed;
 
     public LedgerLocalDrafts(SharedSessionLedger ledger, Func<DateTimeOffset>? now = null)
@@ -40,13 +42,16 @@ public sealed class LedgerLocalDrafts : IDisposable
     public void Select(string? sessionId)
     {
         ThrowIfDisposed();
+        _selectionRequest++;
         if (sessionId is not null && Inspect(sessionId) is null)
         {
+            _draftOperation++;
             _pending = null;
             _selectedId = null;
             throw new ArgumentException("UNKNOWN_LEDGER_SESSION", nameof(sessionId));
         }
         if (sessionId == _selectedId) return;
+        _draftOperation++;
         _pending = null; // selection change invalidates approval, not existing drafts
         _selectedId = sessionId;
     }
@@ -54,17 +59,22 @@ public sealed class LedgerLocalDrafts : IDisposable
     public async ValueTask SelectAsync(string? sessionId)
     {
         ThrowIfDisposed();
+        var request = ++_selectionRequest;
+        if (sessionId != _selectedId) _draftOperation++;
         if (sessionId is not null)
         {
-            var state = await InspectAsync(sessionId).ConfigureAwait(false);
+            var state = await InspectAsync(sessionId);
+            if (_disposed || request != _selectionRequest) return;
             if (state is null)
             {
+                _draftOperation++;
                 _pending = null;
                 _selectedId = null;
                 throw new ArgumentException("UNKNOWN_LEDGER_SESSION", nameof(sessionId));
             }
         }
         if (sessionId == _selectedId) return;
+        _draftOperation++;
         _pending = null;
         _selectedId = sessionId;
     }
@@ -72,6 +82,7 @@ public sealed class LedgerLocalDrafts : IDisposable
     public LedgerDraftReview Prepare(string direction, string input)
     {
         ThrowIfDisposed();
+        _draftOperation++;
         // Even a refused new review attempt invalidates the previous token.
         _pending = null;
         var state = RequireSelected();
@@ -91,8 +102,10 @@ public sealed class LedgerLocalDrafts : IDisposable
     public async ValueTask<LedgerDraftReview> PrepareAsync(string direction, string input)
     {
         ThrowIfDisposed();
+        var operation = ++_draftOperation;
         _pending = null;
-        var state = await RequireSelectedAsync().ConfigureAwait(false);
+        var state = await RequireSelectedAsync();
+        RequireCurrentOperation(operation, state.Id);
         if (direction is not ("chat-to-terminal" or "terminal-to-chat"))
             throw new ArgumentException("INVALID_TRANSFER_DIRECTION", nameof(direction));
         if (string.IsNullOrWhiteSpace(input) || input.Contains('\0') ||
@@ -109,6 +122,7 @@ public sealed class LedgerLocalDrafts : IDisposable
     public LedgerDraftStageReceipt StageReviewed(string reviewId, string stillVisibleText)
     {
         ThrowIfDisposed();
+        _draftOperation++;
         // A review token may be exercised exactly once; consume before doing work.
         var pending = _pending;
         _pending = null;
@@ -136,12 +150,14 @@ public sealed class LedgerLocalDrafts : IDisposable
     public async ValueTask<LedgerDraftStageReceipt> StageReviewedAsync(string reviewId, string stillVisibleText)
     {
         ThrowIfDisposed();
+        var operation = ++_draftOperation;
         var pending = _pending;
         _pending = null;
         if (pending is null || pending.ReviewId != reviewId ||
             !string.Equals(_selectedId, pending.SessionId, StringComparison.Ordinal))
             throw new InvalidOperationException("STALE_OR_CHANGED_TRANSFER_REVIEW");
-        var current = await InspectAsync(pending.SessionId).ConfigureAwait(false);
+        var current = await InspectAsync(pending.SessionId);
+        RequireCurrentOperation(operation, pending.SessionId);
         if (current is null || current.Version != pending.LedgerVersion)
             throw new InvalidOperationException("LEDGER_SESSION_CHANGED");
         var at = _now();
@@ -181,6 +197,8 @@ public sealed class LedgerLocalDrafts : IDisposable
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(snapshot);
+        _selectionRequest++;
+        _draftOperation++;
         _drafts.Clear();
         if (snapshot.Buffers is not null)
         {
@@ -207,7 +225,11 @@ public sealed class LedgerLocalDrafts : IDisposable
         }
     }
 
-    public void DiscardPending() => _pending = null;
+    public void DiscardPending()
+    {
+        _draftOperation++;
+        _pending = null;
+    }
 
     public void Forget(string sessionId)
     {
@@ -255,6 +277,13 @@ public sealed class LedgerLocalDrafts : IDisposable
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+
+    private void RequireCurrentOperation(int operation, string sessionId)
+    {
+        ThrowIfDisposed();
+        if (operation != _draftOperation || _selectedId != sessionId)
+            throw new InvalidOperationException("STALE_OR_CHANGED_TRANSFER_REVIEW");
+    }
 
     private sealed record PendingReview(string ReviewId, string SessionId, long LedgerVersion,
         string Direction, string Text, DateTimeOffset CreatedAt);

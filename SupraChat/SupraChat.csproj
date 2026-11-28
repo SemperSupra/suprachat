@@ -23,6 +23,9 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="TerminalAssets/*.js;TerminalAssets/*.css;TerminalAssets/*.html" />
+    <Content Include="TerminalAssets/*.LICENSE"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../oracles/codex-capability-catalog-20261001.json"
              Link="oracles/codex-capability-catalog-20261001.json"
              CopyToOutputDirectory="PreserveNewest"
