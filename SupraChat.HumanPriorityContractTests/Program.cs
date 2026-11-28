@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using SupraChat.Core;
+using SupraChat.Automation;
 
 static class Test
 {
@@ -16,8 +17,76 @@ static class Test
         catch(ArgumentException) { _n++; return; }
         throw new InvalidOperationException("R46_UNSAFE_ACCEPT_"+id);
     }
+    // Reuse the actual W12 verifier, not a test double for its MAC/scope/TTL checks.
+    // observedPeer is a synthetic independent trusted-bootstrap observation, never
+    // a field copied out of the request/grant. This is NOT real OS or device auth.
+    private static void CheckSignedGrantComposition()
+    {
+        var sid=Guid.NewGuid().ToString("N");
+        var other=Guid.NewGuid().ToString("N");
+        const string owner="verified-owner", guest="verified-guest";
+        var now=DateTimeOffset.FromUnixTimeSeconds(1792710000);
+        var key=RandomNumberGenerator.GetBytes(32);
+        using var grants=new W12ScopedGrantAuthority(key,()=>now);
+        CryptographicOperations.ZeroMemory(key);
+        var ownerGrant=grants.Issue(owner,"human",sid,new[]{"session.approve"},TimeSpan.FromMinutes(2));
+        var guestGrant=grants.Issue(guest,"human",sid,new[]{"session.approve"},TimeSpan.FromMinutes(2));
+        var wrongScope=grants.Issue(owner,"human",sid,new[]{"session.read"},TimeSpan.FromMinutes(2));
+        var agentGrant=grants.Issue("agent-one","agent",sid,new[]{"session.mutate"},TimeSpan.FromMinutes(2));
+        var otherGrant=grants.Issue(owner,"human",other,new[]{"session.approve"},TimeSpan.FromMinutes(2));
+        var state=HumanInterventionPolicy.Initial(sid,owner);
+        var intent=new HumanControlRequest(sid,0,"verified-owner-pause-001","pause");
+
+        SessionLedgerAdmission Admit(string token,string? observedPeer,string target)
+        {
+            var admitted=grants.Validate(token,target,"session.approve",claimedActor:observedPeer,
+                                         claimedAudience:"human");
+            return new SessionLedgerAdmission(admitted.Allowed,admitted.ActorId,admitted.Audience,
+                admitted.SessionId,admitted.GrantId,
+                HumanBootstrapVerified: admitted.Allowed && observedPeer is not null &&
+                                        observedPeer==admitted.ActorId);
+        }
+        void Denied(string token,string? peer,string target,string name,HumanControlState? checkpoint=null)
+        {
+            var before=checkpoint??state;
+            var result=HumanInterventionPolicy.Apply(before,intent,Admit(token,peer,target));
+            Check(result.Status=="AUTHENTICATED_HUMAN_REQUIRED" &&
+                result.State==before && !result.IsReplay && !result.StaleWorkFenced &&
+                !result.ExternalStopVerified,name);
+        }
+        Check(grants.Validate(ownerGrant,sid,"session.approve").Allowed,
+            "valid_signed_grant_independent_of_peer");
+        Denied(ownerGrant,null,sid,"valid_bearer_without_bootstrap");
+        Denied(ownerGrant,guest,sid,"stolen_bearer_wrong_observed_peer");
+        Denied(guestGrant,guest,sid,"verified_guest_not_designated_owner");
+        Denied(wrongScope,owner,sid,"owner_read_scope_cannot_preempt");
+        Denied(agentGrant,"agent-one",sid,"agent_mutate_scope_cannot_preempt");
+        Denied(otherGrant,owner,sid,"wrong_session_signed_grant");
+        Denied(ownerGrant,owner,other,"wrong_session_requested");
+        Denied("not-a-grant",owner,sid,"malformed_signed_grant");
+        var accepted=HumanInterventionPolicy.Apply(state,intent,Admit(ownerGrant,owner,sid));
+        Check(accepted.State.OwnerActorId==owner && accepted.State.Epoch==1 &&
+            accepted.State.Phase==HumanControlPhase.PauseRequested &&
+            accepted.StaleWorkFenced && !accepted.ExternalStopVerified,
+            "signed_owner_and_independent_peer_pause_requested");
+        var replay=HumanInterventionPolicy.Apply(accepted.State,intent,Admit(ownerGrant,owner,sid));
+        Check(replay.IsReplay && replay.State==accepted.State,"signed_owner_exact_latest_replay");
+        Denied(ownerGrant,guest,sid,"stolen_bearer_cannot_replay",accepted.State);
+        Denied(guestGrant,guest,sid,"guest_cannot_replay_owner_intent",accepted.State);
+        Check(grants.Revoke(ownerGrant),"revoke_existing_synthetic_grant");
+        Denied(ownerGrant,owner,sid,"revoked_owner_cannot_replay",accepted.State);
+        now=now.AddMinutes(2);
+        var expired=grants.Validate(guestGrant,sid,"session.approve",claimedActor:guest);
+        Check(!expired.Allowed && expired.Status=="GRANT_EXPIRED_OR_NOT_YET_VALID",
+            "independent_signed_grant_expiry");
+        Denied(guestGrant,guest,sid,"expired_guest_denied",accepted.State);
+        // Actual authenticated host, durable grant revocation, epoch commit,
+        // older idempotency receipts and effect reconciliation remain held.
+    }
+
     static int Main()
     {
+        CheckSignedGrantComposition();
         var session=Guid.NewGuid().ToString("N");
         var other=Guid.NewGuid().ToString("N");
         var grant=Guid.NewGuid().ToString("N");
