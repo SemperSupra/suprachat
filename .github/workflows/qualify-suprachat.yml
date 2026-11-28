@@ -1154,25 +1154,51 @@ jobs:
           Add-Type -AssemblyName UIAutomationTypes
 
           $exe = Join-Path $PWD 'out/win-x64/SupraChat.exe'
-          $p = Start-Process -FilePath $exe -PassThru
+          # Bind diagnostics to this UIA launch, never the earlier launch smoke.
+          $uiaLogDir = Join-Path $env:RUNNER_TEMP ('suprachat-uia-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $uiaLogDir -ErrorAction Stop | Out-Null
+          $uiaStartupLog = Join-Path $uiaLogDir 'startup.log'
+          $uiaStdoutLog = Join-Path $uiaLogDir 'stdout.log'
+          $uiaStderrLog = Join-Path $uiaLogDir 'stderr.log'
+          $previousStartupLog = $env:SUPRACHAT_STARTUP_LOG
+          $env:SUPRACHAT_STARTUP_LOG = $uiaStartupLog
+          $p = $null
+          $uiaPhase = 'Launch'
+          $script:uiaFirstObserverFault = $null
+          . ./tools/uia-lifetime-diagnostics/Assert-UiaHostAlive.ps1
           try {
+            # Record the actual published managed assembly as well as the apphost.
+            $uiaAppHostHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            $uiaAssemblyHash = (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $exe) 'SupraChat.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+            $uiaSourceCommit = (git rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $uiaSourceCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'UIA_SOURCE_PIN_UNAVAILABLE' }
+            Write-Host ([ordered]@{schema='suprachat-uia-published-identity/v1';checkout_sha=$uiaSourceCommit;apphost_sha256=$uiaAppHostHash;managed_assembly_sha256=$uiaAssemblyHash} | ConvertTo-Json -Compress)
+            $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $uiaStdoutLog -RedirectStandardError $uiaStderrLog
+            $uiaPhase = 'RootSearch'
+            Write-Host 'UIA_PHASE=RootSearch'
             $deadline = (Get-Date).AddSeconds(20)
             $window = $null
             while ((Get-Date) -lt $deadline -and -not $window) {
+              Assert-UiaHostAlive -Process $p -Phase RootSearch
               Start-Sleep -Milliseconds 500
+              Assert-UiaHostAlive -Process $p -Phase RootSearch
               $processCondition = New-Object System.Windows.Automation.PropertyCondition(
                 [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
                 $p.Id)
               $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
                 [System.Windows.Automation.TreeScope]::Descendants,
                 $processCondition)
+              Assert-UiaHostAlive -Process $p -Phase RootSearch
             }
+            Assert-UiaHostAlive -Process $p -Phase RootSearch
 
             $qualificationDir = Join-Path $PWD 'out/win-x64/qualification'
             New-Item -ItemType Directory -Force -Path $qualificationDir | Out-Null
             $receiptPath = Join-Path $qualificationDir 'windows-uia.json'
 
             if (-not $window) {
+              $uiaPhase = 'RootBoundary'
+              Assert-UiaHostAlive -Process $p -Phase RootBoundary
               $receipt = @{
                 schema = 'suprachat-windows-uia-qualification/v1'
                 state = 'RUNNER_UIA_ROOT_UNAVAILABLE'
@@ -1185,22 +1211,34 @@ jobs:
                 gui_launch_smoke = 'PASS'
                 explanation = 'Hosted runner kept SupraChat alive but exposed no UI Automation root in this non-interactive desktop session. This is an environment qualification boundary; semantic correctness is still enforced whenever UIA peers are exposed.'
               }
+              Assert-UiaHostAlive -Process $p -Phase RootBoundary
               $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
+              Assert-UiaHostAlive -Process $p -Phase RootBoundary
               Write-Host ($receipt | ConvertTo-Json -Compress)
               Write-Host 'Windows live UI Automation qualification: RUNNER_UIA_ROOT_UNAVAILABLE.'
             }
             else {
               Write-Host "UIA root: name='$($window.Current.Name)' class='$($window.Current.ClassName)' automationId='$($window.Current.AutomationId)' processId=$($window.Current.ProcessId)"
 
+              $uiaPhase = 'InitialTree'
+              Write-Host 'UIA_PHASE=InitialTree'
+              Assert-UiaHostAlive -Process $p -Phase InitialTree
               $allDescendants = $window.FindAll(
                 [System.Windows.Automation.TreeScope]::Descendants,
                 [System.Windows.Automation.Condition]::TrueCondition)
+              Assert-UiaHostAlive -Process $p -Phase InitialTree
+              $uiaPhase = 'InitialPeerRead'
+              Write-Host 'UIA_PHASE=InitialPeerRead'
               $semanticPeers = @(
                 $allDescendants |
                   Where-Object { -not [string]::IsNullOrWhiteSpace($_.Current.AutomationId) }
               )
 
+              Assert-UiaHostAlive -Process $p -Phase InitialPeerRead
+              Write-Host ("UIA_INITIAL_TREE_COUNTS raw={0} named={1}" -f $allDescendants.Count,$semanticPeers.Count)
               if ($semanticPeers.Count -eq 0) {
+              $uiaPhase = 'PeerBoundary'
+              Assert-UiaHostAlive -Process $p -Phase PeerBoundary
               $receipt = @{
                 schema = 'suprachat-windows-uia-qualification/v1'
                 state = 'RUNNER_UIA_BOUNDARY'
@@ -1212,8 +1250,11 @@ jobs:
               }
                 $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
                 Write-Host ($receipt | ConvertTo-Json -Compress)
+                Assert-UiaHostAlive -Process $p -Phase PeerBoundary
                 Write-Host 'Windows live UI Automation semantic-tree qualification: RUNNER_UIA_BOUNDARY.'
               } else {
+                $uiaPhase = 'SemanticPeers'
+                Write-Host 'UIA_PHASE=SemanticPeers'
                 $script:uiaTransientRetries = 0
                 # Issue #152: once the default ChatGPT tab's WebView2 document
                 # loads, TreeScope.Descendants searches from the main window
@@ -1272,16 +1313,8 @@ jobs:
                     # Native WebView remounts can recreate the provider tree on
                     # tab selection. Reacquire the current, declared main HWND
                     # on every attempt; fall back to root process search if HWND is zero.
-                    $p.Refresh()
-                    # The real app process can terminate after exposing its
-                    # initial HWND. Refuse immediately instead of misreporting
-                    # this lifetime failure as a missing Avalonia tab.
-                    if ($p.HasExited) {
-                      $observedExitCode = 'unavailable'
-                      try { $observedExitCode = [string][int]$p.ExitCode } catch {}
-                      Write-Host ('UIA host lifetime: processAlive=False exitCode=' + $observedExitCode)
-                      throw 'UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS'
-                    }
+                    # Preserve the historical semantic-phase failure marker.
+                    Assert-UiaHostAlive -Process $p -Phase SemanticPeers
                     $window = $null
                     if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
                       try {
@@ -1315,6 +1348,11 @@ jobs:
                     }
                   }
                   catch [System.Windows.Automation.ElementNotAvailableException] {
+                    if ($null -eq $script:uiaFirstObserverFault) {
+                      $script:uiaFirstObserverFault = [ordered]@{schema='suprachat-uia-observer-fault/v1';kind='ElementNotAvailable';hresult=[int]$_.Exception.HResult;retryable=$true}
+                      Write-Host ($script:uiaFirstObserverFault | ConvertTo-Json -Compress)
+                    }
+                    Assert-UiaHostAlive -Process $p -Phase SemanticPeers
                     $script:uiaTransientRetries++
                     $element = $null
                   }
@@ -1323,7 +1361,18 @@ jobs:
                     # RPC_E_CALL_REJECTED (0x80010001) and
                     # RPC_E_SERVERCALL_RETRYLATER (0x8001010A). In particular,
                     # E_UNEXPECTED (0x8000FFFF) is *not* an RPC rejection.
-                    if ($_.Exception.HResult -notin @(-2147418113, -2147418111, -2147417846)) { throw }
+                    $observerHResult = [int]$_.Exception.HResult
+                    $retryable = Test-UiaTransientRpcHResult -HResult $observerHResult
+                    $observation = [ordered]@{schema='suprachat-uia-observer-fault/v1';kind='COM';hresult=$observerHResult;retryable=$retryable}
+                    if ($null -eq $script:uiaFirstObserverFault) {
+                      $script:uiaFirstObserverFault = $observation
+                      Write-Host ($observation | ConvertTo-Json -Compress)
+                    }
+                    elseif (-not $retryable) {
+                      Write-Host ($observation | ConvertTo-Json -Compress)
+                    }
+                    if (-not $retryable) { throw }
+                    Assert-UiaHostAlive -Process $p -Phase SemanticPeers
                     $script:uiaTransientRetries++
                     $element = $null
                   }
@@ -1419,7 +1468,12 @@ jobs:
                 # Inactive tab content is not attached to the live UIA tree. Select each
                 # work area before checking its controls. Native WebView content has
                 # its own provider; its declarative ID is covered by contract checks.
-                foreach ($automationId in @('RootTabs', 'Nav.Back', 'Nav.Home', 'Tab.ChatGPT')) {
+                $uiaPhase = 'FirstOwnedRootTabs'
+                Write-Host 'UIA_PHASE=FirstOwnedRootTabs'
+                $null = Require-SemanticControl 'RootTabs'
+                $uiaPhase = 'SemanticPeers'
+                Write-Host 'UIA_PHASE=RemainingSemanticPeers'
+                foreach ($automationId in @('Nav.Back', 'Nav.Home', 'Tab.ChatGPT')) {
                   $null = Require-SemanticControl $automationId
                 }
                 foreach ($area in @(
@@ -1746,6 +1800,8 @@ jobs:
                 $reset = Require-SemanticControl 'Accessibility.ScaleReset'
                 $reset.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
+                $uiaPhase = 'FinalReceipt'
+                Assert-UiaHostAlive -Process $p -Phase FinalReceipt
                 $receipt = @{
                   schema = 'suprachat-windows-uia-qualification/v1'
                   state = 'PASS'
@@ -1758,13 +1814,64 @@ jobs:
                   static_accessibility_contract = 'PASS'
                   gui_launch_smoke = 'PASS'
                 }
+                Assert-UiaHostAlive -Process $p -Phase FinalReceipt
                 $receipt | ConvertTo-Json | Set-Content -Encoding UTF8 $receiptPath
+                Assert-UiaHostAlive -Process $p -Phase FinalReceipt
                 'Windows live UI Automation accessibility smoke PASS.'
               }
             }
           }
+          catch {
+            $uiaFirstFailure = $_
+            Write-Host ('UIA_FAILURE_PHASE=' + $uiaPhase)
+            # Preserve observer and app lifetime observations separately.
+            # Do not emit exception strings, paths, or provider content.
+            $failureHResult = $null
+            $failureInnerHResult = $null
+            try { $failureHResult = [int]$uiaFirstFailure.Exception.HResult } catch {}
+            try {
+              if ($null -ne $uiaFirstFailure.Exception.InnerException) {
+                $failureInnerHResult = [int]$uiaFirstFailure.Exception.InnerException.HResult
+              }
+            } catch {}
+            $failureProcessAlive = $null
+            $failureExitCode = $null
+            try {
+              if ($null -ne $p) {
+                $p.Refresh()
+                $failureProcessAlive = -not $p.HasExited
+                if (-not $failureProcessAlive) { $failureExitCode = [int]$p.ExitCode }
+              }
+            } catch {}
+            Write-Host ([ordered]@{
+              schema = 'suprachat-uia-failure-boundary/v1'
+              phase = $uiaPhase
+              observer_hresult = $failureHResult
+              observer_inner_hresult = $failureInnerHResult
+              process_alive = $failureProcessAlive
+              process_exit_code = $failureExitCode
+              first_observer_fault = $script:uiaFirstObserverFault
+              root_cause = 'UNKNOWN'
+            } | ConvertTo-Json -Depth 5 -Compress)
+            # Only the failing launch's fresh files; the shared events.jsonl is
+            # intentionally excluded because it is not process-bound.
+            try {
+              & ./tools/uia-lifetime-diagnostics/Get-RedactedUiaFailureReceipt.ps1 `
+                -StartupLog $uiaStartupLog -StdoutLog $uiaStdoutLog -StderrLog $uiaStderrLog
+            }
+            catch {
+              Write-Host 'UIA startup symptom receipt unavailable; original qualification failure retained.'
+            }
+            throw $uiaFirstFailure
+          }
           finally {
-            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            try {
+              if ($null -ne $p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            }
+            finally {
+              $env:SUPRACHAT_STARTUP_LOG = $previousStartupLog
+              Remove-Item -LiteralPath $uiaLogDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
           }
 
       - name: Qualify synthetic secret UIA boundary for v0.0.1
