@@ -27,6 +27,28 @@ static void Require(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+// Bounded diagnostic producer never exports arbitrary exception text.
+var unthrown = StartupLifecycleObservation.DescribeException(new InvalidOperationException("PRIVATE-FIXTURE"));
+Require(unthrown == "fatal-components outer=NO_STACK inner=NONE inner-kind=NONE truncated=NO",
+    "startup diagnostic fabricated stack evidence");
+var wrapped = StartupLifecycleObservation.DescribeException(new InvalidOperationException("PRIVATE-OUTER",
+    new System.Runtime.InteropServices.COMException("PRIVATE-INNER", unchecked((int)0x8000FFFF))));
+Require(wrapped == "fatal-components outer=NO_STACK inner=NO_STACK inner-kind=COM truncated=NO",
+    "startup diagnostic inner classification mismatch");
+Exception deep = new ArgumentException("PRIVATE-CHAIN");
+for (var i = 0; i < 12; i++) deep = new InvalidOperationException("PRIVATE-WRAPPER", deep);
+Require(StartupLifecycleObservation.DescribeException(deep).EndsWith("truncated=YES", StringComparison.Ordinal),
+    "startup diagnostic unbounded chain");
+try { throw new InvalidOperationException("PRIVATE-THROWN"); }
+catch (InvalidOperationException thrown)
+{
+    var observation = StartupLifecycleObservation.DescribeException(thrown);
+    Require(observation == "fatal-components outer=OTHER_MANAGED inner=NONE inner-kind=NONE truncated=NO",
+        "startup diagnostic thrown component mismatch");
+    Require(!observation.Contains("PRIVATE", StringComparison.Ordinal), "startup diagnostic raw message leak");
+}
+Console.WriteLine("Startup lifecycle diagnostic producer checks PASS (bounded categorical evidence only)");
+
 BrokerContractTests.Run();
 SupraChat.ContractTests.SharedSessionAdversarialChecks.Run();
 

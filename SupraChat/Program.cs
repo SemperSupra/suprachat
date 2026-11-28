@@ -41,6 +41,7 @@ internal static class Program
 
         try
         {
+            StartupLifecycleObservation.WriteStage(StartupStage.DesktopLifetimeEntering);
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
             Log("desktop-lifetime-returned");
             DogfoodObservability.RecordAsync("app", "desktop-lifetime", "success")
@@ -49,6 +50,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
+            Log(StartupLifecycleObservation.DescribeException(ex));
             Log("fatal-startup-exception");
             Log(ex.ToString());
             DogfoodObservability.RecordExceptionAsync("app", "fatal-startup", ex)

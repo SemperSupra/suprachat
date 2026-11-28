@@ -12,6 +12,8 @@ try {
     $ts = '2026-11-28T08:00:01.0000000+00:00 '
     @(
         ($ts + 'managed-main-entered framework=10 os=synthetic'),
+        ($ts + 'lifecycle-stage=MainWindowAssigned'),
+        ($ts + 'fatal-components outer=AVALONIA_BASE inner=WEBVIEW2 inner-kind=COM truncated=NO'),
         ($ts + 'fatal-startup-exception'),
         ($ts + 'System.InvalidOperationException: TOKEN-SECRET-DO-NOT-EMIT'),
         'at C:\SENSITIVE-USERNAME\private\source.cs'
@@ -22,10 +24,14 @@ try {
         Set-Content -LiteralPath $events -Encoding UTF8
     $raw = & $tool -StartupLog $startup -StdoutLog $stdout -StderrLog $stderr -EventLog $events
     $d = $raw | ConvertFrom-Json
-    if ($d.schema -ne 'suprachat-redacted-uia-startup-observation/v2' -or
+    if ($d.schema -ne 'suprachat-redacted-uia-startup-observation/v3' -or
         -not $d.startup_log_present -or -not $d.managed_main_entered_observed -or
         -not $d.fatal_startup_exception_marker_observed -or
         $d.desktop_lifetime_returned_observed -or $d.exception_category_observed -cne 'INVALID_OPERATION' -or
+        $d.last_pre_fatal_lifecycle_stage -cne 'MainWindowAssigned' -or
+        $d.outer_throw_component_observed -cne 'AVALONIA_BASE' -or
+        $d.inner_throw_component_observed -cne 'WEBVIEW2' -or
+        $d.inner_exception_category_observed -cne 'COM' -or $d.inner_chain_truncated -ne $false -or
         $d.diagnostic_event_count_capped -ne 2 -or $d.root_cause -ne 'UNKNOWN' -or
         $d.ui_automation_passed -or $d.failed_qualification_gate_waived -or $d.credential_or_raw_log_exported) {
         throw 'Redacted startup receipt contract failed'
@@ -62,7 +68,30 @@ try {
             throw 'Fixed exception-category privacy/attribution contract failed'
         }
     }
-    Write-Output '{"schema":"suprachat-r50-uia-privacy-test/v2","result":"PASS","synthetic_only":true,"ui_automation_passed":false,"root_cause":"UNKNOWN"}'
+    # Unknown component/stage tokens and marker-like exception messages cannot escape.
+    @(
+        ($ts + 'lifecycle-stage=PRIVATESTAGE'),
+        ($ts + 'fatal-components outer=PRIVATE_COMPONENT inner=WEBVIEW2 inner-kind=COM truncated=NO'),
+        ($ts + 'fatal-startup-exception'),
+        ($ts + 'System.InvalidOperationException: payload'),
+        ($ts + 'lifecycle-stage=MainWindowAssigned'),
+        ($ts + 'fatal-components outer=APP inner=NONE inner-kind=NONE truncated=NO')
+    ) | Set-Content -LiteralPath $startup -Encoding UTF8
+    $raw = & $tool -StartupLog $startup
+    $d = $raw | ConvertFrom-Json
+    if ($d.last_pre_fatal_lifecycle_stage -ne 'UNAVAILABLE' -or
+        $d.outer_throw_component_observed -ne 'UNAVAILABLE' -or $raw -match 'PRIVATE') {
+        throw 'UNTRUSTED_COMPONENT_MARKER_ACCEPTED'
+    }
+    # A valid-looking marker without a matching fatal event is not evidence.
+    @(
+        ($ts + 'lifecycle-stage=MainWindowAssigned'),
+        ($ts + 'fatal-components outer=APP inner=NONE inner-kind=NONE truncated=NO')
+    ) | Set-Content -LiteralPath $startup -Encoding UTF8
+    $d = (& $tool -StartupLog $startup | ConvertFrom-Json)
+    if ($d.outer_throw_component_observed -ne 'UNAVAILABLE' -or
+        $d.last_pre_fatal_lifecycle_stage -ne 'UNAVAILABLE') { throw 'UNBOUND_COMPONENT_MARKER' }
+    Write-Output '{"schema":"suprachat-r55-uia-privacy-test/v3","result":"PASS","synthetic_only":true,"ui_automation_passed":false,"root_cause":"UNKNOWN"}'
 }
 finally {
     if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Recurse -Force }

@@ -93,8 +93,40 @@ elseif ($fatalCount -eq 1 -and ($fatalIndex + 1) -lt $lines.Count) {
         }
     }
 }
+# Only the bounded pre-fatal producer marker is accepted. Never infer a
+# throw frame from arbitrary stack text or trust arbitrary enum-like tokens.
+$lastStage = 'UNAVAILABLE'
+$outerComponent = 'UNAVAILABLE'
+$innerComponent = 'UNAVAILABLE'
+$innerKind = 'UNAVAILABLE'
+$chainTruncated = $null
+$stages = @('DesktopLifetimeEntering','XamlLoading','XamlLoaded','FrameworkInitialization',
+    'MainWindowCreating','MainWindowAssigned','FrameworkInitialized',
+    'StartupArgumentsEntering','StartupArgumentsReturned')
+$components = @('NO_STACK','APP','AVALONIA_BASE','AVALONIA_CONTROLS','AVALONIA_WIN32',
+    'AVALONIA_WEBVIEW','WEBVIEW2','DOTNET_RUNTIME','OTHER_MANAGED','UNAVAILABLE')
+$kinds = @('NONE','UNAVAILABLE','COM','INVALID_OPERATION','OBJECT_DISPOSED','NULL_REFERENCE',
+    'ARGUMENT','IO','TYPE_INITIALIZATION','ACCESS_DENIED','NATIVE_LIBRARY','OTHER')
+if ($fatalCount -eq 1) {
+    for ($i = 0; $i -lt $fatalIndex; $i++) {
+        if ($lines[$i] -cmatch ($stamp + 'lifecycle-stage=([A-Za-z]{1,64})$')) {
+            $candidate = $Matches[1]
+            if ($candidate -cin $stages) { $lastStage = $candidate }
+        }
+    }
+    if ($fatalIndex -gt 0 -and $lines[$fatalIndex - 1] -cmatch
+        ($stamp + 'fatal-components outer=([A-Z_]{1,32}) inner=([A-Z_]{1,32}) inner-kind=([A-Z_]{1,32}) truncated=(YES|NO)$')) {
+        $a = $Matches[1]; $b = $Matches[2]; $c = $Matches[3]; $d = $Matches[4]
+        if ($a -cin $components -and ($b -eq 'NONE' -or $b -cin $components) -and
+            $c -cin $kinds -and (($b -eq 'NONE') -eq ($c -eq 'NONE')) -and
+            -not ($b -eq 'NONE' -and $d -eq 'YES')) {
+            $outerComponent = $a; $innerComponent = $b; $innerKind = $c
+            $chainTruncated = ($d -eq 'YES')
+        }
+    }
+}
 $receipt = [ordered]@{
-    schema = 'suprachat-redacted-uia-startup-observation/v2'
+    schema = 'suprachat-redacted-uia-startup-observation/v3'
     evidence_class = 'PUBLIC_RUNNER_SYMPTOM_ONLY'
     startup_log_present = [bool]$startup.present
     startup_log_oversized = [bool]$startup.oversized
@@ -102,6 +134,11 @@ $receipt = [ordered]@{
     desktop_lifetime_returned_observed = [bool]$returned
     fatal_startup_exception_marker_observed = [bool]($fatalCount -gt 0)
     exception_category_observed = $category
+    last_pre_fatal_lifecycle_stage = $lastStage
+    outer_throw_component_observed = $outerComponent
+    inner_throw_component_observed = $innerComponent
+    inner_exception_category_observed = $innerKind
+    inner_chain_truncated = $chainTruncated
     stdout_present = [bool]$stdout.present
     stdout_nonempty = [bool]$stdout.nonempty
     stdout_oversized = [bool]$stdout.oversized
