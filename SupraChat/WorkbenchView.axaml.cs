@@ -389,6 +389,7 @@ public partial class WorkbenchView : UserControl
             W0Status.Text = "SESSION_SELECTION_REQUIRED";
             return;
         }
+        SessionLedgerResult outcome;
         try
         {
             var existing = await _authority.InspectAsync(selected);
@@ -397,15 +398,29 @@ public partial class WorkbenchView : UserControl
                 W0Status.Text = "SESSION_SELECTION_STALE";
                 return;
             }
-            _drafts.Forget(selected);
-            W2ClearReview();
-            var outcome = await _authority.CloseAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
+            outcome = await _authority.CloseAsync("workbench-ui-" + Guid.NewGuid().ToString("N"),
                 existing.Id, existing.Version);
-            _selectedId = null;
-            W0Output.Text = string.Empty;
-            await RefreshAsync(outcome.Applied ? "Session archived; draft buffers cleared." : "Close refused: " + outcome.Status);
         }
-        catch (Exception) { W0Status.Text = "OUTCOME_UNKNOWN: close may have committed; reconnect and refresh before retrying."; }
+        catch (Exception)
+        {
+            W0Status.Text = "OUTCOME_UNKNOWN: close may have committed; drafts retained. Reconnect and refresh before retrying.";
+            return;
+        }
+
+        if (!outcome.Applied)
+        {
+            W0Status.Text = "Close refused: " + outcome.Status + "; drafts retained.";
+            return;
+        }
+
+        _drafts.Forget(selected);
+        if (_selectedId == selected)
+        {
+            _selectedId = null;
+            W2ClearReview();
+            W0Output.Text = string.Empty;
+        }
+        await RefreshAsync("Session archived; its draft buffers cleared.");
     }
 
     private async void W0Restore_Click(object? sender, RoutedEventArgs e)
