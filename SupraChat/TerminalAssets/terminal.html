@@ -12,7 +12,7 @@ html, body { height: 100%; margin: 0; background: #171717; overflow: hidden; }
 </style>
 </head>
 <body>
-<div id="terminal" aria-label="Interactive workspace terminal"></div>
+<div id="terminal" role="region" aria-label="Interactive workspace terminal"></div>
 <script>/* XTERM_JS */</script>
 <script>/* FIT_JS */</script>
 <script>
@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
         fontFamily: "Consolas, monospace",
         scrollback: 3000,
         screenReaderMode: true,
+        promptLabel: "Workspace shell input",
         theme: { background: "#171717", foreground: "#eeeeee" },
         linkHandler: { activate: () => {} }
     });
