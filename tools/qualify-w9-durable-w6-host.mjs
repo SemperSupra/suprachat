@@ -342,6 +342,86 @@ try{
   assert.deepEqual(restoredInventory.sessions.find(s=>s.id===sidA),restored.payload.session);
   record('explicit-archive-restore-target-not-latest-archive');
 
+  // R54: a historical APPLIED archive receipt is NOT proof that A is
+  // currently archived. Exercise the real W9 host's crash-before-commit
+  // and lost-ack-after-commit seams on the SAME immutable close request.
+  // This tests metadata only; UI draft generation and selection are not
+  // present in this process and must be qualified separately.
+  const closeAfterRestore={...change('w54-close-lost-ack-000001','human',sidA,5,null),
+                           operation:'archive'};
+  await stop();
+  await launch({...envBase,SUPRACHAT_W9_RDTE_FAULTS:'1',SUPRACHAT_W9_FAULT:'BEFORE_COMMIT'});
+  const closeBefore=await Promise.allSettled([
+    request('/v1/sessions/change','POST',closeAfterRestore)
+  ]);
+  assert(closeBefore[0].status==='rejected' || closeBefore[0].value.status!==200,
+         'CLOSE_ACK_BEFORE_COMMIT');
+  assert.equal(await waitExit(host),88);
+  host=null;
+  await launch();
+  verifyUnchanged((await request('/v1/sessions')).body,restoredInventory);
+  record('archive-crash-before-commit-preserves-active-target-and-inventory');
+
+  await stop();
+  await launch({...envBase,SUPRACHAT_W9_RDTE_FAULTS:'1',SUPRACHAT_W9_FAULT:'AFTER_COMMIT_BEFORE_ACK'});
+  const closeLost=await Promise.allSettled([
+    request('/v1/sessions/change','POST',closeAfterRestore)
+  ]);
+  assert(closeLost[0].status==='rejected' || closeLost[0].value.status!==200,
+         'CLOSE_ACK_NOT_LOST');
+  assert.equal(await waitExit(host),89);
+  host=null;
+  await launch();
+  const archivedReadback=(await request('/v1/sessions')).body;
+  const recoveredClose=await request('/v1/sessions/change','POST',closeAfterRestore);
+  assert.equal(recoveredClose.status,200);
+  assert.equal(recoveredClose.body.applied,true);
+  assert.equal(recoveredClose.body.isReplay,true);
+  assert.equal(recoveredClose.body.session.id,sidA);
+  assert.equal(recoveredClose.body.session.version,6);
+  assert.equal(recoveredClose.body.session.isArchived,true);
+  assert.deepEqual(archivedReadback.sessions.find(s=>s.id===sidA),recoveredClose.body.session);
+  assert.deepEqual(archivedReadback.sessions.find(s=>s.id===sidB),arB.body.session);
+  assert.equal(archivedReadback.sequence,restoredInventory.sequence+1);
+  assert.deepEqual(archivedReadback.events.slice(restoredInventory.events.length),[{
+    sequence:archivedReadback.sequence,sessionId:sidA,audience:'human',
+    operation:'archive',sessionVersion:6
+  }]);
+  verifyUnchanged((await request('/v1/sessions')).body,archivedReadback);
+  record('archive-lost-ack-recovers-original-target-bound-commit');
+
+  const laterRestore={...change('w54-later-restore-00001','agent',sidA,6,null),operation:'restore'};
+  const laterRestored=await agentRpc('session/ledger/change',laterRestore);
+  assert.equal(laterRestored.http_status,200);
+  assert.equal(laterRestored.payload.session.id,sidA);
+  assert.equal(laterRestored.payload.session.version,7);
+  assert.equal(laterRestored.payload.session.isArchived,false);
+  const currentAfterRestore=(await request('/v1/sessions')).body;
+  assert.equal(currentAfterRestore.sequence,archivedReadback.sequence+1);
+  assert.deepEqual(currentAfterRestore.sessions.find(s=>s.id===sidA),laterRestored.payload.session);
+  assert.deepEqual(currentAfterRestore.sessions.find(s=>s.id===sidB),arB.body.session);
+  const staleClose={...closeAfterRestore,idempotencyKey:'w54-fresh-stale-close-001'};
+  const staleCloseResult=await request('/v1/sessions/change','POST',staleClose);
+  assert.equal(staleCloseResult.status,409);
+  assert.equal(staleCloseResult.body.status,'VERSION_CONFLICT');
+  assert.equal(staleCloseResult.body.session.version,7);
+  assert.equal(staleCloseResult.body.session.isArchived,false);
+  const wrongTargetClose=await request('/v1/sessions/change','POST',
+    {...closeAfterRestore,sessionId:sidB,expectedVersion:arB.body.session.version});
+  assert.equal(wrongTargetClose.status,409);
+  assert.equal(wrongTargetClose.body.status,'IDEMPOTENCY_KEY_PAYLOAD_CONFLICT');
+  await stop();
+  await launch();
+  verifyUnchanged((await request('/v1/sessions')).body,currentAfterRestore);
+  const oldArchive=await request('/v1/sessions/change','POST',closeAfterRestore);
+  // The old APPLIED result is immutable and still describes version 6,
+  // even though the current target is active at version 7.
+  assert.deepEqual(oldArchive,recoveredClose);
+  verifyReplay(staleCloseResult,await request('/v1/sessions/change','POST',staleClose));
+  verifyUnchanged((await request('/v1/sessions')).body,currentAfterRestore);
+  record('historical-archive-replay-does-not-rearchive-restored-current-target');
+
+
 
   await stop();
   // Corrupt metadata store in a separate disposable location, not the gold DB.
