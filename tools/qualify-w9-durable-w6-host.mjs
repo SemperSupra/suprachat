@@ -220,8 +220,25 @@ try{
   // version, through HTTP and a separate agent JSON-RPC process. This
   // explicitly does NOT prove independently authenticated human identity
   // or higher-priority human preemption; W8/W9 epoch integration is HOLD.
-  const aBefore=(await request('/v1/sessions')).body.sessions.find(s=>s.id===sidA);
+  const beforeRace=(await request('/v1/sessions')).body;
+  const aBefore=beforeRace.sessions.find(s=>s.id===sidA);
+  const bBefore=beforeRace.sessions.find(s=>s.id===sidB);
   assert.equal(aBefore.version,1);
+  assert.equal(bBefore.version,2);
+  const replayContestant=async (c)=>{
+    if(c.kind==='agent'){
+      const r=await agentRpc('session/ledger/change',c.req);
+      return {status:r.http_status,body:r.payload};
+    }
+    return request('/v1/sessions/change','POST',c.req);
+  };
+  const verifyReplay=(first,replay)=>{
+    assert.equal(replay.status,first.status);
+    assert.deepEqual(replay.body,{...first.body,isReplay:true});
+  };
+  const verifyUnchanged=(observed,expected)=>{
+    assert.deepEqual(observed,expected,'UNEXPECTED_LEDGER_MUTATION');
+  };
   const humanRace=change('w50-human-same-session-0001','human',
                          sidA,1,'synthetic-human-race');
   const autoRace=change('w50-auto-same-session-00001','automation',
@@ -241,13 +258,23 @@ try{
   assert.equal(contestants.filter(x=>x.status===200&&x.body.applied).length,1);
   assert.equal(contestants.filter(x=>x.status===409&&
                                     x.body.status==='VERSION_CONFLICT').length,2);
-  assert.equal((await request('/v1/sessions')).body.sessions
-              .find(s=>s.id===sidA).version,2);
-  for(const loser of contestants.filter(x=>x.status===409)){
-    const replay=await request('/v1/sessions/change','POST',loser.req);
-    assert.equal(replay.status,409);
-    assert.equal(replay.body.isReplay,true);
+  const raceWinner=contestants.find(x=>x.status===200&&x.body.applied);
+  assert.equal(raceWinner.body.session.id,sidA);
+  assert.equal(raceWinner.body.session.title,raceWinner.req.value);
+  assert.equal(raceWinner.body.session.version,2);
+  const afterRace=(await request('/v1/sessions')).body;
+  assert.deepEqual(afterRace.sessions.find(s=>s.id===sidA),raceWinner.body.session);
+  assert.deepEqual(afterRace.sessions.find(s=>s.id===sidB),bBefore);
+  assert.equal(afterRace.sequence,beforeRace.sequence+1);
+  assert.deepEqual(afterRace.events.slice(beforeRace.events.length),[{
+    sequence:afterRace.sequence,sessionId:sidA,audience:raceWinner.kind,
+    operation:'set-title',sessionVersion:2
+  }]);
+  for(const c of contestants){
+    assert.equal(c.body.isReplay,false);
+    verifyReplay(c,await replayContestant(c));
   }
+  verifyUnchanged((await request('/v1/sessions')).body,afterRace);
   record('three-audiences-same-session-single-writer-cas');
   // A later synthetic human request is accepted at the NEW revision, while
   // stale automation/agent proposals remain refused. This is NOT human
@@ -258,25 +285,62 @@ try{
   assert.equal(follow.status,200);
   assert.equal(follow.body.applied,true);
   assert.equal(follow.body.session.version,3);
+  assert.equal(follow.body.session.id,sidA);
+  assert.equal(follow.body.session.title,humanFollow.value);
   const staleAuto=change('w50-stale-auto-00000001','automation',
                          sidA,2,'unadmitted-stale-work');
+  const staleAgent=change('w50-stale-agent-0000001','agent',
+                          sidA,2,'unadmitted-agent-work');
   const stale=await request('/v1/sessions/change','POST',staleAuto);
+  const staleAgentR=await agentRpc('session/ledger/change',staleAgent);
   assert.equal(stale.status,409);
   assert.equal(stale.body.status,'VERSION_CONFLICT');
-  record('revision-bound-human-followup-and-stale-automation-refusal');
+  assert.equal(staleAgentR.http_status,409);
+  assert.equal(staleAgentR.payload.status,'VERSION_CONFLICT');
+  const reuse=await request('/v1/sessions/change','POST',
+    {...raceWinner.req,sessionId:sidB,expectedVersion:bBefore.version,value:'wrong-target'});
+  assert.equal(reuse.status,409);
+  assert.equal(reuse.body.status,'IDEMPOTENCY_KEY_PAYLOAD_CONFLICT');
+  const afterFollow=(await request('/v1/sessions')).body;
+  assert.deepEqual(afterFollow.sessions.find(s=>s.id===sidA),follow.body.session);
+  assert.deepEqual(afterFollow.sessions.find(s=>s.id===sidB),bBefore);
+  assert.equal(afterFollow.sequence,afterRace.sequence+1);
+  record('revision-bound-human-followup-stale-actors-and-wrong-target-refused');
 
   await stop();
   await launch();
   inventory=(await request('/v1/sessions')).body;
-  assert.equal(inventory.sessions.find(s=>s.id===sidA).version,3);
-  const followReplay=await request('/v1/sessions/change','POST',humanFollow);
-  assert.equal(followReplay.status,200);
-  assert.equal(followReplay.body.isReplay,true);
-  const staleReplay=await request('/v1/sessions/change','POST',staleAuto);
-  assert.equal(staleReplay.status,409);
-  assert.equal(staleReplay.body.isReplay,true);
+  verifyUnchanged(inventory,afterFollow);
+  // Replay all three original outcomes AFTER further mutation and restart.
+  // A fresh current-state response is not a valid historical receipt.
+  for(const c of contestants)verifyReplay(c,await replayContestant(c));
+  verifyReplay(follow,await request('/v1/sessions/change','POST',humanFollow));
+  verifyReplay(stale,await request('/v1/sessions/change','POST',staleAuto));
+  const staleAgentReplay=await agentRpc('session/ledger/change',staleAgent);
+  verifyReplay({status:staleAgentR.http_status,body:staleAgentR.payload},
+               {status:staleAgentReplay.http_status,body:staleAgentReplay.payload});
+  verifyUnchanged((await request('/v1/sessions')).body,afterFollow);
   assert.equal(inventory.authenticatedAudiences,false);
-  record('three-audience-shared-session-recovered-after-restart');
+  record('three-audience-shared-session-exact-outcomes-recovered-after-restart');
+
+  // Explicit target restoration: B is archived later, but restore A.
+  // This is the metadata contract only, not native GUI restore qualification.
+  const archiveA={...change('w54-archive-A-00000001','human',sidA,3,null),operation:'archive'};
+  const archiveB={...change('w54-archive-B-00000001','automation',sidB,2,null),operation:'archive'};
+  const arA=await request('/v1/sessions/change','POST',archiveA);
+  const arB=await request('/v1/sessions/change','POST',archiveB);
+  assert.equal(arA.status,200);assert.equal(arA.body.session.isArchived,true);
+  assert.equal(arB.status,200);assert.equal(arB.body.session.isArchived,true);
+  const restoreA={...change('w54-restore-A-00000001','agent',sidA,4,null),operation:'restore'};
+  const restored=await agentRpc('session/ledger/change',restoreA);
+  assert.equal(restored.http_status,200);
+  assert.equal(restored.payload.session.id,sidA);
+  assert.equal(restored.payload.session.isArchived,false);
+  assert.equal(restored.payload.session.version,5);
+  const restoredInventory=(await request('/v1/sessions')).body;
+  assert.deepEqual(restoredInventory.sessions.find(s=>s.id===sidB),arB.body.session);
+  assert.deepEqual(restoredInventory.sessions.find(s=>s.id===sidA),restored.payload.session);
+  record('explicit-archive-restore-target-not-latest-archive');
 
 
   await stop();
