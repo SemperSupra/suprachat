@@ -1,0 +1,83 @@
+{
+  "schema": "suprachat-uia-failure-lineage/v1",
+  "repository": "SemperSupra/suprachat",
+  "observations": [
+    {
+      "run_id": 44974466325,
+      "job_id": 137061134557,
+      "head_sha": "0c1e0da43e52022a03350dd0294ff8cb0cdaf7a6",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 44987324859,
+      "job_id": 137100698081,
+      "head_sha": "731740ee3e71687d3d8aeceebe31c1b3b28f38b4",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 44987447989,
+      "job_id": 137101062956,
+      "head_sha": "4d0ea216187c29be5e04446cda8dfca31f975710",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 44988987711,
+      "job_id": 137105743861,
+      "head_sha": "2b511e1f972ad2d4961c0809dd0404f5f145e202",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 45101928196,
+      "job_id": 137454604770,
+      "head_sha": "312df56db5ee0675bfbdff751789926b08a79d9e",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 46129109656,
+      "job_id": 140930171205,
+      "head_sha": "e745b2fd322ed214b482b52436aeed08d08f439d",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 46135854410,
+      "job_id": 140950878700,
+      "head_sha": "a91ddf11edc9ecf2d4d9228102f5c83f0c71ea62",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
+    }
+  ]
+}
