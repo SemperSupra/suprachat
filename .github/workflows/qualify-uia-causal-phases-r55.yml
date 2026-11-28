@@ -15,13 +15,11 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - probe: Idle
+          # Prior four cells are retained as completed run 46137974017.
+          # Only the newly isolated first owned control lookup is exercised.
+          - probe: FirstOwned
             launch: StartupOnly
-          - probe: Root
-            launch: StartupOnly
-          - probe: Descendants
-            launch: StartupOnly
-          - probe: Descendants
+          - probe: FirstOwned
             launch: Redirected
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -20,8 +20,8 @@ def main():
     base=load_document(FIX.read_bytes())
     out=critic(base)
     assert out["classification"]=="RECURRING_CROSS_HEAD_FAILURE"
-    assert out["unique_source_heads"]==6
-    assert out["observation_count"]==6
+    assert out["unique_source_heads"]==7
+    assert out["observation_count"]==7
     assert out["root_cause"]=="UNKNOWN"
     assert not any(out[k] for k in (
         "installation_or_uia_gate_waived","real_desktop_hil_passed",

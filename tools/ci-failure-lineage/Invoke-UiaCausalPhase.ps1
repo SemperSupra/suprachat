@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$Collector,
-    [Parameter(Mandatory=$true)][ValidateSet('Idle','Root','Descendants')][string]$Probe,
+    [Parameter(Mandatory=$true)][ValidateSet('Idle','Root','Descendants','FirstOwned')][string]$Probe,
     [Parameter(Mandatory=$true)][ValidateSet('StartupOnly','Redirected')][string]$Launch
 )
 Set-StrictMode -Version Latest
@@ -13,6 +13,9 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') {
     throw 'DISPOSABLE_PUBLIC_WINDOWS_RUNNER_REQUIRED'
 }
 $exePath = (Resolve-Path -LiteralPath $Exe).Path
+$dllPath = Join-Path (Split-Path -Parent $exePath) 'SupraChat.dll'
+$exeDigest = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$dllDigest = (Get-FileHash -LiteralPath $dllPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $collectorPath = (Resolve-Path -LiteralPath $Collector).Path
 $dir = Join-Path $env:RUNNER_TEMP ('uia-phase-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $dir
@@ -26,6 +29,10 @@ $rootAt = $null
 $descendants = $null
 $namedPeerCount = $null
 $traversalCompleted = $false
+$firstOwnedFound = $false
+$firstOwnedElapsed = $null
+$observerHResult = $null
+$observerInnerHResult = $null
 $observedExit = $null
 $observerFault = $false
 $startupReceipt = $null
@@ -38,6 +45,26 @@ function Stop-Owned([Diagnostics.Process]$child) {
         Stop-Process -Id $child.Id -Force -ErrorAction Stop
         if (-not $child.WaitForExit(5000)) { throw 'OWNED_PROCESS_CLEANUP_TIMEOUT' }
     }
+}
+function Find-FirstOwnedRootTabs($root) {
+    # Same bounded owned-control walk as the first RootTabs check in the
+    # pinned full-product workflow. No selection, Invoke or provider input.
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $queue = New-Object System.Collections.Generic.Queue[System.Windows.Automation.AutomationElement]
+    $queue.Enqueue($root)
+    $visited = 0
+    while ($queue.Count -gt 0) {
+        $node = $queue.Dequeue()
+        $child = $walker.GetFirstChild($node)
+        while ($child) {
+            if ($visited -ge 4000) { throw 'UIA_OWNED_TRAVERSAL_BUDGET_EXHAUSTED' }
+            $visited++
+            if ($child.Current.AutomationId -eq 'RootTabs') { return $true }
+            if ($child.Current.FrameworkId -ne 'Chrome') { $queue.Enqueue($child) }
+            $child = $walker.GetNextSibling($child)
+        }
+    }
+    return $false
 }
 function Set-Phase([string]$next) {
     $script:phase = $next
@@ -88,7 +115,7 @@ try {
                     $rootAt = [int]$clock.ElapsedMilliseconds
                 }
             }
-            if ($rootSeen -and -not $p.HasExited -and $Probe -eq 'Descendants') {
+            if ($rootSeen -and -not $p.HasExited -and $Probe -in @('Descendants','FirstOwned')) {
                 # Intentionally exercise the historical full-tree query once.
                 Set-Phase 'RAW_DESCENDANTS'
                 $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -108,6 +135,21 @@ try {
                     $traversalCompleted = $true
                 }
             }
+            if ($Probe -eq 'FirstOwned' -and $traversalCompleted -and $namedPeerCount -gt 0 -and -not $p.HasExited) {
+                Set-Phase 'FIRST_OWNED_ROOT_TABS'
+                $p.Refresh()
+                if (-not $p.HasExited -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($p.MainWindowHandle)
+                }
+                if (-not $p.HasExited -and $root -and $root.Current.ProcessId -eq $p.Id -and
+                    $root.Current.AutomationId -eq 'SupraChat.MainWindow') {
+                    $firstOwnedFound = Find-FirstOwnedRootTabs $root
+                    $firstOwnedElapsed = [int]$clock.ElapsedMilliseconds
+                }
+                if (-not $firstOwnedFound -and -not $p.HasExited) {
+                    $status = 'FIRST_OWNED_CONTROL_UNQUALIFIED'
+                }
+            }
         }
         if ($status -eq 'NOT_OBSERVED') {
             if (-not $p.HasExited) {
@@ -123,7 +165,7 @@ try {
             elseif ($Probe -ne 'Idle' -and -not $rootSeen) {
                 $status = 'ALIVE_NO_ROOT_UNQUALIFIED'
             }
-            elseif ($Probe -eq 'Descendants' -and (-not $traversalCompleted -or $namedPeerCount -eq 0)) {
+            elseif ($Probe -in @('Descendants','FirstOwned') -and (-not $traversalCompleted -or $namedPeerCount -eq 0)) {
                 $status = 'ALIVE_NO_SEMANTIC_PEERS_UNQUALIFIED'
             }
             else {
@@ -135,6 +177,9 @@ try {
 catch {
     $observerFault = $true
     $status = 'OBSERVER_FAULT'
+    # Numeric HRESULT observations only; no exception type/message/stack.
+    try { $observerHResult = [int]$_.Exception.HResult } catch {}
+    try { if ($null -ne $_.Exception.InnerException) { $observerInnerHResult = [int]$_.Exception.InnerException.HResult } } catch {}
     # Do not output exception text, window names, paths or provider data.
 }
 finally {
@@ -154,9 +199,10 @@ finally {
     $env:SUPRACHAT_STARTUP_LOG = $oldStartup
     try { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop } catch { $cleanupOk = $false }
     [ordered]@{
-        schema = 'suprachat-uia-causal-phase/v1'
+        schema = 'suprachat-uia-causal-phase/v2'
         source_sha = '824147915e7fba498a9b94d9ec22075fe3dd082a'
-        app_sha256 = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        apphost_sha256 = $exeDigest
+        managed_assembly_sha256 = $dllDigest
         probe = $Probe
         launch_mode = $Launch
         last_phase = $phase
@@ -167,8 +213,12 @@ finally {
         descendant_count_capped = $descendants
         semantic_peer_count = $namedPeerCount
         traversal_completed = $traversalCompleted
+        first_owned_root_tabs_observed = $firstOwnedFound
+        first_owned_elapsed_ms = $firstOwnedElapsed
         exit_code = $observedExit
         observer_fault = $observerFault
+        observer_hresult = $observerHResult
+        observer_inner_hresult = $observerInnerHResult
         startup_observation = $startupReceipt
         cleanup_ok = $cleanupOk
         root_cause = 'UNKNOWN'

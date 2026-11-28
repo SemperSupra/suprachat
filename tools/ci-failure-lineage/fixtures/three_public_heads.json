@@ -67,6 +67,17 @@
       "host_exit_code": 70,
       "conclusion": "failure",
       "evidence_kind": "public-gha-job-log-observation"
+    },
+    {
+      "run_id": 46135854410,
+      "job_id": 140950878700,
+      "head_sha": "a91ddf11edc9ecf2d4d9228102f5c83f0c71ea62",
+      "runner": "windows-2025",
+      "stage": "installed-winapp-native-uia",
+      "terminal_marker": "UIA_HOST_PROCESS_EXITED_BEFORE_SEMANTIC_PEERS",
+      "host_exit_code": 70,
+      "conclusion": "failure",
+      "evidence_kind": "public-gha-job-log-observation"
     }
   ]
 }
