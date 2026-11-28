@@ -1,33 +1,18 @@
 #requires -Version 5.1
 <#
-.SYNOPSIS
-  R50 public-hosted read-only startup symptom receipt after GUI/UIA failure.
-.DESCRIPTION
-  Fixed categorical observations only. Never emits app logs, exception strings,
-  personal paths, window identifiers, event bodies, or credentials.
-  A symptom receipt cannot waive failed UIA/product qualification.
+Fixed categorical observations only; never emits app logs, exception strings,
+paths, identifiers, event bodies or credentials. A symptom receipt cannot
+waive failed UIA/product qualification.
 #>
 [CmdletBinding()]
-param(
-    [string]$StartupLog,
-    [string]$StdoutLog,
-    [string]$StderrLog,
-    [string]$EventLog
-)
+param([string]$StartupLog, [string]$StdoutLog, [string]$StderrLog, [string]$EventLog)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $maximumBytes = 1048576
-
 function Inspect-File {
-    param([string]$Path)
-    $result = [ordered]@{
-        present = $false
-        oversized = $false
-        nonempty = $false
-        content = ''
-    }
-    if ([string]::IsNullOrWhiteSpace($Path) -or
-        -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    param([string]$Path, [switch]$ReadContent)
+    $result = [ordered]@{ present = $false; oversized = $false; nonempty = $false; content = '' }
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return $result
     }
     $item = Get-Item -LiteralPath $Path
@@ -37,31 +22,86 @@ function Inspect-File {
         $result.oversized = $true
         return $result
     }
-    $result.content = [IO.File]::ReadAllText($item.FullName)
+    if ($ReadContent) {
+        # Bound the actual read even if a process is still writing.
+        $buffer = New-Object byte[] ($maximumBytes + 1)
+        $stream = [IO.File]::Open($item.FullName, [IO.FileMode]::Open,
+            [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        try {
+            $used = 0
+            while ($used -lt $buffer.Length) {
+                $n = $stream.Read($buffer, $used, $buffer.Length - $used)
+                if ($n -eq 0) { break }
+                $used += $n
+            }
+            if ($used -gt $maximumBytes) {
+                $result.oversized = $true
+                return $result
+            }
+            $result.content = [Text.Encoding]::UTF8.GetString($buffer, 0, $used)
+        }
+        finally { $stream.Dispose() }
+    }
     return $result
 }
-
-$startup = Inspect-File -Path $StartupLog
+$startup = Inspect-File -Path $StartupLog -ReadContent
 $stdout = Inspect-File -Path $StdoutLog
 $stderr = Inspect-File -Path $StderrLog
-$events = Inspect-File -Path $EventLog
-
+$events = Inspect-File -Path $EventLog -ReadContent
 $eventLineCount = 0
 if ($events.present -and -not $events.oversized -and $events.nonempty) {
-    # Deliberately count bounded rows only; do not parse or echo event payloads.
     $eventLineCount = @($events.content -split "\r?\n" |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
     if ($eventLineCount -gt 2048) { $eventLineCount = 2048 }
 }
-
+# Program.Log uses ISO-8601 "O" timestamp followed by the message.
+# Only a producer-shaped marker and adjacent exception header qualify.
+$stamp = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}(?:Z|[+-]\d{2}:\d{2}) '
+$lines = @($startup.content.TrimStart([char]0xFEFF) -split "\r?\n")
+$managed = $false
+$returned = $false
+$fatalCount = 0
+$fatalIndex = -1
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    $line = $lines[$i]
+    if ($line -cmatch ($stamp + 'managed-main-entered framework=')) { $managed = $true }
+    if ($line -cmatch ($stamp + 'desktop-lifetime-returned$')) { $returned = $true }
+    if ($line -cmatch ($stamp + 'fatal-startup-exception$')) { $fatalCount++; $fatalIndex = $i }
+}
+$category = 'UNAVAILABLE'
+if ($fatalCount -gt 1) { $category = 'AMBIGUOUS_MARKERS' }
+elseif ($fatalCount -eq 1 -and ($fatalIndex + 1) -lt $lines.Count) {
+    if ($lines[$fatalIndex + 1] -cmatch ($stamp + '([A-Za-z0-9_.+]{1,200})(?::|$)')) {
+        # Fixed literal categories, never a matched class name or namespace prefix.
+        switch -CaseSensitive ($Matches[1]) {
+            'System.InvalidOperationException' { $category = 'INVALID_OPERATION' }
+            'System.ArgumentException' { $category = 'ARGUMENT' }
+            'System.ArgumentNullException' { $category = 'ARGUMENT' }
+            'System.ArgumentOutOfRangeException' { $category = 'ARGUMENT' }
+            'System.NullReferenceException' { $category = 'NULL_REFERENCE' }
+            'System.ObjectDisposedException' { $category = 'OBJECT_DISPOSED' }
+            'System.IO.IOException' { $category = 'IO' }
+            'System.IO.FileNotFoundException' { $category = 'IO' }
+            'System.IO.FileLoadException' { $category = 'IO' }
+            'System.IO.DirectoryNotFoundException' { $category = 'IO' }
+            'System.UnauthorizedAccessException' { $category = 'ACCESS_DENIED' }
+            'System.Runtime.InteropServices.COMException' { $category = 'COM' }
+            'System.TypeInitializationException' { $category = 'TYPE_INITIALIZATION' }
+            'System.DllNotFoundException' { $category = 'NATIVE_LIBRARY' }
+            'System.BadImageFormatException' { $category = 'NATIVE_LIBRARY' }
+            default { $category = 'OTHER_OR_UNRECOGNIZED' }
+        }
+    }
+}
 $receipt = [ordered]@{
-    schema = 'suprachat-redacted-uia-startup-observation/v1'
+    schema = 'suprachat-redacted-uia-startup-observation/v2'
     evidence_class = 'PUBLIC_RUNNER_SYMPTOM_ONLY'
     startup_log_present = [bool]$startup.present
     startup_log_oversized = [bool]$startup.oversized
-    managed_main_entered_observed = [bool]($startup.content.Contains('managed-main-entered'))
-    desktop_lifetime_returned_observed = [bool]($startup.content.Contains('desktop-lifetime-returned'))
-    fatal_startup_exception_marker_observed = [bool]($startup.content.Contains('fatal-startup-exception'))
+    managed_main_entered_observed = [bool]$managed
+    desktop_lifetime_returned_observed = [bool]$returned
+    fatal_startup_exception_marker_observed = [bool]($fatalCount -gt 0)
+    exception_category_observed = $category
     stdout_present = [bool]$stdout.present
     stdout_nonempty = [bool]$stdout.nonempty
     stdout_oversized = [bool]$stdout.oversized
