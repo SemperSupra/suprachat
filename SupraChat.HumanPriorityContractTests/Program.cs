@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using SupraChat.Core;
 using SupraChat.Automation;
 
@@ -84,9 +85,107 @@ static class Test
         // older idempotency receipts and effect reconciliation remain held.
     }
 
+    // Existing W12 verifier + W9 ledger admission/revocation seam.
+    // Serialized checkpoint fixture only: not an actual authenticated host,
+    // a new durable store, or persistence of the human-control epoch.
+    private static void CheckLedgerAdmissionComposition()
+    {
+        SessionLedgerCheckpoint? checkpoint=null;
+        void Capture(SessionLedgerCheckpoint cp) =>
+            checkpoint=JsonSerializer.Deserialize<SessionLedgerCheckpoint>(JsonSerializer.Serialize(cp));
+        var ledger=new SharedSessionLedger(persist:Capture);
+        var a=ledger.Open("r55-policy-open-a-001","automation","A").Session!;
+        var b=ledger.Open("r55-policy-open-b-001","automation","B").Session!;
+        const string owner="fixture-owner", workerId="fixture-worker";
+        var now=DateTimeOffset.FromUnixTimeSeconds(1792710000);
+        var key=RandomNumberGenerator.GetBytes(32);
+        using var grants=new W12ScopedGrantAuthority(key,()=>now);
+        CryptographicOperations.ZeroMemory(key);
+        var ownerGrant=grants.Issue(owner,"human",a.Id,new[]{"session.read","session.approve"},TimeSpan.FromMinutes(2));
+        var workerGrant=grants.Issue(workerId,"agent",a.Id,new[]{"session.read","session.propose","session.mutate"},TimeSpan.FromMinutes(2));
+        var otherGrant=grants.Issue(workerId,"agent",b.Id,new[]{"session.read","session.propose"},TimeSpan.FromMinutes(2));
+        var policy=HumanInterventionPolicy.Initial(a.Id,owner);
+        SessionLedgerAdmission Admit(string token,string? peer,string target,string scope,string audience)
+        {
+            var verified=grants.Validate(token,target,scope,claimedActor:peer,claimedAudience:audience);
+            return new(verified.Allowed && peer is not null,verified.ActorId,verified.Audience,
+                verified.SessionId,verified.GrantId,
+                HumanBootstrapVerified: verified.Allowed && audience=="human" && peer is not null &&
+                    peer==verified.ActorId);
+        }
+        int calls=0;
+        SessionLedgerProjection<HumanControlFence> Observe(
+            SharedSessionLedger host,string token,string? peer,string target,long epoch)
+        {
+            SessionLedgerAdmission? admitted=null;
+            return host.InspectProjectionAdmitted(target,
+                ()=>admitted=Admit(token,peer,target,"session.propose","agent"),
+                snapshot=>
+                {
+                    calls++;
+                    Check(snapshot.Id==a.Id,"projection_exact_target");
+                    return HumanInterventionPolicy.CheckProposal(policy,epoch,admitted!);
+                });
+        }
+        var missingPeer=ledger.InspectProjectionAdmitted(a.Id,
+            ()=>Admit(ownerGrant,null,a.Id,"session.read","human"),snapshot=>{calls++;return snapshot.Id;});
+        Check(missingPeer.Admission.Status=="ADMISSION_REFUSED" && missingPeer.Projection is null &&
+              calls==0,"ledger_rejects_human_bearer_without_peer");
+        foreach (var denied in new[]{
+            Observe(ledger,workerGrant,"wrong-peer",a.Id,0),
+            Observe(ledger,otherGrant,workerId,a.Id,0),
+            Observe(ledger,ownerGrant,owner,a.Id,0)})
+            Check(denied.Admission.Status=="ADMISSION_REFUSED" && denied.Projection is null &&
+                  calls==0,"ledger_denies_wrong_peer_target_or_scope");
+        var allowed=Observe(ledger,workerGrant,workerId,a.Id,0);
+        Check(allowed.Admission.Status=="OBSERVED" &&
+              allowed.Projection is {ProposalMayContinue:true,ToolAuthorityGranted:false} &&
+              calls==1,"admitted_projection_not_tool_effect");
+        var paused=HumanInterventionPolicy.Apply(policy,new(a.Id,0,"r55-owner-pause-00001","pause"),
+            Admit(ownerGrant,owner,a.Id,"session.approve","human"));
+        Check(paused.State.Epoch==1 && paused.StaleWorkFenced && !paused.ExternalStopVerified,
+            "fixture_policy_pause_not_stop_witness");
+        policy=paused.State;
+        Check(Observe(ledger,workerGrant,workerId,a.Id,0).Projection is
+            {Status:"STALE_EPOCH_FENCED",ProposalMayContinue:false,ToolAuthorityGranted:false},
+            "admitted_projection_stale_epoch_refused");
+        Check(Observe(ledger,workerGrant,workerId,a.Id,1).Projection is
+            {Status:"HUMAN_INTERVENTION_FENCED",ProposalMayContinue:false,ToolAuthorityGranted:false},
+            "admitted_projection_paused_epoch_refused");
+
+        // Existing metadata writer does not yet enforce the policy epoch.
+        // This tests the admitted metadata journal and durable revocation only.
+        var change=new SessionLedgerCommand("set-title",a.Id,"r55-worker-title-0001",a.Version,"A revised");
+        Func<SessionLedgerAdmission> admitWorker=()=>Admit(workerGrant,workerId,a.Id,"session.mutate","agent");
+        var first=ledger.ExecuteAdmitted(change,admitWorker);
+        Check(first.Applied && first.Session?.Version==a.Version+1,"fixture_metadata_writer_applied");
+        var replay=ledger.ExecuteAdmitted(change,admitWorker);
+        Check(replay.IsReplay && replay.Session==first.Session,"admitted_metadata_replay");
+        var verified=admitWorker();
+        Check(ledger.RevokeOwnGrant(verified.GrantId!,a.Id,"agent"),"ledger_revocation_committed");
+        Check(admitWorker().Allowed,"signature_still_valid_after_ledger_revocation");
+        var count=calls;
+        var revoked=Observe(ledger,workerGrant,workerId,a.Id,1);
+        Check(revoked.Admission.Status=="GRANT_REVOKED" && revoked.Projection is null &&
+              calls==count,"revoked_projection_callback_not_executed");
+        Check(ledger.ExecuteAdmitted(change,admitWorker).Status=="GRANT_REVOKED",
+            "revoked_actor_cannot_read_historical_outcome");
+        Check(checkpoint is not null,"existing_checkpoint_contains_revocation");
+        var recovered=new SharedSessionLedger(checkpoint,persist:Capture);
+        Check(recovered.IsGrantRevoked(verified.GrantId!),"revocation_recovered_from_existing_checkpoint");
+        Check(recovered.Inspect(a.Id)==first.Session && recovered.Inspect(b.Id)==b,
+            "recovered_metadata_and_other_target_unchanged");
+        revoked=Observe(recovered,workerGrant,workerId,a.Id,1);
+        Check(revoked.Admission.Status=="GRANT_REVOKED" && revoked.Projection is null &&
+              calls==count,"recovered_revocation_blocks_projection");
+        Check(recovered.ExecuteAdmitted(change,admitWorker).Status=="GRANT_REVOKED",
+            "recovered_revocation_blocks_historical_replay");
+    }
+
     static int Main()
     {
         CheckSignedGrantComposition();
+        CheckLedgerAdmissionComposition();
         var session=Guid.NewGuid().ToString("N");
         var other=Guid.NewGuid().ToString("N");
         var grant=Guid.NewGuid().ToString("N");
@@ -105,6 +204,12 @@ static class Test
               "automation_policy_proposal");
         Check(!HumanInterventionPolicy.CheckProposal(s,0,worker).ToolAuthorityGranted,
               "separate_tool_authority");
+        foreach(var malformed in new string?[]{null,""," ","bad:actor","actor with space","actor\nline","é",new string('a',81)})
+        {
+            var rejected=HumanInterventionPolicy.CheckProposal(s,0,worker with {ActorId=malformed});
+            Check(rejected.Status=="AUTHENTICATED_ACTOR_REQUIRED" &&
+                !rejected.ProposalMayContinue && !rejected.ToolAuthorityGranted,"malformed_proposing_actor_refused");
+        }
 
         var guidance=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             "synthetic human intent not transported in control receipt"))).ToLowerInvariant();

@@ -108,7 +108,7 @@ public static class HumanInterventionPolicy
             verifiedActor.SessionId != current.SessionId ||
             verifiedActor.Audience is not ("automation" or "agent") ||
             verifiedActor.HumanBootstrapVerified ||
-            string.IsNullOrWhiteSpace(verifiedActor.ActorId) ||
+            !ValidActorId(verifiedActor.ActorId) ||
             !Guid.TryParseExact(verifiedActor.GrantId, "N", out _))
             return new("AUTHENTICATED_ACTOR_REQUIRED", false, false);
         if (observedEpoch != current.Epoch)
